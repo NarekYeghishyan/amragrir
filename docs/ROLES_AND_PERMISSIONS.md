@@ -134,10 +134,22 @@ Implemented in `apps/api`:
   and price a basket (`POST /cart/quote`) but gets 403 from `POST /orders`,
   matching §1 above.
 
+- **Owner and admin can work the order queue** (`GET /owner/orders`,
+  `PATCH /owner/orders/{id}/status`). Scope is a Prisma filter — owner sees the
+  branches of the restaurants they own, admin sees everything — applied to
+  every query rather than checked afterwards. A `branchId` query parameter
+  narrows that scope and can never widen it.
+- **`paid` is not a status the panel may set.** Only a payment makes an order
+  paid; a restaurant that could set it could mark an unpaid order as settled.
+- **WebSocket subscriptions authorise per order**, through the same visibility
+  rule as the REST endpoints, so a socket cannot watch an order its holder may
+  not read.
+
 Not implemented yet:
 
-- **`branchIds` in the JWT** — lands with the owner module, since nothing
-  consumes branch scoping until then.
-- **Staff/owner order access** — reading and advancing orders for a branch
-  arrives with the owner panel; today only the customer side of an order
-  exists.
+- **`staff` has no branch scope.** The schema has no user-to-branch link, so
+  there is nothing to filter them by; they are **refused** rather than quietly
+  given the owner's reach. Adding staff means adding that table first.
+- **`branchIds` in the JWT** — ownership is currently resolved through a join
+  on every query. That is one extra join, not a correctness problem; the claim
+  becomes worth adding when the panel is under real load.

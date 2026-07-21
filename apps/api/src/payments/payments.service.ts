@@ -13,6 +13,7 @@ import {
   canTransitionOrder,
 } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { OrderEventsService, toStatusEvent } from '../orders/order-events.service';
 import { PAYMENT_PROVIDER, PaymentDeclinedError, type PaymentProvider } from './payment.provider';
 import { CreatePaymentDto } from './dto';
 
@@ -32,6 +33,7 @@ export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
+    private readonly events: OrderEventsService,
   ) {}
 
   methods(): { methods: PaymentMethod[]; default: PaymentMethod } {
@@ -147,6 +149,10 @@ export class PaymentsService {
         }
         throw err;
       });
+
+    // Paying is a status change like any other, so anyone watching the order
+    // hears about it — otherwise the tracking screen would open on stale data.
+    this.events.publish(toStatusEvent(order));
 
     return {
       id: payment.id,

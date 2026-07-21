@@ -9,11 +9,11 @@ import {
 import { Prisma } from '@prisma/client';
 import {
   ACTIVE_ORDER_STATUSES,
-  CANCELLABLE_ORDER_STATUSES,
   Language,
   ORDER_MAX_LEAD_DAYS,
   OrderStatus,
   PaymentStatus,
+  Role,
   ServiceMode,
   TERMINAL_ORDER_STATUSES,
   isOrderCancellable,
@@ -21,6 +21,9 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { localize, type I18nField } from '../common/i18n';
 import { PaymentsService } from '../payments/payments.service';
+import { orderScopeFor } from '../owner/branch-access';
+import type { JwtPayload } from '../auth/token.service';
+import { OrderEventsService, countdown, toStatusEvent } from './order-events.service';
 import { generateOrderCode, pickupCodeFrom } from './order-code';
 import { estimatePrepMinutes, priceLine, priceOrder, type PricedLine } from './pricing';
 import { BasketDto, CreateOrderDto, ListOrdersDto, OrderListFilter } from './dto';
@@ -125,6 +128,7 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly payments: PaymentsService,
+    private readonly events: OrderEventsService,
   ) {}
 
   /**
@@ -238,7 +242,7 @@ export class OrdersService {
         totalAmd: row.totalAmd,
         status: row.status as OrderStatus,
         readyAt: row.readyAt?.toISOString() ?? null,
-        secondsLeft: secondsLeft(row.readyAt, row.status as OrderStatus),
+        secondsLeft: countdown(row.readyAt, row.status as OrderStatus),
       })),
       total,
       page: query.page,
@@ -262,9 +266,24 @@ export class OrdersService {
       );
     }
 
+    return this.transition(order, OrderStatus.Cancelled);
+  }
+
+  /**
+   * Moves an order to a new status, reversing the payment if it is being
+   * cancelled, and announces the result.
+   *
+   * Shared by the customer's cancel and the owner panel's status changes, so
+   * the refund rule and the event cannot be implemented twice and drift. The
+   * caller decides *whether* the move is allowed — this method performs it.
+   */
+  async transition(order: OrderRow, next: OrderStatus): Promise<OrderDetail> {
     // Reverse the money *before* touching the order: if the provider refuses,
     // the customer still has an order rather than neither an order nor a refund.
-    const paymentStatus = order.payment ? await this.payments.reverse(order.payment) : null;
+    const paymentStatus =
+      next === OrderStatus.Cancelled && order.payment
+        ? await this.payments.reverse(order.payment)
+        : null;
 
     const updated = await this.prisma
       .$transaction(async (tx) => {
@@ -275,11 +294,11 @@ export class OrdersService {
           });
         }
         return tx.order.update({
-          // Matching on the status too, so a cancel racing a payment or a
-          // kitchen status change loses instead of overwriting it.
-          where: { id: order.id, status: { in: [...CANCELLABLE_ORDER_STATUSES] } },
-          data: { status: OrderStatus.Cancelled },
-          include: DETAIL_INCLUDE,
+          // Matching on the status this decision was made against, so a change
+          // that landed in between loses instead of being overwritten.
+          where: { id: order.id, status: order.status },
+          data: { status: next },
+          include: ORDER_DETAIL_INCLUDE,
         });
       })
       .catch((err: unknown) => {
@@ -292,12 +311,31 @@ export class OrdersService {
           );
         }
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
-          throw new ConflictException('The order changed before it could be cancelled');
+          throw new ConflictException('The order changed before this could be applied');
         }
         throw err;
       });
 
+    this.events.publish(toStatusEvent(updated));
     return this.toDetail(updated);
+  }
+
+  /**
+   * Loads an order for a live subscriber: the customer who placed it, or a
+   * staff-side user whose scope covers its branch. Same filter-in-the-query
+   * rule as everywhere else, so an unauthorised watcher gets 404, not a stream.
+   */
+  async findVisibleTo(user: JwtPayload, orderId: string): Promise<OrderDetail> {
+    const where: Prisma.OrderWhereInput =
+      user.role === Role.Owner || user.role === Role.Admin
+        ? { id: orderId, OR: [{ userId: user.sub }, orderScopeFor(user)] }
+        : { id: orderId, userId: user.sub };
+
+    const order = await this.prisma.order.findFirst({ where, include: ORDER_DETAIL_INCLUDE });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    return this.toDetail(order);
   }
 
   // ── internals ─────────────────────────────────────────────────────────────
@@ -403,11 +441,11 @@ export class OrdersService {
   private async createWithUniqueCode(
     branchId: string,
     build: (code: string) => Prisma.OrderUncheckedCreateInput,
-  ): Promise<Prisma.OrderGetPayload<{ include: typeof DETAIL_INCLUDE }>> {
+  ): Promise<OrderRow> {
     for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt += 1) {
       const code = await this.freshCode(branchId);
       try {
-        return await this.prisma.order.create({ data: build(code), include: DETAIL_INCLUDE });
+        return await this.prisma.order.create({ data: build(code), include: ORDER_DETAIL_INCLUDE });
       } catch (err) {
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
           continue;
@@ -451,10 +489,10 @@ export class OrdersService {
   private async loadOwnOrder(
     userId: string,
     orderId: string,
-  ): Promise<Prisma.OrderGetPayload<{ include: typeof DETAIL_INCLUDE }>> {
+  ): Promise<OrderRow> {
     const order = await this.prisma.order.findFirst({
       where: { id: orderId, userId },
-      include: DETAIL_INCLUDE,
+      include: ORDER_DETAIL_INCLUDE,
     });
     if (!order) {
       throw new NotFoundException('Order not found');
@@ -462,7 +500,7 @@ export class OrdersService {
     return order;
   }
 
-  private toDetail(order: Prisma.OrderGetPayload<{ include: typeof DETAIL_INCLUDE }>): OrderDetail {
+  private toDetail(order: OrderRow): OrderDetail {
     return {
       id: order.id,
       code: order.code,
@@ -484,7 +522,7 @@ export class OrdersService {
       depositAmd: order.depositAmd,
       totalAmd: order.totalAmd,
       readyAt: order.readyAt?.toISOString() ?? null,
-      secondsLeft: secondsLeft(order.readyAt, order.status as OrderStatus),
+      secondsLeft: countdown(order.readyAt, order.status as OrderStatus),
       tableNo: order.reservation?.table?.tableNo ?? null,
       reservationId: order.reservationId,
       notes: order.notes,
@@ -496,20 +534,14 @@ export class OrdersService {
   }
 }
 
-const DETAIL_INCLUDE = {
+/** Exported so anything that hands an order to `transition` loads the same
+ *  relations — a second copy of this list would drift and fail at runtime. */
+export const ORDER_DETAIL_INCLUDE = {
   items: true,
   payment: true,
   branch: { include: { restaurant: true } },
   reservation: { include: { table: true } },
 } satisfies Prisma.OrderInclude;
 
-/**
- * Countdown for the tracking screen. Null once the order is finished — a
- * completed order has no time left, and a negative number would render as one.
- */
-export function secondsLeft(readyAt: Date | null, status: OrderStatus): number | null {
-  if (!readyAt || TERMINAL_ORDER_STATUSES.includes(status) || status === OrderStatus.Ready) {
-    return null;
-  }
-  return Math.max(0, Math.round((readyAt.getTime() - Date.now()) / 1000));
-}
+/** An order row with everything the detail and event shapes need. */
+export type OrderRow = Prisma.OrderGetPayload<{ include: typeof ORDER_DETAIL_INCLUDE }>;

@@ -4,7 +4,6 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import {
-  CANCELLABLE_ORDER_STATUSES,
   Language,
   ORDER_MAX_LEAD_DAYS,
   OrderStatus,
@@ -12,7 +11,8 @@ import {
   SERVICE_FEE_AMD,
   ServiceMode,
 } from '@amragrir/shared';
-import { OrdersService, secondsLeft } from './orders.service';
+import { OrdersService } from './orders.service';
+import { OrderEventsService, countdown } from './order-events.service';
 import { CreateOrderDto } from './dto';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { PaymentsService } from '../payments/payments.service';
@@ -110,11 +110,17 @@ function build(options: { branch?: unknown; menuItems?: unknown[]; order?: unkno
   } as unknown as PrismaService;
 
   const payments = { reverse: jest.fn().mockResolvedValue(PaymentStatus.Refunded) };
+  const events = { publish: jest.fn(), subscribe: jest.fn() };
 
   return {
-    service: new OrdersService(prisma, payments as unknown as PaymentsService),
+    service: new OrdersService(
+      prisma,
+      payments as unknown as PaymentsService,
+      events as unknown as OrderEventsService,
+    ),
     prisma,
     payments,
+    events,
     orderCreate,
     orderUpdate,
     paymentUpdate,
@@ -352,16 +358,23 @@ describe('cancel', () => {
     );
   });
 
-  it('matches on the status, so a cancel racing the kitchen loses', async () => {
+  it('matches on the status it read, so a cancel racing the kitchen loses', async () => {
     // Regression: the cancellable check reads a snapshot. An unconditional
     // update would let a cancel land on an order that started cooking.
     const { service, orderUpdate } = build();
     await service.cancel('user-1', 'order-1');
 
     expect(orderUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'order-1', status: { in: [...CANCELLABLE_ORDER_STATUSES] } },
-      }),
+      expect.objectContaining({ where: { id: 'order-1', status: OrderStatus.Created } }),
+    );
+  });
+
+  it('announces the change, so a tracking screen does not have to poll', async () => {
+    const { service, events } = build();
+    await service.cancel('user-1', 'order-1');
+
+    expect(events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'order-1', status: OrderStatus.Cancelled }),
     );
   });
 
@@ -374,22 +387,22 @@ describe('cancel', () => {
   });
 });
 
-describe('secondsLeft', () => {
+describe('countdown', () => {
   it('counts down to readyAt', () => {
     const readyAt = new Date(Date.now() + 480_000);
-    expect(secondsLeft(readyAt, OrderStatus.Preparing)).toBeCloseTo(480, -1);
+    expect(countdown(readyAt, OrderStatus.Preparing)).toBeCloseTo(480, -1);
   });
 
   it('never goes negative on a late order', () => {
     const readyAt = new Date(Date.now() - 60_000);
-    expect(secondsLeft(readyAt, OrderStatus.Preparing)).toBe(0);
+    expect(countdown(readyAt, OrderStatus.Preparing)).toBe(0);
   });
 
   it('is null once there is nothing left to wait for', () => {
     const readyAt = new Date(Date.now() + 480_000);
-    expect(secondsLeft(readyAt, OrderStatus.Ready)).toBeNull();
-    expect(secondsLeft(readyAt, OrderStatus.Completed)).toBeNull();
-    expect(secondsLeft(readyAt, OrderStatus.Cancelled)).toBeNull();
-    expect(secondsLeft(null, OrderStatus.Preparing)).toBeNull();
+    expect(countdown(readyAt, OrderStatus.Ready)).toBeNull();
+    expect(countdown(readyAt, OrderStatus.Completed)).toBeNull();
+    expect(countdown(readyAt, OrderStatus.Cancelled)).toBeNull();
+    expect(countdown(null, OrderStatus.Preparing)).toBeNull();
   });
 });
