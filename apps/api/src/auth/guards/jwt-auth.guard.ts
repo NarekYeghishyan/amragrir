@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { IS_PUBLIC_KEY } from '../decorators';
+import { bearerFrom } from '../bearer';
 import { JwtPayload, TokenService } from '../token.service';
 
 /**
@@ -26,21 +27,12 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<Request & { user?: JwtPayload }>();
-    const token = this.extractToken(request);
+    const token = bearerFrom(request.headers.authorization);
     if (!token) {
       throw new UnauthorizedException('Missing bearer token');
     }
 
     request.user = await this.tokens.verifyAccess(token);
     return true;
-  }
-
-  private extractToken(request: Request): string | null {
-    const header = request.headers.authorization;
-    if (!header) {
-      return null;
-    }
-    const [scheme, value] = header.split(' ');
-    return scheme?.toLowerCase() === 'bearer' && value ? value : null;
   }
 }

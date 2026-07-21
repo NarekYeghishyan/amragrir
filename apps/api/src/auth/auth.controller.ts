@@ -3,15 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RefreshDto, SendCodeDto, VerifyCodeDto } from './dto';
 import { Public } from './decorators';
-
-/** Pulls the bearer value out of an Authorization header, if present. */
-function bearerFrom(header?: string): string | null {
-  if (!header) {
-    return null;
-  }
-  const [scheme, value] = header.split(' ');
-  return scheme?.toLowerCase() === 'bearer' && value ? value : null;
-}
+import { bearerFrom } from './bearer';
 
 /**
  * All routes here are @Public — they are how a caller obtains a token — so

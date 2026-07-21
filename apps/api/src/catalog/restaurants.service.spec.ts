@@ -41,16 +41,17 @@ function branchRow(over: Record<string, unknown> = {}) {
   };
 }
 
-function build(rows: ReturnType<typeof branchRow>[]) {
+function build(rows: ReturnType<typeof branchRow>[], tables: unknown[] = []) {
   const findMany = jest.fn().mockResolvedValue(rows);
   const count = jest.fn().mockResolvedValue(rows.length);
+  const tableFindMany = jest.fn().mockResolvedValue(tables);
   const prisma = {
     restaurantBranch: { findMany, count, findFirst: jest.fn().mockResolvedValue(rows[0] ?? null) },
     menuItem: { findMany: jest.fn().mockResolvedValue([]) },
-    table: { findMany: jest.fn().mockResolvedValue([]) },
+    table: { findMany: tableFindMany },
   } as unknown as PrismaService;
 
-  return { service: new RestaurantsService(prisma), findMany, count, prisma };
+  return { service: new RestaurantsService(prisma), findMany, count, tableFindMany, prisma };
 }
 
 function query(over: Partial<ListRestaurantsDto> = {}): ListRestaurantsDto {
@@ -98,7 +99,7 @@ describe('RestaurantsService.list', () => {
 
   it('sorts by distance when asked, regardless of DB order', async () => {
     const near = branchRow({ id: 'near', lat: 40.178, lng: 44.5128 });
-    const far = branchRow({ id: 'far', lat: 40.21, lng: 44.56 });
+    const far = branchRow({ id: 'far', lat: 40.19, lng: 44.53 });
     const { service } = build([far, near]);
 
     const { items } = await service.list(
@@ -107,6 +108,23 @@ describe('RestaurantsService.list', () => {
     );
 
     expect(items.map((i) => i.id)).toEqual(['near', 'far']);
+  });
+
+  // `nearest` with no distMax used to mean "every branch in the database".
+  // An order-ahead product has no use for a result 40 km away, and the
+  // unbounded query was the reason the endpoint could be used to exhaust memory.
+  it('applies an implicit radius to nearest when no distMax is given', async () => {
+    const inRange = branchRow({ id: 'in-range', lat: 40.19, lng: 44.53 });
+    const wayOut = branchRow({ id: 'way-out', lat: 40.6, lng: 45.2 });
+    const { service } = build([inRange, wayOut]);
+
+    const { items, total } = await service.list(
+      query({ ...CENTRE, sort: RestaurantSort.Nearest }),
+      Language.Hy,
+    );
+
+    expect(items.map((i) => i.id)).toEqual(['in-range']);
+    expect(total).toBe(1);
   });
 
   it('drops branches beyond distMax', async () => {
@@ -143,6 +161,47 @@ describe('RestaurantsService.list', () => {
     await service.list(query({ page: 3, limit: 10 }), Language.Hy);
 
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 10 }));
+  });
+
+  // Regression: the distance path ran findMany with neither skip/take nor a
+  // geographic predicate, so "near me" selected every branch in the table and
+  // materialised it in Node before slicing to one page.
+  it('bounds the distance query in SQL instead of scanning the table', async () => {
+    const { service, findMany } = build([branchRow()]);
+
+    await service.list(query({ ...CENTRE, sort: RestaurantSort.Nearest }), Language.Hy);
+
+    const args = findMany.mock.calls[0]![0];
+    expect(args.take).toBeGreaterThan(0);
+    expect(args.where.lat).toEqual({ gte: expect.any(Number), lte: expect.any(Number) });
+    expect(args.where.lng).toEqual({ gte: expect.any(Number), lte: expect.any(Number) });
+    // The implicit radius must actually be narrow, not a whole-planet box.
+    expect(args.where.lat.lte - args.where.lat.gte).toBeLessThan(1);
+  });
+
+  // Regression: setting distMax disabled the SQL ORDER BY while the in-app
+  // sort only ran for `nearest`, so every other sort was silently discarded.
+  it('keeps the requested sort when a distance filter is applied', async () => {
+    const { service, findMany } = build([branchRow()]);
+
+    await service.list(
+      query({ ...CENTRE, distMax: 2, sort: RestaurantSort.Fastest }),
+      Language.Hy,
+    );
+
+    expect(findMany.mock.calls[0]![0].orderBy).toEqual([{ avgPrepMin: 'asc' }]);
+  });
+
+  // Regression: the radius was compared against the rounded display distance,
+  // so a branch 2.04 km away rounded to 2.0 and slipped past distMax=2.
+  it('filters on the true distance, not the rounded display value', async () => {
+    // ~2.04 km north of the centre.
+    const justOutside = branchRow({ id: 'outside', lat: 40.19595, lng: CENTRE.lng });
+    const { service } = build([justOutside]);
+
+    const { items } = await service.list(query({ ...CENTRE, distMax: 2 }), Language.Hy);
+
+    expect(items).toHaveLength(0);
   });
 
   describe('filters', () => {
@@ -255,5 +314,48 @@ describe('RestaurantsService lookups', () => {
     const { service } = build([]);
 
     await expect(service.menu('nope', {}, Language.Hy)).rejects.toThrow(NotFoundException);
+  });
+
+  // Regression: findFirst had no ordering, so a restaurant id or slug matching
+  // several branches returned whichever row the database happened to yield —
+  // the same URL could serve a different branch's menu on each request.
+  it.each([
+    ['findOne', (s: RestaurantsService) => s.findOne('sunny-table', Language.Hy)],
+    ['menu', (s: RestaurantsService) => s.menu('sunny-table', {}, Language.Hy)],
+    ['tables', (s: RestaurantsService) => s.tables('sunny-table')],
+  ])('resolves the branch deterministically in %s', async (_label, call) => {
+    const { service, prisma } = build([branchRow()]);
+
+    await call(service);
+
+    expect(prisma.restaurantBranch.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
+    );
+  });
+});
+
+describe('RestaurantsService.tables', () => {
+  const table = (tableNo: string) => ({ id: tableNo, tableNo, seats: 2, zone: null });
+
+  // Regression: table_no is a varchar, so ordering it in SQL listed "10"
+  // immediately after "1". The seed only has tables 1-4, where lexicographic
+  // and numeric order coincide, so live testing could not surface it.
+  it('orders numbered tables numerically, not lexicographically', async () => {
+    const { service } = build(
+      [branchRow()],
+      ['10', '2', '1', '12', '3'].map(table),
+    );
+
+    const { tables } = await service.tables('sunny-table');
+
+    expect(tables.map((t) => t.tableNo)).toEqual(['1', '2', '3', '10', '12']);
+  });
+
+  it('keeps non-numeric labels together after the numbered ones', async () => {
+    const { service } = build([branchRow()], ['A2', '2', 'A1', '1'].map(table));
+
+    const { tables } = await service.tables('sunny-table');
+
+    expect(tables.map((t) => t.tableNo)).toEqual(['1', '2', 'A1', 'A2']);
   });
 });

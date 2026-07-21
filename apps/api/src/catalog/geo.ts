@@ -28,3 +28,30 @@ export function distanceKm(
 export function roundKm(km: number): number {
   return Math.round(km * 10) / 10;
 }
+
+const KM_PER_DEGREE_LAT = 111.32;
+
+/**
+ * Latitude/longitude bounds enclosing a radius, so a distance query can be
+ * narrowed in SQL (on the `(lat, lng)` index) before exact distances are
+ * computed. The box over-selects at the corners — callers still filter by
+ * true distance — but it turns an unbounded scan into a bounded one.
+ */
+export function boundingBox(
+  center: { lat: number; lng: number },
+  radiusKm: number,
+): { minLat: number; maxLat: number; minLng: number; maxLng: number } {
+  const latDelta = radiusKm / KM_PER_DEGREE_LAT;
+
+  // Longitude degrees shrink towards the poles. Guard the cosine so a point
+  // near a pole cannot divide by ~0 and produce an infinite span.
+  const cos = Math.max(Math.cos(toRad(center.lat)), 0.01);
+  const lngDelta = radiusKm / (KM_PER_DEGREE_LAT * cos);
+
+  return {
+    minLat: center.lat - latDelta,
+    maxLat: center.lat + latDelta,
+    minLng: center.lng - lngDelta,
+    maxLng: center.lng + lngDelta,
+  };
+}

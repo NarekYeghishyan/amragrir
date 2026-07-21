@@ -130,6 +130,11 @@ Nearby list with filters (Home feed).
 - `distanceKm` is `null` unless `lat`/`lng` are supplied; `distMax` and
   `sort=nearest` are ignored without them (`nearest` then falls back to the
   default ordering rather than inventing one).
+- **`sort=nearest` without `distMax` applies an implicit 5 km radius.** This is
+  an order-ahead product, and an unbounded "near me" query would scan the whole
+  table. Pass an explicit `distMax` to widen or narrow it.
+- `distMax` is matched against the true distance; `distanceKm` in the response
+  is the same value rounded to 100 m for display.
 - `category` and `dietary` select restaurants having **at least one matching
   menu item**, not attributes of the restaurant row.
 - `limit` is capped at **50**; exceeding it is a 400.
@@ -147,7 +152,9 @@ Nearby list with filters (Home feed).
 ### GET /restaurants/{id}
 Restaurant profile + branch.
 - `{id}` accepts a **branch id, a restaurant id, or a restaurant slug** —
-  clients hold whichever the previous screen supplied.
+  clients hold whichever the previous screen supplied. When a restaurant id or
+  slug matches several branches the oldest is returned, deterministically; pass
+  a branch id to address a specific one.
 - **Response 200:** restaurant object + `branch { id, name, address, city, lat, lng, phone, openHours, isOpen, prepMin }`.
 - **404** if nothing matches.
 

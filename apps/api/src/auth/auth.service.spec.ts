@@ -1,4 +1,4 @@
-import type { User } from '@prisma/client';
+import { Prisma, type User } from '@prisma/client';
 import { Role } from '@amragrir/shared';
 import { AuthService } from './auth.service';
 import type { OtpService } from './otp.service';
@@ -38,6 +38,7 @@ function build(opts: { existing?: User | null; caller?: JwtPayload | null } = {}
   const prisma = {
     user: {
       findUnique: jest.fn().mockResolvedValue(opts.existing ?? null),
+      findUniqueOrThrow: jest.fn(),
       update,
       create,
     },
@@ -134,6 +135,27 @@ describe('AuthService.verifyCode', () => {
     await service.verifyCode({ phone: '  099 123 456 ', code: '1234' });
 
     expect(otp.verify).toHaveBeenCalledWith('+37499123456', '1234');
+  });
+
+  // Regression: the find-then-create is not atomic, so a concurrent
+  // verification of the same new phone hit the unique index and surfaced a
+  // 500 instead of simply signing the loser in.
+  it('recovers from a concurrent create of the same phone', async () => {
+    const { service } = build();
+    const winner = userRow({ id: 'winner', name: 'Winner' });
+    const prisma = (service as unknown as { prisma: PrismaService }).prisma;
+    (prisma.user.create as jest.Mock).mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('unique', {
+        code: 'P2002',
+        clientVersion: 'test',
+      }),
+    );
+    (prisma.user.findUniqueOrThrow as jest.Mock) = jest.fn().mockResolvedValue(winner);
+
+    const result = await service.verifyCode({ phone: '99123456', code: '1234' });
+
+    expect(result.user.id).toBe('winner');
+    expect(result.isNewUser).toBe(false);
   });
 
   it('does not overwrite an existing name', async () => {

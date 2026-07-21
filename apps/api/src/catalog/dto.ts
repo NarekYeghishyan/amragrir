@@ -12,7 +12,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { DietaryTag, MenuTab } from '@amragrir/shared';
+import { DietaryTag, MenuTab, RestaurantService } from '@amragrir/shared';
 
 export const RestaurantSort = {
   Recommended: 'recommended',
@@ -66,10 +66,10 @@ export class ListRestaurantsDto {
   @Transform(toArray)
   dietary?: string[];
 
-  /** Restaurant-declared services: pickup | dinein | reserve. */
+  /** Restaurant-declared services (`restaurants.services`). */
   @IsArray()
   @IsOptional()
-  @IsIn(['pickup', 'dinein', 'reserve'], { each: true })
+  @IsIn(Object.values(RestaurantService), { each: true })
   @Transform(toArray)
   service?: string[];
 

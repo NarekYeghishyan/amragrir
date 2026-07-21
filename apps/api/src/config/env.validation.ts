@@ -57,6 +57,18 @@ export class EnvVars {
   @IsString()
   @IsOptional()
   CORS_ORIGIN?: string;
+
+  /**
+   * Number of reverse proxies in front of the app (nginx/ALB = 1). Required for
+   * per-IP rate limiting to see the real client: without it Express reports the
+   * proxy's address and every user shares one bucket. Leave 0 when the app is
+   * exposed directly — trusting a forwarded header nobody sets lets a caller
+   * spoof their IP and bypass the limit.
+   */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  TRUST_PROXY_HOPS = 0;
 }
 
 export function validateEnv(config: Record<string, unknown>): EnvVars {
