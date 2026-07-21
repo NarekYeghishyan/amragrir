@@ -84,6 +84,41 @@ instance — switch to the Redis adapter before scaling out.
 above. API_DOCUMENTATION.md updated with the error-code list, rate limits, token
 non-interchangeability, and the real guest-upgrade semantics.
 
+### DEVELOPMENT_GUIDE.md expanded
+
+Added the conventions this codebase actually follows, several of them learned
+the hard way earlier in this changelog:
+
+- **API conventions** — `/v1` versioning, the single error envelope, what each
+  status code means, secure-by-default routing, mandatory pagination with a
+  server-side cap, server-side resolution of localised columns, and never
+  returning internals.
+- **Security baseline** — never trust the client, distinguish token kinds,
+  revocable refresh tokens, secrets/codes hashed at rest, rate-limit anything
+  unauthenticated or costly, fail-fast config, no PII in logs.
+- **Observability** — health reports each dependency and stays 200 with a
+  `down` marker.
+- **Testing** — test business rules rather than the framework; **a green build
+  is not a working app**, so exercise the running endpoint; every bug fix gets a
+  regression test carrying the reason it exists.
+- **Definition of Done** — an eight-point checklist ending in "docs updated" and
+  "anything deliberately left out is written down".
+- Roadmap reworked into a status table with the rationale for the two orderings
+  that are easy to get wrong (catalog before any client; owner screens before
+  dine-in).
+
+### Phase 2 — Catalog (read-only)
+
+- **`GET /categories`, `/restaurants`, `/restaurants/{id}`, `/restaurants/{id}/menu`, `/restaurants/{id}/tables`** — all public, no token at all, since browsing is open to unauthenticated visitors and the web app needs these pages crawlable.
+- **List rows are branches, not restaurants.** A branch is what a guest travels to and what carries hours, coordinates and prep time; the restaurant supplies name, rating and services.
+- **`{id}` accepts a branch id, a restaurant id, or a slug** — clients hold whichever the previous screen gave them, and guessing wrong should not be a 404.
+- **Localisation resolved server-side** from `Accept-Language` (`hy` default, falling back through `hy` to any populated translation). Clients receive plain strings, never the raw `*_i18n` JSON.
+- **Filters:** rating, declared services, free-text over name and cuisine, plus category and dietary — the latter two select branches having *at least one matching menu item*, since they describe dishes rather than the restaurant.
+- **Sorting:** recommended, fastest, top-rated in SQL; `nearest` needs coordinates and is computed and paged in the application. Without coordinates `nearest` falls back to the default order rather than inventing a meaningless one. Distance uses Haversine in `geo.ts` — **move it into the query (PostGIS) before the catalog grows**, noted in the source.
+- **`limit` capped at 50** server-side.
+- **`priceMax` deliberately not implemented** — the design's price-per-person filter has no backing column; recorded as an open question rather than faked.
+- **122 tests passing** (up from 79). Verified live against the seed: 11 categories in Armenian and Russian, distance sort (0.4 km vs 1.4 km from Republic Square), each filter, menu tabs, tables, plus 404 and validation paths.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,
