@@ -218,7 +218,7 @@ depends on it — build thin vertical slices, not horizontal layers.
 | 2 | Catalog (read-only): categories, restaurants, branches, menu | ✅ done |
 | 3 | First mobile slice: auth → home → restaurant → menu on the real API | ✅ done |
 | 4 | Basket + orders (pickup), payment, idempotency | ✅ done (API) |
-| 5 | Order tracking: realtime status, countdown + the owner **API** that moves it | ✅ done (API) |
+| 5 | Order tracking: realtime status, countdown + the owner **API** that moves it | ✅ done |
 | 6 | `apps/admin` — owner **screens** (incoming orders, status changes, menu) | |
 | 7 | Table booking (dine-in) + deposit | |
 | 8 | Favorites, search, filters, referrals, rewards | |
@@ -236,9 +236,11 @@ Rationale for the two orderings that are easy to get wrong:
   theatre — the same reasoning as the point above, applied one phase earlier.
   The owner *screens* stay in Phase 6.
 
-Phases 4 and 5 shipped the **API**. The basket, checkout and tracking screens
-in `apps/mobile` are not built yet — the endpoints they need exist and have
-been exercised end to end, but nothing on a phone calls them.
+`apps/mobile` now covers the whole ordering path (auth → home → restaurant →
+basket → checkout → tracking). What remains unproven on every mobile phase so
+far is the same thing: **no screen has been run on a device or simulator.**
+Types, tests and the bundle all pass, and every endpoint was exercised
+directly, but that is not the same as having seen it.
 
 ### Open questions (confirm with product)
 - Exact `ready_at` calculation by kitchen load.

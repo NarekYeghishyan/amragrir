@@ -1,10 +1,15 @@
+import type { PaymentMethod } from '@amragrir/shared';
 import { request } from './client';
 import type {
   AuthResult,
   Category,
   GuestResult,
   MenuItem,
+  Order,
+  OrderListItem,
   Paged,
+  PaymentResult,
+  Quote,
   RestaurantDetail,
   RestaurantListItem,
   SendCodeResult,
@@ -62,5 +67,48 @@ export const catalog = {
       query: { menuTab },
       authenticated: false,
       language,
+    }),
+};
+
+export interface BasketPayload {
+  branchId: string;
+  serviceMode: 'pickup';
+  items: { menuItemId: string; qty: number }[];
+}
+
+export const cart = {
+  /** Prices the basket. The client never adds up a total itself. */
+  quote: (basket: BasketPayload, language?: string) =>
+    request<Quote>('/cart/quote', { method: 'POST', body: basket, language }),
+};
+
+export const orders = {
+  /** `idempotencyKey` must be the same across retries of one checkout
+   *  attempt, or a dropped connection becomes a second order. */
+  create: (
+    basket: BasketPayload & { readyAt?: string; notes?: string },
+    idempotencyKey: string,
+    language?: string,
+  ) => request<Order>('/orders', { method: 'POST', body: basket, idempotencyKey, language }),
+
+  list: (status?: 'active' | 'past') =>
+    request<Paged<OrderListItem>>('/orders', { query: { status } }),
+
+  get: (id: string) => request<Order>(`/orders/${id}`),
+
+  cancel: (id: string) => request<Order>(`/orders/${id}/cancel`, { method: 'POST' }),
+};
+
+export const payments = {
+  methods: () =>
+    request<{ methods: PaymentMethod[]; default: PaymentMethod }>('/payment-methods', {
+      authenticated: false,
+    }),
+
+  pay: (orderId: string, method: PaymentMethod, idempotencyKey: string, token?: string) =>
+    request<PaymentResult>('/payments', {
+      method: 'POST',
+      body: { orderId, method, ...(token ? { token } : {}) },
+      idempotencyKey,
     }),
 };

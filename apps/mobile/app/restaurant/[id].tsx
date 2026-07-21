@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { MenuTab } from '@amragrir/shared';
 import { catalog } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import type { MenuItem, RestaurantDetail } from '../../src/api/types';
+import { useCart } from '../../src/cart';
 import { useTheme } from '../../src/theme/useTheme';
-import { radius, spacing, spot, typography } from '../../src/theme/tokens';
+import { HIT_TARGET, radius, spacing, spot, typography } from '../../src/theme/tokens';
 import { formatAmd, formatPriceLevel } from '../../src/format';
 
 const TABS = Object.values(MenuTab);
@@ -14,6 +15,8 @@ const TABS = Object.values(MenuTab);
 export default function RestaurantScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
+  const router = useRouter();
+  const cart = useCart();
 
   const [restaurant, setRestaurant] = useState<RestaurantDetail | null>(null);
   const [items, setItems] = useState<MenuItem[]>([]);
@@ -72,6 +75,36 @@ export default function RestaurantScreen() {
   const meta = [restaurant?.cuisine, formatPriceLevel(restaurant?.priceLevel ?? null)]
     .filter(Boolean)
     .join(' · ');
+
+  /**
+   * A basket belongs to one restaurant (BUSINESS_LOGIC.md §4). Adding from a
+   * second one is a decision only the customer can make, so it is asked rather
+   * than silently resolved either way.
+   */
+  const addToBasket = (item: MenuItem): void => {
+    if (!restaurant) {
+      return;
+    }
+    const branchId = restaurant.branch.id;
+    const line = { menuItemId: item.id, name: item.name, priceAmd: item.priceAmd };
+
+    if (cart.conflictsWith(branchId)) {
+      Alert.alert(
+        'Start a new basket?',
+        `Your basket has items from ${cart.restaurantName}. Ordering from ${restaurant.name} will empty it.`,
+        [
+          { text: 'Keep it', style: 'cancel' },
+          {
+            text: 'Start new',
+            style: 'destructive',
+            onPress: () => cart.add(branchId, restaurant.name, line),
+          },
+        ],
+      );
+      return;
+    }
+    cart.add(branchId, restaurant.name, line);
+  };
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.bg }]}>
@@ -133,16 +166,28 @@ export default function RestaurantScreen() {
             </View>
           </View>
         }
-        renderItem={({ item }) => <MenuRow item={item} />}
+        renderItem={({ item }) => <MenuRow item={item} onAdd={() => addToBasket(item)} />}
         ListEmptyComponent={
           <Text style={[styles.error, { color: colors.ink3 }]}>Nothing on this tab yet</Text>
         }
       />
+
+      {cart.itemCount > 0 && (
+        <Pressable
+          onPress={() => router.push('/basket')}
+          accessibilityRole="button"
+          style={[styles.basketBar, { backgroundColor: colors.accent }]}
+        >
+          <Text style={styles.basketText}>
+            View basket · {cart.itemCount} {cart.itemCount === 1 ? 'item' : 'items'}
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }
 
-function MenuRow({ item }: { item: MenuItem }) {
+function MenuRow({ item, onAdd }: { item: MenuItem; onAdd: () => void }) {
   const { colors } = useTheme();
   const facts = [
     item.caloriesKcal === null ? null : `${item.caloriesKcal} kcal`,
@@ -162,7 +207,21 @@ function MenuRow({ item }: { item: MenuItem }) {
           </Text>
         )}
         <Text style={[styles.meta, { color: colors.ink3 }]}>{facts}</Text>
-        <Text style={[styles.price, { color: colors.ink }]}>{formatAmd(item.priceAmd)}</Text>
+        <View style={styles.priceRow}>
+          <Text style={[styles.price, { color: colors.ink }]}>{formatAmd(item.priceAmd)}</Text>
+          {item.isAvailable ? (
+            <Pressable
+              onPress={onAdd}
+              accessibilityRole="button"
+              accessibilityLabel={`Add ${item.name} to the basket`}
+              style={[styles.add, { backgroundColor: colors.accentSoft }]}
+            >
+              <Text style={[styles.addText, { color: colors.accent }]}>+</Text>
+            </Pressable>
+          ) : (
+            <Text style={[styles.meta, { color: colors.ink3 }]}>Sold out</Text>
+          )}
+        </View>
       </View>
     </View>
   );
@@ -191,5 +250,25 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, gap: 2 },
   dish: { ...typography.body, fontWeight: '700' },
   price: { ...typography.label, marginTop: spacing.xs },
+  priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  add: {
+    width: HIT_TARGET,
+    height: HIT_TARGET,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addText: { ...typography.heading },
+  basketBar: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.xl,
+    minHeight: HIT_TARGET + 6,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  basketText: { ...typography.body, fontWeight: '700', color: '#fff' },
   error: { ...typography.body, textAlign: 'center', marginTop: spacing.xxl },
 });

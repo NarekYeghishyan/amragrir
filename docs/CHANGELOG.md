@@ -312,7 +312,47 @@ the owner queue, the owner gets 422 skipping a step and 400 attempting `paid`,
 a stranger's socket subscription gets `Order not found`, and a garbage token
 gets `Invalid or expired token`.
 
-**Still not built:** the basket, checkout and tracking **screens**.
+### Phase 5 (mobile) — Basket, checkout and live tracking screens
+
+`apps/mobile` now covers the whole ordering path: **auth → home → restaurant →
+basket → checkout → tracking**.
+
+- **`src/cart.tsx` holds the basket, and its rules are a reducer** rather than
+  state scattered through screens, so they can be tested without rendering
+  anything. Adding a dish from a second restaurant replaces the basket
+  (BUSINESS_LOGIC §4) — but the *screen asks first*, because that is a decision
+  only the customer can make. Quantity zero removes a line, and the last line
+  leaving also forgets the restaurant, otherwise an empty basket would still
+  claim a branch and prompt about "switching" from nothing.
+- **No total is ever computed on the phone.** The basket carries menu prices
+  only so a single line can be rendered before the quote returns; every
+  subtotal, fee and total on screen is the answer to `POST /cart/quote`.
+- **The idempotency key is created once per checkout attempt and kept in a
+  ref** — deliberately *not* regenerated when placing the order fails. That is
+  the entire point: a customer tapping "Place order" again after a dropped
+  connection replays the first response instead of ordering twice.
+- **Tracking loads over REST first and treats the socket as an optimisation.**
+  If the stream never connects the screen still renders. It also shows
+  `reconnecting…` rather than a countdown that has quietly stopped being live —
+  a frozen timer looks exactly like a stuck order.
+- **The stream client reconnects with backoff.** A phone loses its connection
+  constantly — backgrounding, a tunnel, a lift — so this is not an optional
+  extra; without it the tracking screen silently stops updating. Retry lives in
+  `onclose` only, since `onerror` is always followed by one and handling both
+  would schedule two reconnects per failure.
+- The countdown ticks locally between server updates so it moves every second
+  instead of jumping at each status change; any value from the server replaces
+  it.
+- Tracking has no back button: the order exists, and swiping back to checkout
+  would offer to place it again.
+- **32 mobile tests** (up from 14), covering the cart rules and the countdown
+  formatting, and the app **bundles cleanly (1.2 MB web bundle)**.
+
+**Not verified:** rendering, navigation and gestures on a device or simulator —
+that still needs a human running `pnpm --filter @amragrir/mobile dev`. Every
+endpoint and the exact WebSocket subscribe frame these screens use were
+exercised directly against the running API, and the bundle builds, but **no
+screen has been seen on screen.**
 
 ## 2026-07-21 — Initial documentation set
 
