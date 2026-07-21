@@ -3,6 +3,7 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { WsAdapter } from '@nestjs/platform-ws';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
@@ -20,6 +21,10 @@ async function bootstrap(): Promise<void> {
 
   // All routes live under /v1 to match the public base https://api.amragrir.am/v1.
   app.setGlobalPrefix('v1');
+
+  // Plain `ws`, not socket.io: React Native and every browser ship a WebSocket
+  // client already, so the app needs no extra dependency and no protocol shim.
+  app.useWebSocketAdapter(new WsAdapter(app));
 
   app.useGlobalPipes(
     new ValidationPipe({

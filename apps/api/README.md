@@ -53,14 +53,33 @@ src/
 ├── auth/             # OTP, JWT issue/rotate, guards, decorators
 ├── users/            # GET/PATCH /me, settings, language
 ├── catalog/          # public: categories, restaurants, menu, tables
-├── orders/           # cart quote, orders (pickup), pricing, order codes
+├── orders/           # cart quote, orders (pickup), pricing, codes, WS gateway
 ├── payments/         # PaymentProvider interface + dev provider, /payments
+├── owner/            # kitchen queue + status transitions (owner/admin)
 ├── health/           # GET /v1/health (liveness + DB/Redis reachability)
 └── common/           # error filter, i18n resolution, idempotency interceptor
 ```
 
 Modules to come, per DEVELOPMENT_GUIDE.md §2: `reservations`, `favorites`,
-`referrals`, `reviews`, `notifications`, `owner`, `admin`.
+`referrals`, `reviews`, `notifications`, `admin`.
+
+## Live order status
+
+`ws://localhost:3000/v1/orders/stream` — plain WebSocket. Authenticate in the
+first message, because a browser cannot set headers on a handshake:
+
+```json
+{ "event": "subscribe", "data": { "token": "<accessToken>", "orderId": "…" } }
+```
+
+The reply is the order's current state; every later change arrives the same
+way. Fan-out is an in-process emitter (`order-events.service.ts`) — **that is
+the file to change before running a second API instance**, since a socket on
+one instance would not hear a change made on another.
+
+To move an order through the kitchen locally, sign in as the seeded owner
+(`+37400000000`, OTP in the API log) and
+`PATCH /v1/owner/orders/{id}/status`.
 
 ## Money notes
 

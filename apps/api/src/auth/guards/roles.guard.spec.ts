@@ -5,8 +5,9 @@ import { RolesGuard } from './roles.guard';
 import { ROLES_KEY, VERIFIED_PHONE_KEY } from '../decorators';
 import type { JwtPayload } from '../token.service';
 
-function contextWith(user?: JwtPayload): ExecutionContext {
+function contextWith(user?: JwtPayload, type: 'http' | 'ws' = 'http'): ExecutionContext {
   return {
+    getType: () => type,
     switchToHttp: () => ({ getRequest: () => ({ user }) }),
     getHandler: () => undefined,
     getClass: () => undefined,
@@ -69,5 +70,14 @@ describe('RolesGuard', () => {
     const guard = new RolesGuard(reflectorWith({ [ROLES_KEY]: [Role.Customer] }));
 
     expect(() => guard.canActivate(contextWith(undefined))).toThrow(ForbiddenException);
+  });
+
+  // Global guards also run for WebSocket handlers, where there is no
+  // request.user to read — sockets authorise themselves per subscription
+  // instead. Without this the gateway would throw on every message.
+  it('steps aside for a WebSocket context', () => {
+    const guard = new RolesGuard(reflectorWith({ [ROLES_KEY]: [Role.Admin] }));
+
+    expect(guard.canActivate(contextWith(undefined, 'ws'))).toBe(true);
   });
 });

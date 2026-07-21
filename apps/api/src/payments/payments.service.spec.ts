@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { OrderStatus, PaymentMethod, PaymentStatus } from '@amragrir/shared';
 import { PaymentsService } from './payments.service';
 import { PaymentDeclinedError, type PaymentProvider } from './payment.provider';
+import type { OrderEventsService } from '../orders/order-events.service';
 import { CreatePaymentDto } from './dto';
 import type { PrismaService } from '../prisma/prisma.service';
 
@@ -47,7 +48,16 @@ function build(options: { order?: unknown; charge?: jest.Mock } = {}) {
     refund: jest.fn().mockResolvedValue(undefined),
   };
 
-  return { service: new PaymentsService(prisma, provider), prisma, provider, paymentCreate, paymentUpdate };
+  const events = { publish: jest.fn(), subscribe: jest.fn() };
+
+  return {
+    service: new PaymentsService(prisma, provider, events as unknown as OrderEventsService),
+    prisma,
+    provider,
+    events,
+    paymentCreate,
+    paymentUpdate,
+  };
 }
 
 const dto = (over: Partial<CreatePaymentDto> = {}): CreatePaymentDto =>

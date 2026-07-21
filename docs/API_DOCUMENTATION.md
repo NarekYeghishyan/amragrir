@@ -297,9 +297,38 @@ food is spent.
 ### POST /orders/{id}/reorder — **not implemented**
 Lands with the orders-history screen.
 
-### Realtime status — **not implemented**
-- **WS:** `wss://api.amragrir.am/v1/orders/{id}/stream` → events `{ "status","secondsLeft","readyAt" }`. Fallback — poll `GET /orders/{id}` every 5–10s.
-- Until then `GET /orders/{id}` already returns `secondsLeft`, so polling works.
+### Realtime status · *implemented*
+
+**`wss://api.amragrir.am/v1/orders/stream`** — plain WebSocket (not socket.io;
+React Native and every browser already ship a client).
+
+One socket, one connection, any number of orders — the orders list screen shows
+several countdowns at once.
+
+**Authentication is the first message, not the handshake.** A browser cannot
+set an `Authorization` header on a WebSocket, and a token in the query string
+is written into every access log along the way.
+
+```json
+→ { "event": "subscribe",   "data": { "token": "<accessToken>", "orderId": "…" } }
+← { "event": "order",       "data": { "orderId","code","status","readyAt","secondsLeft" } }
+→ { "event": "unsubscribe", "data": { "orderId": "…" } }
+← { "event": "error",       "data": { "message": "…" } }
+```
+
+- The reply to `subscribe` is the **current state**, not just a promise of
+  future ones — a client opening the tracking screen after the order moved
+  would otherwise render stale data until the next change, which for a
+  finished order never comes.
+- An order the caller may not read answers `Order not found` — the same text as
+  one that does not exist, since a distinguishable error confirms the id.
+- The server pings every 30s; a socket that misses two is dropped. Clients
+  should reconnect and re-subscribe.
+- **Polling is still supported and returns the same fields.** This is an
+  optimisation, not the only way to follow an order.
+- **Single-instance only today.** Fan-out is an in-process emitter, so a socket
+  on instance A would not hear a change made on instance B; that becomes Redis
+  pub/sub before the API is scaled out.
 
 ---
 
@@ -397,10 +426,30 @@ keeps across retries).
 
 ## Owner / Admin (restaurant panel)
 
-> For roles `owner`/`staff`/`admin` (see ROLES_AND_PERMISSIONS).
+> For roles `owner`/`admin` (see ROLES_AND_PERMISSIONS). **`staff` is refused**
+> — the schema has no user-to-branch link, so there is nothing to scope them
+> by, and lending them the owner's reach in the meantime would be worse than
+> making them wait.
 
-- `GET /owner/orders?status=` — incoming orders.
-- `PATCH /owner/orders/{id}/status` — change status (`confirmed→preparing→ready…`).
+### GET /owner/orders · *implemented*
+The kitchen queue.
+- **Query:** `status=active|past, branchId, page, limit` (capped at 50)
+- Scoped to the branches the caller owns; `admin` sees everything. `branchId`
+  **narrows** that scope and never widens it, so passing someone else's branch
+  id returns nothing rather than their orders.
+- **Ordered oldest first** — a kitchen works a queue, not a stack.
+- **Response 200:** `{ "items":[ { "id","code","pickupCode","status","serviceMode","branch","customerName","itemsCount","totalAmd","paymentStatus","readyAt","secondsLeft","createdAt","items":[{"name","qty"}],"notes" } ], "total", "page" }`
+
+### PATCH /owner/orders/{id}/status · *implemented*
+- **Body:** `{ "status": "confirmed|preparing|almost_ready|ready|completed|cancelled" }`
+- **`paid` is not settable.** Only a payment makes an order paid; a panel that
+  could set it could mark an unpaid order as settled.
+- Legality comes from the shared state machine, so skipping a step is **422**.
+- Cancelling here refunds a captured payment, exactly as the customer's cancel does.
+- Every change is broadcast to anyone watching the order.
+- **Response 200:** the full order (same shape as `GET /orders/{id}`).
+
+### Not implemented yet
 - `GET|POST|PATCH|DELETE /owner/menu-items` — manage the menu.
 - `PATCH /owner/branches/{id}` — hours, `isOpen`, `reservationsEnabled`.
 - `GET|POST|PATCH /owner/tables` — manage tables.

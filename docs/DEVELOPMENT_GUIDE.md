@@ -218,8 +218,8 @@ depends on it — build thin vertical slices, not horizontal layers.
 | 2 | Catalog (read-only): categories, restaurants, branches, menu | ✅ done |
 | 3 | First mobile slice: auth → home → restaurant → menu on the real API | ✅ done |
 | 4 | Basket + orders (pickup), payment, idempotency | ✅ done (API) |
-| 5 | Order tracking: realtime status, countdown | ← current |
-| 6 | `apps/admin` — owner screens (incoming orders, status changes, menu) | |
+| 5 | Order tracking: realtime status, countdown + the owner **API** that moves it | ✅ done (API) |
+| 6 | `apps/admin` — owner **screens** (incoming orders, status changes, menu) | |
 | 7 | Table booking (dine-in) + deposit | |
 | 8 | Favorites, search, filters, referrals, rewards | |
 | 9 | `apps/web` (Next.js) on the same API | |
@@ -231,11 +231,14 @@ Rationale for the two orderings that are easy to get wrong:
   nothing; the seed already provides data for it.
 - **Owner screens before dine-in.** Once real orders exist, a human has to move
   them through their statuses, otherwise nothing ever reaches `ready`.
+- **The owner's status *API* moved forward into Phase 5**, ahead of its
+  screens. Tracking with nothing able to change a status is untestable
+  theatre — the same reasoning as the point above, applied one phase earlier.
+  The owner *screens* stay in Phase 6.
 
-Phase 4 shipped the **API only**. The basket, checkout and tracking screens in
-`apps/mobile` are not built yet — the endpoints they need exist and have been
-exercised, but nothing on a phone calls them. Phase 5 covers the client side
-together with tracking.
+Phases 4 and 5 shipped the **API**. The basket, checkout and tracking screens
+in `apps/mobile` are not built yet — the endpoints they need exist and have
+been exercised end to end, but nothing on a phone calls them.
 
 ### Open questions (confirm with product)
 - Exact `ready_at` calculation by kitchen load.

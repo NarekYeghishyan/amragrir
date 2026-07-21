@@ -10,7 +10,9 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { OrdersModule } from './orders/orders.module';
+import { OrderEventsModule } from './orders/order-events.module';
 import { PaymentsModule } from './payments/payments.module';
+import { OwnerModule } from './owner/owner.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { IdempotencyInterceptor } from './common/idempotency/idempotency.interceptor';
@@ -31,8 +33,10 @@ import { IdempotencyInterceptor } from './common/idempotency/idempotency.interce
     AuthModule,
     UsersModule,
     CatalogModule,
+    OrderEventsModule,
     OrdersModule,
     PaymentsModule,
+    OwnerModule,
     HealthModule,
   ],
   providers: [

@@ -252,6 +252,68 @@ orders (422 until table booking), coupons and referral discounts, opening-hours
 validation on `readyAt`, and the WebSocket order stream (`GET /orders/{id}`
 already returns `secondsLeft`, so polling works meanwhile).
 
+### Phase 5 (API) — Live order tracking, and the owner API that makes it move
+
+- **Pulled the owner's status API forward from Phase 6.** Tracking with nothing
+  able to change a status is untestable theatre — the same reasoning the
+  roadmap already gives for putting owner screens before dine-in, applied one
+  phase earlier. `GET /owner/orders` and `PATCH /owner/orders/{id}/status` ship
+  here; the owner *screens* stay in Phase 6. Roadmap and rationale updated.
+- **`wss://…/v1/orders/stream`** — plain `ws`, not socket.io, because React
+  Native and every browser already ship a WebSocket client and the app needs no
+  extra dependency for it.
+  - **Authentication is the first message, not the handshake.** A browser
+    cannot set an `Authorization` header on a WebSocket, and a token in the
+    query string ends up in every access log on the way. A `subscribe` message
+    carries it instead — which also lets one socket follow several orders, as
+    the orders list screen needs.
+  - **`subscribe` replies with the current state**, not only future changes. A
+    client opening the tracking screen after the order moved would otherwise
+    show stale data until the next transition — and for a finished order there
+    isn't one.
+  - Subscriptions authorise per order through the same visibility rule the REST
+    endpoints use, and answer `Order not found` for both "missing" and "not
+    yours", since a distinguishable error confirms the id exists.
+  - 30s ping/pong sweep: a socket killed by a dropped mobile connection is
+    otherwise never collected, because TCP alone can keep a dead peer open for
+    hours. Disconnect and shutdown both release the emitter listener.
+- **Status changes are published from one place.** `OrdersService.transition`
+  now performs every move — customer cancel, owner advance — so the refund rule
+  and the broadcast exist once and cannot drift. It matches on the status it
+  read, so a change that lands in between loses with a 409 rather than being
+  overwritten.
+- **`paid` is not a status the panel may set.** Only a payment makes an order
+  paid; a restaurant able to set it could mark an unpaid order as settled. The
+  legality of every other move comes from the shared state machine, not a list
+  written in the owner module.
+- **The owner queue is scoped by a Prisma filter, not a check afterwards** —
+  owner sees their restaurants' branches, admin sees all. A `branchId` query
+  parameter narrows that scope and can never widen it, so passing someone
+  else's branch id returns nothing rather than their orders. Ordered oldest
+  first: a kitchen works a queue, not a stack.
+- **`staff` is refused rather than approximated.** The schema has no
+  user-to-branch link, so there is nothing to scope them by; lending them the
+  owner's reach until that table exists would be worse than making them wait.
+  Written down in ROLES_AND_PERMISSIONS rather than left as a silent gap.
+- **Global guards now step aside for WebSocket contexts.** `JwtAuthGuard` and
+  `RolesGuard` read `request.user`, which does not exist for a socket message —
+  without this the gateway would have thrown on every frame. Both carry a test.
+- **`OrderEventsService` is an in-process emitter and says so in its own
+  docblock**: it is the first thing that breaks on a second API instance, and
+  swapping it for Redis pub/sub is a change to that one file.
+- **227 tests passing** (up from 205), including gateway tests for the snapshot
+  reply, cross-order isolation, invalid tokens and listener cleanup.
+
+**Verified live, end to end:** a customer placed an order, a socket subscribed
+*before* payment, and the owner walked the order through the kitchen. The
+socket received `created → paid → confirmed → preparing → almost_ready →
+ready → completed` without a single poll. Also checked: a customer gets 403 on
+the owner queue, the owner gets 422 skipping a step and 400 attempting `paid`,
+a stranger's socket subscription gets `Order not found`, and a garbage token
+gets `Invalid or expired token`.
+
+**Still not built:** the basket, checkout and tracking **screens**.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

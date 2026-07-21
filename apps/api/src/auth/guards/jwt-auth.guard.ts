@@ -18,6 +18,14 @@ export class JwtAuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    // Global guards run for WebSocket handlers too, where there is no HTTP
+    // request to read a header from. Sockets authenticate themselves in the
+    // `subscribe` message instead (see OrdersGateway) — a browser cannot set
+    // an Authorization header on a WebSocket handshake.
+    if (context.getType() !== 'http') {
+      return true;
+    }
+
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
