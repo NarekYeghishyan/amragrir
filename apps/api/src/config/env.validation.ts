@@ -1,9 +1,12 @@
-import { plainToInstance } from 'class-transformer';
+import { plainToInstance, Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, Min, MinLength, validateSync } from 'class-validator';
 
 /** Validated shape of process.env. ConfigModule runs `validateEnv` at boot and
  *  fails fast if anything required is missing or malformed. */
 export class EnvVars {
+  // env values are always strings — @Type coerces before @IsInt runs.
+  // (implicit conversion alone is unreliable here, so convert explicitly.)
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(65535)

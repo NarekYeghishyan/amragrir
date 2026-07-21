@@ -20,7 +20,10 @@
 - **Local infra:** root `docker-compose.yml` (Postgres 16 + Redis 7) and `apps/api/.env.example`.
 - **Dev seed** (`apps/api/prisma/seed.ts`): 11 cuisine categories + 2 demo restaurants (Sunny Table — all services + tables; Greenhouse — pickup only) with branches and menu, idempotent.
 - **`packages/shared` now builds to CommonJS `dist`** so the CJS NestJS app can consume it; added a build script.
-- **Verified:** `@amragrir/shared` build, `prisma generate`, and `@amragrir/api` typecheck + `nest build` (→ `dist/main.js`) all pass. Not yet run against a live DB (Docker not installed on the dev machine) — migrations/seed pending Docker Desktop.
+- **Verified end-to-end against a live database:** initial migration `20260721123512_init` applied to Postgres, seed loaded (11 categories, 2 restaurants, 2 branches, 9 menu items, 4 tables), and the running API returns `GET /v1/health` → `{"status":"ok","db":"up"}` with 404s in the documented error envelope.
+- **Two bugs the smoke test caught** (build and typecheck both passed while the app could not boot):
+  - `PORT` from `.env` arrives as a string and `enableImplicitConversion` did not coerce it, so env validation failed on `isInt` — fixed with an explicit `@Type(() => Number)`.
+  - `incremental: true` combined with nest-cli's `deleteOutDir` produced stale builds (dist wiped, cache reporting files unchanged, so `src/prisma/*` was never re-emitted and the app crashed on a missing module) — removed `incremental`.
 - **Known issue:** `turbo run build` can't locate pnpm when it's only a corepack shim; use per-package `--filter` builds until pnpm is on PATH (documented in root README).
 
 ## 2026-07-21 — Initial documentation set
