@@ -26,7 +26,7 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | Field | Type | Description |
 |---|---|---|
 | id | uuid PK | |
-| phone | varchar(20) UNIQUE NOT NULL | primary login identifier |
+| phone | varchar(20) UNIQUE NULL | primary login identifier; **nullable** — a guest account exists before any phone is known, and the column is filled on OTP verification (guest → customer upgrade) |
 | phone_verified | boolean DEFAULT false | verified via OTP |
 | name | varchar(120) | full name |
 | email | varchar(160) UNIQUE NULL | optional |

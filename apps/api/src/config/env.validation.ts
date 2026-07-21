@@ -17,12 +17,42 @@ export class EnvVars {
   DATABASE_URL!: string;
 
   @IsString()
-  @IsOptional()
-  REDIS_URL?: string;
+  @MinLength(1)
+  REDIS_URL!: string;
 
   @IsString()
-  @IsOptional()
-  JWT_SECRET?: string;
+  @MinLength(16)
+  JWT_SECRET!: string;
+
+  /** Access token lifetime (seconds). Short — refresh rotates it. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(60)
+  JWT_ACCESS_TTL = 900;
+
+  /** Refresh token lifetime (seconds). */
+  @Type(() => Number)
+  @IsInt()
+  @Min(600)
+  JWT_REFRESH_TTL = 2_592_000;
+
+  /** OTP validity window (seconds) — DEVELOPMENT_GUIDE.md specifies 120. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(30)
+  OTP_TTL = 120;
+
+  /** Minimum gap between OTP sends to one phone (seconds). */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  OTP_RESEND_COOLDOWN = 60;
+
+  /** Wrong-code attempts allowed before the OTP is burned. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  OTP_MAX_ATTEMPTS = 5;
 
   @IsString()
   @IsOptional()
