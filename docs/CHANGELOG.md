@@ -163,6 +163,95 @@ that needs a human to run `pnpm --filter @amragrir/mobile dev`. Every endpoint
 the app calls was exercised directly, and the bundle builds, but no screen has
 been seen on screen.
 
+### Phase 4 — Basket, orders (pickup), payment, idempotency
+
+The API can now take money for food. `POST /cart/quote`, `POST /orders`,
+`GET /orders`, `GET /orders/{id}`, `POST /orders/{id}/cancel`,
+`GET /payment-methods`, `POST /payments`.
+
+- **The basket stays on the client; the server owns the arithmetic.** A cart
+  table would need syncing and conflict rules for state that is per-device and
+  throwaway. `POST /cart/quote` prices a basket instead, and shares its pricing
+  code with order creation — the quote and the order cannot disagree because
+  they are the same function. API_DOCUMENTATION's "optional server-side cart"
+  is now a decision rather than an open question.
+- **Nothing about money comes from the client.** The order request carries ids
+  and quantities; prices, names and prep times are re-read from the database.
+  `POST /payments` has **no amount field at all** — the server charges the
+  order's total.
+- **Unknown fields are rejected, not ignored.** `couponCode` is documented in
+  the design but unimplemented, so sending it is a 400. Accepting and dropping
+  it would let a customer believe a discount applied.
+- **Idempotency is mandatory on both money endpoints**, not advisory. A phone
+  that loses signal after the server created the order will retry; without a
+  key that is a second order. Redis-backed, scoped to endpoint **and** caller
+  (a guessed key must not return someone else's order), fingerprinted on the
+  body (same key + different basket → 409), and released on failure so a
+  transient error cannot burn a key.
+- **A quote reports problems; an order refuses them.** A sold-out or unknown
+  dish comes back in `unavailable[]` with `canOrder: false` so the basket
+  screen can flag the line, but the same basket sent to `POST /orders` is a
+  422. A closed restaurant still gets prices.
+- **The order state machine lives in `packages/shared`** (`ORDER_STATUS_FLOW`,
+  `canTransitionOrder`, `isOrderCancellable`) because the owner panel will
+  decide which buttons to render from the same table. Payment asks the machine
+  whether `created → paid` is legal instead of checking statuses by hand.
+- **Ownership is in the query, not a guard.** Every order lookup filters on
+  `userId`, so no code path loads another user's order and then decides — and
+  the answer is 404, not 403, which would confirm the id exists.
+- **Two race windows closed** — both found by asking what happens between the
+  check and the write, not by a failing test. `POST /payments` and
+  `/orders/{id}/cancel` now match the **current** status in the `WHERE` clause,
+  so paying cannot un-cancel a cancelled order and a cancel cannot land on an
+  order the kitchen already started. The loser gets a 409. Added to
+  DEVELOPMENT_GUIDE's security baseline as a rule.
+- **Cancelling refunds before it cancels.** If the provider refuses, the
+  customer keeps an order rather than having neither order nor refund; the
+  remaining window (refunded, then the status write fails) is logged as
+  needing manual reconciliation rather than pretended away.
+- **`PaymentProvider` mirrors `SmsSender`** — nothing outside `PaymentsModule`
+  names a provider. The dev implementation approves everything, and declines
+  when the token is `decline`, so the declined path is reachable instead of
+  written and never run. A decline records a `failed` payment and leaves the
+  order `created`, so the customer retries on the same row.
+- **Cash captures nothing but still commits the order** to `paid` — otherwise
+  the kitchen never receives it (BUSINESS_LOGIC §5).
+- **Pickup code is derived, not stored** — the last four digits of
+  `orders.code` (`AMR-42774033` → `4033`), so the two can never disagree. With
+  only 10,000 values a busy branch would repeat one about one time in eight at
+  50 active orders, so generation also avoids clashing with an active order at
+  the same branch. Best-effort by design and documented as such: only
+  `orders.code` carries a unique constraint. **No schema change was needed.**
+- **Prep estimate is the slowest dish, not the sum** — a kitchen cooks in
+  parallel. Falls back to the branch average, then to a constant, so an
+  unfilled column never schedules an order for "right now".
+- **205 tests passing** (up from 132), including regression tests for both race
+  windows.
+
+**Verified against the running API**, not just the suite: sign-in, quote
+(subtotal matched the menu prices), order creation, a replayed
+`Idempotency-Key` returning the *same* order id, 409 on key reuse with a
+different basket, 400 without a key, card capture, 409 on paying twice, the
+active-orders list, cancel-with-refund, a declined card followed by a
+successful cash retry, and the rule checks (dine-in 422, duplicate line 400,
+`readyAt` too soon 422 with `earliestReadyAt`, qty over the cap 400, unknown
+dish 422, coupon field 400). Cross-user isolation checked with two verified
+accounts: every route answers 404 for the other's order.
+
+Unrelated fix found while running the checks: **`apps/mobile` no longer
+typechecked.** TypeScript 6 (Expo SDK 57) stopped pulling every
+`node_modules/@types` package into the global scope automatically, so the spec
+files lost `describe`/`it`/`expect` after a patch bump. Naming `"types":
+["jest"]` in `apps/mobile/tsconfig.json` restores them. Confirmed the failure
+exists on the previous commit too, so it is not a Phase 4 regression.
+
+**Not built:** the basket, checkout and tracking **screens**. Phase 4 shipped
+the API only — the endpoints exist and have been exercised, but nothing on a
+phone calls them yet. Also deferred: `POST /orders/{id}/reorder`, dine-in
+orders (422 until table booking), coupons and referral discounts, opening-hours
+validation on `readyAt`, and the WebSocket order stream (`GET /orders/{id}`
+already returns `secondsLeft`, so polling works meanwhile).
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

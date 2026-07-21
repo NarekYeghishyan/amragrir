@@ -2,6 +2,11 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // TypeScript 6 (shipped with Expo SDK 57) no longer pulls every
+    // node_modules/@types package into the global scope automatically, so the
+    // spec files lost `describe`/`it`/`expect`. Naming jest here restores them;
+    // everything else this app uses arrives through imports.
+    "types": ["jest"],
     "paths": {
       "@/*": ["./src/*"]
     }

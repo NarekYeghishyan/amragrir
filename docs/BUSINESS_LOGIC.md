@@ -56,10 +56,27 @@ Transitions: `pending → confirmed → seated → completed`; `cancelled` possi
 ## 4. Food order (Order)
 
 - An order is tied to **one restaurant** (basket does not mix restaurants). **[from design]**
+  Enforced by scoping the menu lookup to the branch: a dish belonging elsewhere
+  is simply "not on this menu".
 - **Food ready at** — user chooses the ready time; the kitchen synchronizes prep. **[from design]**
 - Each dish has a **prep time** (min) and calories — used for estimation and planning. **[from design]**
+- **Prep estimate = the slowest dish, not the sum** of the dishes: a kitchen
+  cooks in parallel, so ten dishes are not ten times slower. Falls back to the
+  branch average, then to `DEFAULT_PREP_MIN`, so an unfilled column never
+  schedules an order for "right now".
+- A requested `ready_at` earlier than that estimate is rejected; so is one more
+  than `ORDER_MAX_LEAD_DAYS` ahead. A minute of slack is allowed for clock skew
+  between the quote and the order.
 - **Countdown** after placing: starts at `480 seconds` (8:00 min) to readiness (demo value). **[from design]** In production `ready_at` is computed from the chosen time and current kitchen load.
 - **Pickup code** generated per order; for dine-in — table number. **[from design]**
+  It is the **last four digits of `orders.code`** (`AMR-42774033` → `4033`) —
+  derived rather than stored, so the two can never disagree. `orders.code`
+  carries the unique constraint; the pickup code is additionally checked
+  against active orders at the same branch, because with only 10,000 possible
+  values a busy branch would otherwise repeat one surprisingly often.
+- **Cancellation** is allowed while `created`, `paid` or `confirmed`. A captured
+  payment is refunded before the order is cancelled — if the provider refuses,
+  the customer keeps an order rather than having neither order nor refund.
 
 ### Order statuses
 
@@ -78,13 +95,27 @@ Tracking steps in UI: **Confirmed → Preparing → Almost ready → Ready**. **
 
 Transitions: `created → paid → confirmed → preparing → almost_ready → ready → completed`; cancellation possible before `preparing` (policy TBD).
 
+The transition table lives in `packages/shared/src/order-status.ts`
+(`ORDER_STATUS_FLOW`, `canTransitionOrder`, `isOrderCancellable`) rather than
+in the API, because the owner panel decides which buttons to show from the same
+table — two copies would drift. Status changes match on the **current** status
+in the `WHERE` clause, so a cancel racing a payment loses instead of
+overwriting it.
+
 ---
 
 ## 5. Payment
 
 - Methods: **Apple Pay, Google Pay, Credit Card, Cash**. **[from design]**
 - Cash (`cash`) → "Place order" without online payment (pay on site); others → "Pay now". **[from design]**
+  A cash payment is recorded as `pending` and captures nothing, but the order
+  still moves to `paid` — otherwise the kitchen never receives it.
 - Default method: `apple`. **[from design]**
+- The **amount is always read from the order**, never from the request. The
+  client chooses which order and which method; the server decides how much.
+- A **declined** charge is recorded as `failed` and leaves the order `created`,
+  so the customer can retry on the same payment row rather than accumulating
+  abandoned records.
 
 ### Payment statuses [proposed]
 
@@ -144,5 +175,12 @@ For the deposit: `authorized` at booking, `captured`/`credited` at completion, `
 | Referral discount | 2%, stacks to 25% | design |
 | Filter price range | 4000–24000֏ | design |
 | Distance range | 0.5–5 km | design |
+| Max qty per dish | 20 | proposed |
+| Max dishes per order | 50 | proposed |
+| Max pre-order lead time | 7 days | proposed |
+| Fallback prep time | 15 min | proposed |
 
 > Move all numeric business constants to config/settings, do not hardcode.
+> They currently live in `packages/shared/src/constants.ts`; the ordering
+> limits marked *proposed* have no design value behind them and should be
+> confirmed with product before launch.

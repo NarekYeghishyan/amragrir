@@ -115,6 +115,12 @@ in API_DOCUMENTATION.md.
 - **Never return internals.** No stack traces, driver errors, or connection
   strings in responses — the exception filter collapses unknown errors to a
   generic 500.
+- **Anything that creates money or an obligation requires an
+  `Idempotency-Key`** — `@Idempotent(scope)` on the handler, and the header is
+  mandatory, not advisory. A phone that loses signal after the server created
+  the order will retry; without a key the customer is charged twice. The stored
+  response is scoped to the endpoint *and* the caller, and a failed request
+  releases its key so a transient error cannot burn it.
 
 ### Security baseline
 
@@ -130,6 +136,14 @@ in API_DOCUMENTATION.md.
 - **Rate-limit anything unauthenticated and anything that costs money** (SMS).
   Per-resource cooldowns are not a substitute for a per-IP ceiling: a per-phone
   cooldown does nothing against one host spraying thousands of numbers.
+- **Own the resource in the query, not in a check afterwards.** `WHERE id = ?
+  AND user_id = ?` has no path that loads another user's row; a fetch-then-
+  compare does, and one early `return` removes it. It also answers 404 rather
+  than 403, which does not confirm the id exists.
+- **Guard a status change on the status you read.** Business checks run against
+  a snapshot; by the time the write lands, another request may have moved the
+  row. Put the expected status in the `WHERE` clause so the loser of a race
+  fails instead of overwriting.
 - **Config fails fast.** Required env vars are validated at boot; the process
   refuses to start rather than failing at the first request.
 - **No PII in logs.** Phone numbers are masked (`+374******56`). Logs get IDs,
@@ -203,8 +217,8 @@ depends on it — build thin vertical slices, not horizontal layers.
 | 1 | Auth: OTP, JWT sessions, guards, `/me` | ✅ done |
 | 2 | Catalog (read-only): categories, restaurants, branches, menu | ✅ done |
 | 3 | First mobile slice: auth → home → restaurant → menu on the real API | ✅ done |
-| 4 | Basket + orders (pickup), payment, idempotency | ← current |
-| 5 | Order tracking: realtime status, countdown | |
+| 4 | Basket + orders (pickup), payment, idempotency | ✅ done (API) |
+| 5 | Order tracking: realtime status, countdown | ← current |
 | 6 | `apps/admin` — owner screens (incoming orders, status changes, menu) | |
 | 7 | Table booking (dine-in) + deposit | |
 | 8 | Favorites, search, filters, referrals, rewards | |
@@ -218,12 +232,21 @@ Rationale for the two orderings that are easy to get wrong:
 - **Owner screens before dine-in.** Once real orders exist, a human has to move
   them through their statuses, otherwise nothing ever reaches `ready`.
 
+Phase 4 shipped the **API only**. The basket, checkout and tracking screens in
+`apps/mobile` are not built yet — the endpoints they need exist and have been
+exercised, but nothing on a phone calls them. Phase 5 covers the client side
+together with tracking.
+
 ### Open questions (confirm with product)
 - Exact `ready_at` calculation by kitchen load.
 - Deposit refund / no-show policy.
 - Reward points accrual rates.
-- SMS and acquiring provider for Armenia — the app depends on a `SmsSender`
-  interface, so choosing one is a provider swap, not a rewrite.
+- SMS and acquiring provider for Armenia — the app depends on the `SmsSender`
+  and `PaymentProvider` interfaces only, so choosing one is a provider swap,
+  not a rewrite. Both currently resolve to console implementations that move
+  nothing.
+- Refund window and cancellation fee for a paid pickup order — cancellation
+  currently refunds in full up to `confirmed`.
 - Referral discount stacking rules (up to 25%).
 - Price-per-person filter (design: 4000–24000֏) has no backing column; it needs
   either a stored average or derivation from menu prices.

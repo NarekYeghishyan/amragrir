@@ -200,50 +200,106 @@ Ordered by `sortOrder`. `name` is resolved from `Accept-Language` (default `hy`)
 
 ---
 
-## Cart (optional server-side)
+## Cart
 
-> The cart can be client-side. If server-side:
+> **The basket lives on the client.** It is per-device, throwaway state that
+> the server gains nothing by storing, and a server-side cart would need
+> syncing and conflict rules for no benefit. What the server does own is the
+> **arithmetic** — hence the quote endpoint below. No client ever computes a
+> total.
 
-### GET /cart · PATCH /cart
-- **PATCH Body:** `{ "branchId", "items": [ { "menuItemId","qty" } ] }`
-- **Response 200:** `{ "items":[...], "subtotalAmd", "serviceFeeAmd", "totalAmd" }`
+### POST /cart/quote · *implemented*
+Prices a basket without creating anything. **Any bearer token, guests
+included** — filling a basket is allowed before verification; only ordering
+is not.
+- **Body:** `{ "branchId", "serviceMode": "pickup", "items": [ { "menuItemId", "qty" } ] }`
+- **Response 200:**
+```json
+{ "branchId","restaurantName","serviceMode":"pickup",
+  "items":[ { "menuItemId","name","unitPriceAmd","qty","lineTotalAmd" } ],
+  "unavailable":[ { "menuItemId","reason":"not_on_menu|sold_out" } ],
+  "subtotalAmd":14200,"serviceFeeAmd":360,"depositAmd":0,"totalAmd":14560,
+  "prepMin":15,"earliestReadyAt":"2026-07-21T18:12:15.556Z",
+  "branchIsOpen":true,"canOrder":true }
+```
+- Prices, names and prep times are re-read from the database; the request
+  carries ids and quantities only.
+- A dish that is missing or sold out is **reported in `unavailable`, not
+  thrown**, so the basket screen can flag the line. `canOrder` is the single
+  answer to "may this become an order".
+- A closed restaurant still returns prices, with `branchIsOpen: false`.
+- `prepMin` is the **slowest dish**, not the sum — a kitchen cooks in parallel.
 
 ---
 
 ## Orders
 
-### POST /orders
-Create an order (pre-order).
+> **Implemented for pickup.** Every route requires a **verified phone**
+> (`403` for guests) and only ever sees the caller's own orders — ownership is
+> part of the query, so another user's order is `404`, never `403`.
+
+### POST /orders · **requires `Idempotency-Key`**
+Create a pre-order.
+- **Headers:** `Idempotency-Key: <8-128 chars>` — **required**, not optional.
+  A retry after a dropped connection would otherwise create a second order.
+  Same key + same body → the first response is replayed. Same key + different
+  body → **409**. Missing → **400**.
 - **Body:**
 ```json
-{ "branchId","serviceMode":"pickup|dine_in",
+{ "branchId","serviceMode":"pickup",
   "items":[{"menuItemId","qty"}],
   "readyAt":"2026-07-25T12:30:00+04:00",
-  "reservation": { "reservedFor":"…","guests":2,"tableId":null },
-  "couponCode": null, "notes": null }
+  "notes": null }
 ```
+- `readyAt` is optional and defaults to now + `prepMin`. Earlier than the
+  kitchen can manage → **422** carrying `{ "earliestReadyAt" }`; further ahead
+  than 7 days → **422**.
+- `serviceMode: "dine_in"` → **422** until table booking ships.
+- **`couponCode` and `reservation` are not accepted** — unknown fields are
+  rejected with **400** rather than silently ignored, so a client cannot
+  believe a discount was applied when it was not.
+- A dish that is missing or sold out → **422** with
+  `details.unavailable[]`. The same dish twice → **400** (combine the
+  quantities; merging silently would hide a broken basket).
 - **Response 201:**
 ```json
-{ "id","code":"AMR-4821","status":"created",
+{ "id","code":"AMR-42774033","pickupCode":"4033","status":"created",
+  "serviceMode":"pickup","restaurantName","branch":{ "id","name","address" },
+  "items":[ { "id","menuItemId","name","unitPriceAmd","qty","lineTotalAmd" } ],
   "subtotalAmd","serviceFeeAmd","depositAmd","totalAmd",
-  "readyAt","pickupCode":"4821","reservationId" }
+  "readyAt","secondsLeft","tableNo":null,"reservationId":null,
+  "notes","payment":null,"createdAt" }
 ```
+- `pickupCode` is the **last four digits of `code`** — derived, never stored,
+  so the two can never disagree.
+- Item names are **snapshots** taken in the caller's language at purchase
+  time; an order records what was bought at the price it was bought.
 
 ### GET /orders
-- **Query:** `status=active|past, page, limit`
-- **Response 200:** `{ "items":[ { "id","restaurantName","date","itemsCount","totalAmd","status","readyAt","secondsLeft" } ] }`
+- **Query:** `status=active|past, page, limit` (limit capped at 50)
+- **Response 200:** `{ "items":[ { "id","code","restaurantName","coverUrl","date","itemsCount","totalAmd","status","readyAt","secondsLeft" } ], "total", "page" }`
+- `itemsCount` counts **dishes, not lines** — "3 items" means three things to eat.
 
 ### GET /orders/{id}
-- **Response 200:** full order + `items[]`, `status`, `secondsLeft`, `pickupCode`, `tableNo`.
-
-### POST /orders/{id}/reorder
-- **Response 201:** a new draft order/cart with the same items.
+- **Response 200:** the same object `POST /orders` returns.
+- `secondsLeft` counts down to `readyAt`, never goes negative, and is `null`
+  once the order is `ready`, `completed` or `cancelled`.
 
 ### POST /orders/{id}/cancel
-- **Response 200:** `{ "status":"cancelled" }` (if rules allow).
+Allowed while `created`, `paid` or `confirmed` — once the kitchen starts, the
+food is spent.
+- **Response 200:** the full order with `status: "cancelled"`.
+- A captured payment is **refunded first**: if the provider refuses, the
+  customer keeps an order rather than having neither order nor refund.
+- **422** if the order has moved past `confirmed`. **409** if it changed
+  underneath the request.
 
-### Realtime status
+### POST /orders/{id}/reorder — **not implemented**
+Lands with the orders-history screen.
+
+### Realtime status — **not implemented**
 - **WS:** `wss://api.amragrir.am/v1/orders/{id}/stream` → events `{ "status","secondsLeft","readyAt" }`. Fallback — poll `GET /orders/{id}` every 5–10s.
+- Until then `GET /orders/{id}` already returns `secondsLeft`, so polling works.
 
 ---
 
@@ -265,12 +321,44 @@ Create an order (pre-order).
 
 ## Payments
 
-### GET /payment-methods
+> **Implemented against a development provider** that approves everything and
+> moves no money — an acquirer for Armenia is still an open question. Nothing
+> outside `PaymentsModule` names a provider, so swapping one in is a
+> `useClass` change.
+
+### GET /payment-methods · *public*
 - **Response 200:** `{ "methods":["apple_pay","google_pay","card","cash"], "default":"apple_pay" }`
 
-### POST /payments
-- **Body:** `{ "orderId","method":"card","token":"…" }`
-- **Response 201:** `{ "id","status":"captured","amountAmd" }`
+### POST /payments · **requires `Idempotency-Key`**
+Requires a verified phone.
+- **Body:** `{ "orderId","method":"apple_pay|google_pay|card|cash","token":"…" }`
+- **There is no amount field.** The server charges the order's `totalAmd`; the
+  client says *which* order and *how*, never *how much*.
+- `token` is an opaque wallet/card token from the client SDK — raw card data
+  must never reach this server. `cash` needs none.
+- **Response 201:** `{ "id","status","amountAmd","method","orderStatus" }`
+- **`cash`** captures nothing (`status: "pending"`, settled at the counter) but
+  still moves the order to `paid`, otherwise the kitchen never sees it.
+- **Declined** → **422**, the attempt is recorded as `failed`, and the order
+  stays `created` so the customer can retry on the same row.
+- **409** if the order is already paid, or if it is in a status that cannot
+  become `paid` (cancelled, preparing…). The order state machine decides, not
+  an ad-hoc check.
+- In development, sending `"token": "decline"` forces a decline, so the failure
+  path is reachable rather than written and never run.
+
+### Idempotency
+
+`POST /orders` and `POST /payments` require an `Idempotency-Key` header
+(8–128 characters, typically a UUID the client generates once per attempt and
+keeps across retries).
+
+- The stored response is scoped to **the endpoint and the authenticated user**,
+  so a guessed key cannot return someone else's order.
+- Records live for **24 hours**.
+- A failed request **releases** its key immediately — a transient error must
+  not permanently burn a key.
+- Concurrent duplicate → **409** while the first is still running.
 
 ---
 

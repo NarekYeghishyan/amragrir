@@ -21,9 +21,10 @@ packages/
 └── config/   # eslint/tsconfig/prettier bases
 ```
 
-**Status:** `apps/api` runs (foundation, auth, public catalog) and
-`apps/mobile` has its first slice (auth → home → restaurant → menu against the
-real API). `apps/web` and `apps/admin` are still placeholder READMEs with their
+**Status:** `apps/api` runs (foundation, auth, public catalog, orders and
+payments for pickup) and `apps/mobile` has its first slice (auth → home →
+restaurant → menu against the real API — basket and checkout screens are not
+built yet). `apps/web` and `apps/admin` are still placeholder READMEs with their
 scaffold commands. See
 [docs/DEVELOPMENT_GUIDE.md](./docs/DEVELOPMENT_GUIDE.md) for the full
 architecture and build order.

@@ -20,6 +20,15 @@ export class RedisService implements OnModuleDestroy {
     await this.client.set(key, value, 'EX', ttlSeconds);
   }
 
+  /**
+   * Atomic claim: writes only if the key is free, returns whether it was.
+   * The whole point is that two concurrent retries of the same request cannot
+   * both win — a get-then-set would let both through.
+   */
+  async setIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean> {
+    return (await this.client.set(key, value, 'EX', ttlSeconds, 'NX')) === 'OK';
+  }
+
   async get(key: string): Promise<string | null> {
     return this.client.get(key);
   }

@@ -45,7 +45,7 @@ prisma/
 └── seed.ts           # dev seed from the design
 src/
 ├── main.ts           # bootstrap: /v1 prefix, ValidationPipe, error filter, CORS
-├── app.module.ts     # config + Prisma + Redis + Auth + Users + Health, global guards
+├── app.module.ts     # module wiring; global guards + idempotency interceptor
 ├── config/           # env.validation.ts — fail-fast env schema
 ├── prisma/           # global PrismaModule + PrismaService
 ├── redis/            # global RedisModule — OTP storage, refresh-token registry
@@ -53,13 +53,26 @@ src/
 ├── auth/             # OTP, JWT issue/rotate, guards, decorators
 ├── users/            # GET/PATCH /me, settings, language
 ├── catalog/          # public: categories, restaurants, menu, tables
+├── orders/           # cart quote, orders (pickup), pricing, order codes
+├── payments/         # PaymentProvider interface + dev provider, /payments
 ├── health/           # GET /v1/health (liveness + DB/Redis reachability)
-└── common/           # error filter, i18n resolution
+└── common/           # error filter, i18n resolution, idempotency interceptor
 ```
 
-Modules to come, per DEVELOPMENT_GUIDE.md §2: `cart`, `orders`, `reservations`,
-`payments`, `favorites`, `referrals`, `reviews`, `notifications`, `owner`,
-`admin`.
+Modules to come, per DEVELOPMENT_GUIDE.md §2: `reservations`, `favorites`,
+`referrals`, `reviews`, `notifications`, `owner`, `admin`.
+
+## Money notes
+
+- **Pricing lives in `orders/pricing.ts`** as pure functions, and both the cart
+  quote and order creation call it — that is what makes a quote and the order
+  it becomes impossible to disagree.
+- **`POST /orders` and `POST /payments` require an `Idempotency-Key` header.**
+  Add `@Idempotent(scope)` to any new endpoint that creates money or an
+  obligation; the interceptor is registered globally and inert without it.
+- **The dev payment provider approves everything** and logs it. Send
+  `"token": "decline"` to force a decline and exercise the failure path.
+  Replace the `useClass` in `PaymentsModule` when an acquirer is chosen.
 
 ## Auth notes
 
