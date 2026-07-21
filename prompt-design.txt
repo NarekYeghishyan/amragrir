@@ -1,0 +1,366 @@
+Ты работаешь как Senior Product Manager, UX Architect и Technical Analyst.
+
+У меня есть дизайн приложения Food Booking Platform (бронирование столиков + предварительный заказ еды).
+
+Твоя задача:
+изучить весь дизайн, все экраны, компоненты и пользовательские сценарии и подготовить полноценную техническую документацию для команды разработки.
+
+Документация должна быть подготовлена для AI-разработчика Cursor.
+
+Проект находится здесь:
+
+D:\Projects\720.Amragrir.am
+
+
+Создай внутри проекта папку:
+
+/docs
+
+
+И создай следующие файлы:
+
+
+1. PROJECT_OVERVIEW.md
+
+Опиши:
+- название проекта
+- цель приложения
+- проблему, которую решает приложение
+- целевую аудиторию
+- основные функции
+- отличие от обычной доставки еды
+
+
+2. DESIGN_SYSTEM.md
+
+Опиши дизайн систему:
+
+- цвета
+- шрифты
+- размеры
+- отступы
+- кнопки
+- карточки
+- формы
+- UI компоненты
+- состояния компонентов:
+  - default
+  - hover
+  - active
+  - disabled
+  - loading
+
+
+3. SCREENS.md
+
+Для каждого экрана подробно опиши:
+
+Название экрана:
+
+Цель:
+
+Пользователь:
+
+Элементы:
+
+Действия пользователя:
+
+Переходы:
+
+API данные которые нужны:
+
+Пример:
+
+Home Screen
+
+Цель:
+Поиск ресторанов рядом
+
+
+Компоненты:
+- Search
+- Categories
+- Restaurant Cards
+- Map
+
+
+User actions:
+- открыть ресторан
+- выбрать категорию
+- применить фильтр
+
+
+4. USER_FLOW.md
+
+Опиши все пользовательские сценарии.
+
+
+Минимально:
+
+Регистрация:
+
+Телефон
+↓
+SMS код
+↓
+Создание профиля
+↓
+Главная
+
+
+Поиск ресторана:
+
+Location
+↓
+Nearby restaurants
+↓
+Restaurant page
+
+
+Бронирование:
+
+Restaurant
+↓
+Date
+↓
+Time
+↓
+Guests count
+↓
+Availability check
+↓
+Reservation
+
+
+Заказ еды:
+
+Menu
+↓
+Add to cart
+↓
+Payment
+↓
+Order confirmation
+
+
+5. BUSINESS_LOGIC.md
+
+Опиши бизнес-правила.
+
+
+Например:
+
+Бронирование:
+
+- ресторан может включить/выключить бронирование
+- количество мест ограничено
+- нельзя создать бронь в закрытое время
+- есть статусы брони
+
+
+Статусы:
+
+Reservation:
+- pending
+- confirmed
+- cancelled
+- completed
+- no_show
+
+
+Order:
+- created
+- paid
+- preparing
+- ready
+- completed
+- cancelled
+
+
+6. DATABASE.md
+
+Предложи структуру базы данных.
+
+
+Таблицы:
+
+Users
+
+Restaurants
+
+Restaurant branches
+
+Tables
+
+Categories
+
+Menu Items
+
+Orders
+
+Order Items
+
+Reservations
+
+Payments
+
+Reviews
+
+Notifications
+
+
+Для каждой таблицы:
+
+- поля
+- тип данных
+- связи
+
+
+7. API_DOCUMENTATION.md
+
+Опиши необходимые API.
+
+
+Например:
+
+Authentication:
+
+POST /auth/send-code
+
+POST /auth/verify-code
+
+
+Restaurants:
+
+GET /restaurants
+
+GET /restaurants/{id}
+
+
+Reservation:
+
+POST /reservations
+
+GET /reservations
+
+
+Orders:
+
+POST /orders
+
+
+Для каждого API:
+
+- метод
+- URL
+- параметры
+- response
+
+
+8. COMPONENTS.md
+
+Опиши React / React Native компоненты:
+
+Например:
+
+RestaurantCard
+
+Props:
+- image
+- name
+- rating
+- distance
+
+
+Button
+
+Input
+
+Calendar
+
+Map
+
+
+9. ROLES_AND_PERMISSIONS.md
+
+Опиши роли:
+
+
+Customer:
+
+- искать рестораны
+- создавать заказ
+- бронировать
+
+
+Restaurant Owner:
+
+- управлять меню
+- принимать заказы
+- управлять столами
+
+
+Admin:
+
+- управление системой
+
+
+10. DEVELOPMENT_GUIDE.md
+
+Создай рекомендации для разработчика.
+
+
+Стек:
+
+Backend:
+NestJS
+
+Database:
+PostgreSQL
+
+Cache:
+Redis
+
+Mobile:
+React Native Expo
+
+Web:
+Next.js
+
+
+Опиши:
+
+- архитектуру
+- структуру проекта
+- правила разработки
+
+
+11. AI_CONTEXT.md
+
+Создай главный файл для AI.
+
+
+В нем напиши:
+
+"Ты являешься AI Developer этого проекта.
+
+Перед созданием любого кода обязательно изучи:
+- PROJECT_OVERVIEW.md
+- BUSINESS_LOGIC.md
+- DATABASE.md
+- USER_FLOW.md
+
+
+Не создавай новые функции без проверки бизнес требований.
+
+Соблюдай архитектуру проекта."
+
+
+Важно:
+
+- Не делай поверхностное описание.
+- Анализируй каждый экран дизайна.
+- Если логика отсутствует, предложи правильный вариант.
+- Думай как архитектор продукта.
+- Документация должна быть понятна Cursor AI.
+- Все файлы должны быть в формате Markdown (.md).
