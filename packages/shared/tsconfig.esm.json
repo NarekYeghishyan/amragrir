@@ -1,0 +1,15 @@
+{
+  "extends": "../config/tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "outDir": "dist/esm",
+    "rootDir": "src",
+    // Declarations are emitted here too. Pointing the ESM condition at the
+    // CommonJS `.d.ts` looks tidier but TypeScript resolves types next to the
+    // resolved JavaScript file, so it simply does not find them.
+    "composite": false,
+    "declarationMap": false
+  },
+  "include": ["src"]
+}

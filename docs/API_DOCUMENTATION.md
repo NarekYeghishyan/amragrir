@@ -449,9 +449,45 @@ The kitchen queue.
 - Every change is broadcast to anyone watching the order.
 - **Response 200:** the full order (same shape as `GET /orders/{id}`).
 
+### GET /owner/branches · *implemented*
+The branches the caller may act on, with a dish count.
+- **Response 200:** `{ "items":[ { "id","restaurantId","restaurantName","name","address","city","phone","isOpen","avgPrepMin","menuItemCount" } ] }`
+
+### PATCH /owner/branches/{id} · *implemented*
+- **Body (any):** `{ "isOpen", "avgPrepMin", "address", "phone" }`
+- `isOpen: false` makes `POST /orders` return **422** for that branch — this is
+  the switch a shift uses to stop the queue.
+- **`reservationsEnabled` is not accepted here.** It lives on the *restaurant*,
+  not the branch, so setting it from a branch endpoint would silently change
+  every other branch too. It lands with the reservations module.
+- **`openHours` is not editable yet** — the column exists but nothing reads it;
+  it arrives with opening-hours validation.
+
+### Menu management · *implemented*
+
+> These return the **raw `*_i18n` objects**, unlike the public menu endpoint
+> which resolves one language. The owner is editing all three; resolving would
+> make the other two invisible and silently unsaveable.
+
+- `GET /owner/menu-items?branchId=&menuTab=` → `{ "items":[ … ] }`
+- `POST /owner/menu-items` — **Body:** `{ "branchId","menuTab","nameI18n":{"hy","ru"?,"en"?},"descI18n"?,"priceAmd","caloriesKcal"?,"prepMin"?,"photoUrl"?,"dietaryTags"?,"isAvailable"? }`
+- `PATCH /owner/menu-items/{id}` — any of the above except `branchId`; moving a
+  dish between branches would change who owns it, which is a different
+  operation, not an edit.
+- `DELETE /owner/menu-items/{id}` → **204**
+
+Rules worth knowing:
+- **`nameI18n.hy` is required.** It is the fallback every other language
+  resolves to, so a dish without it would render nameless for most visitors.
+- **Blank translations are dropped** before storing — an empty string is not a
+  translation, and it would beat the `hy` fallback.
+- **A dish that has ever been ordered cannot be deleted** → **409**, telling the
+  owner to set `isAvailable: false` instead. `order_items` points at it, and an
+  order that can no longer say what was bought is not an order.
+- **Changing a price does not touch existing orders**: every order item stores
+  the price it was bought at.
+
 ### Not implemented yet
-- `GET|POST|PATCH|DELETE /owner/menu-items` — manage the menu.
-- `PATCH /owner/branches/{id}` — hours, `isOpen`, `reservationsEnabled`.
 - `GET|POST|PATCH /owner/tables` — manage tables.
 - `GET /owner/reservations` + `PATCH /owner/reservations/{id}/status`.
 - `GET /admin/*` — manage users, restaurants, moderate reviews, metrics.

@@ -25,8 +25,9 @@ packages/
 pickup, live order status over WebSocket, and the owner queue that moves an
 order through the kitchen). `apps/mobile` covers the whole ordering path —
 auth → home → restaurant → basket → checkout → live tracking — against the real
-API. `apps/web` and `apps/admin` are still placeholder READMEs with their
-scaffold commands. See
+API, and `apps/admin` is a working back office (live kitchen queue, menu, the
+open/closed switch). `apps/web` is still a placeholder README with its scaffold
+command. See
 [docs/DEVELOPMENT_GUIDE.md](./docs/DEVELOPMENT_GUIDE.md) for the full
 architecture and build order.
 

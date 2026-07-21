@@ -24,3 +24,25 @@ export function orderScopeFor(user: JwtPayload): Prisma.OrderWhereInput {
   }
   throw new ForbiddenException('This account cannot manage orders');
 }
+
+/** The same rule expressed against branches, for the menu and settings screens. */
+export function branchScopeFor(user: JwtPayload): Prisma.RestaurantBranchWhereInput {
+  if (user.role === Role.Admin) {
+    return {};
+  }
+  if (user.role === Role.Owner) {
+    return { restaurant: { ownerId: user.sub } };
+  }
+  throw new ForbiddenException('This account cannot manage restaurants');
+}
+
+/** …and against menu items, which are owned through their branch. */
+export function menuScopeFor(user: JwtPayload): Prisma.MenuItemWhereInput {
+  if (user.role === Role.Admin) {
+    return {};
+  }
+  if (user.role === Role.Owner) {
+    return { branch: { restaurant: { ownerId: user.sub } } };
+  }
+  throw new ForbiddenException('This account cannot manage menus');
+}
