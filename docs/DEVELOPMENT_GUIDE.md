@@ -9,7 +9,7 @@
 | Layer | Technology |
 |---|---|
 | Backend | **NestJS** (TypeScript) |
-| Database | **PostgreSQL** (+ Prisma or TypeORM) |
+| Database | **PostgreSQL** + **Prisma** (ORM/migrations — chosen over TypeORM) |
 | Cache / queues / OTP | **Redis** |
 | Mobile | **React Native + Expo** (expo-router) |
 | Web | **Next.js** (App Router) — customer-facing; public restaurant/menu pages need SEO |
