@@ -45,17 +45,31 @@ prisma/
 └── seed.ts           # dev seed from the design
 src/
 ├── main.ts           # bootstrap: /v1 prefix, ValidationPipe, error filter, CORS
-├── app.module.ts     # ConfigModule (env validation) + Prisma + Health
+├── app.module.ts     # config + Prisma + Redis + Auth + Users + Health, global guards
 ├── config/           # env.validation.ts — fail-fast env schema
 ├── prisma/           # global PrismaModule + PrismaService
-├── health/           # GET /v1/health (liveness + DB reachability)
+├── redis/            # global RedisModule — OTP storage, refresh-token registry
+├── sms/              # SmsSender interface + dev console sender
+├── auth/             # OTP, JWT issue/rotate, guards, decorators
+├── users/            # GET/PATCH /me, settings, language
+├── health/           # GET /v1/health (liveness + DB/Redis reachability)
 └── common/filters/   # AllExceptionsFilter — { error: { code, message, details } }
 ```
 
-Modules to come, per DEVELOPMENT_GUIDE.md §2: `auth`, `users`, `restaurants`,
-`branches`, `menu`, `categories`, `cart`, `orders`, `reservations`,
-`payments`, `favorites`, `referrals`, `reviews`, `notifications`, `owner`,
-`admin`.
+Modules to come, per DEVELOPMENT_GUIDE.md §2: `restaurants`, `branches`,
+`menu`, `categories`, `cart`, `orders`, `reservations`, `payments`,
+`favorites`, `referrals`, `reviews`, `notifications`, `owner`, `admin`.
+
+## Auth notes
+
+- **Every endpoint requires a bearer token unless marked `@Public()`** — both
+  `JwtAuthGuard` and `RolesGuard` are registered globally, so a new endpoint is
+  protected by default.
+- Gate an endpoint with `@Roles(Role.Owner)` and/or `@RequiresVerifiedPhone()`;
+  read the caller with `@CurrentUser()`.
+- In dev the OTP is **printed to the server log** by `ConsoleSmsSender`
+  (`[SMS] [dev] to +374...: Amragrir: 1234`) — that is how you complete a login
+  locally. Replace the `useClass` in `SmsModule` when a provider is chosen.
 
 ## Notes
 

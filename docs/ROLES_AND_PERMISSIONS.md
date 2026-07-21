@@ -110,3 +110,25 @@ Full access.
 - JWT contains `sub` (userId) and `role`; for owner/staff — a list of accessible `branchIds`.
 - The guest token is flagged `isGuest`; sensitive endpoints require `phone_verified = true`.
 - Resource ownership (own order/reservation/review) is checked in addition to role (ownership guard).
+
+### Implementation status
+
+Implemented in `apps/api`:
+
+- **`JwtAuthGuard` is global** — every endpoint requires a bearer token unless
+  it opts out with `@Public()`. Secure by default: forgetting a guard on a new
+  endpoint locks it down instead of exposing it.
+- **`RolesGuard` is global** too, enforcing `@Roles(...)` and
+  `@RequiresVerifiedPhone()`. Access-token claims carry `sub`, `role`,
+  `isGuest` and `phoneVerified`, so a guard never has to hit the DB.
+- **`guest` is not a DB role.** `users.role` stays `customer` and the account
+  is flagged `is_guest`; a guest simply has no verified phone. This is what
+  lets phone verification upgrade a guest in place rather than creating a
+  second account.
+
+Not implemented yet:
+
+- **`branchIds` in the JWT** — lands with the owner module, since nothing
+  consumes branch scoping until then.
+- **Ownership guard** (own order/reservation/review) — lands with the orders
+  module, which introduces the first owned resources.

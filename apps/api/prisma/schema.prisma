@@ -86,8 +86,10 @@ enum CouponSource {
 // ── Models ───────────────────────────────────────────────────────────────────
 
 model User {
-  id            String   @id @default(uuid()) @db.Uuid
-  phone         String   @unique @db.VarChar(20)
+  id String @id @default(uuid()) @db.Uuid
+  // Nullable because guest accounts exist before any phone is known; it is
+  // filled in when the user verifies an OTP (guest -> customer upgrade).
+  phone         String?  @unique @db.VarChar(20)
   phoneVerified Boolean  @default(false) @map("phone_verified")
   name          String?  @db.VarChar(120)
   email         String?  @unique @db.VarChar(160)

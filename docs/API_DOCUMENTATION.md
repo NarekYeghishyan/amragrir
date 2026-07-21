@@ -12,49 +12,86 @@ Status codes: 200/201 ok, 400 validation, 401 unauthorized, 403 forbidden, 404 n
 
 ## Authentication
 
-### POST /auth/send-code
+> **Implemented** except `POST /auth/social` (see below). Every other route in
+> this doc is still a specification.
+>
+> Endpoints are authenticated by default; only the routes marked *public* below
+> may be called without a bearer token. Access tokens last 15 min, refresh
+> tokens 30 days and are **single-use** (rotated on every refresh, revocable at
+> logout).
+
+### POST /auth/send-code · *public*
 Send an OTP to the phone.
-- **Body:** `{ "phone": "+37499123456" }`
+- **Body:** `{ "phone": "+37499123456" }` — any Armenian spelling is accepted
+  (`99123456`, `099123456`, `+374 99 123 456`) and normalised to E.164.
 - **Response 200:** `{ "sent": true, "expiresIn": 120 }`
+- **400** invalid/non-Armenian number. **429** resend requested inside the
+  60s cooldown, with `retryAfter` in the payload.
 
-### POST /auth/verify-code
-Verify the code, return tokens.
-- **Body:** `{ "phone": "+37499123456", "code": "1234" }`
+### POST /auth/verify-code · *public*
+Verify the code, return tokens. Creates the account on first verification.
+- **Body:** `{ "phone": "+37499123456", "code": "1234", "name"?, "referralCode"? }`
 - **Response 200:** `{ "accessToken", "refreshToken", "isNewUser": true, "user": { … } }`
-- If `isNewUser` → next `PATCH /me` for profile (name).
+- `name` is optional and used by the register branch of the auth screen.
+- **401** wrong, expired or already-used code. The code is single-use, and is
+  burned after 5 wrong attempts (a 4-digit code would otherwise be
+  brute-forceable inside its window).
 
-### POST /auth/social
+### POST /auth/social · *public* — **not implemented yet**
 - **Body:** `{ "provider": "apple|google", "idToken": "…" }`
 - **Response 200:** `{ "accessToken", "refreshToken", "user" }`
+- Deferred: verifying Apple/Google id tokens needs provider credentials that
+  do not exist yet. The design's social buttons stay non-functional until then.
 
-### POST /auth/guest
-- **Response 200:** `{ "accessToken", "user": { "isGuest": true } }`
+### POST /auth/guest · *public*
+Anonymous session — browsing and basket only.
+- **Response 200:** `{ "accessToken", "refreshToken", "user": { "isGuest": true, "phone": null } }`
+- Verifying a phone later upgrades this same account rather than creating a
+  second one, so a guest never loses state on sign-up.
 
-### POST /auth/refresh
+### POST /auth/refresh · *public*
 - **Body:** `{ "refreshToken" }` → **200:** `{ "accessToken", "refreshToken" }`
+- The supplied token is consumed; claims are re-read from the DB so a changed
+  role or verification status takes effect on the next refresh.
+- **401** if the token is expired, malformed, already used, or revoked.
 
-### POST /auth/logout
-- **Response 204**
+### POST /auth/logout · *public*
+- **Body:** `{ "refreshToken" }`
+- **Response 204.** Revokes that refresh token. Logging out with an already
+  invalid token is not an error.
+
+### `referralCode` on verify-code
+Accepted and validated, but **not yet applied** — referral attribution lands
+with the referrals module (see BUSINESS_LOGIC.md §7).
 
 ---
 
 ## Profile / Me
 
+> **Implemented.** All routes require a bearer token; guests included, since
+> they may read and adjust their own profile (language/theme) before verifying.
+> Every route returns the same full profile object, so a client never needs a
+> follow-up `GET /me` after a write.
+
 ### GET /me
 - **Response 200:**
 ```json
-{ "id","name","phone","email","avatarUrl","language":"hy","darkMode":false,
-  "rewardPoints":340,"ordersCount":28,"couponsCount":3 }
+{ "id","name","phone","email","avatarUrl","language":"hy","role":"customer",
+  "isGuest":false,"phoneVerified":true,"darkMode":false,"notifPush":true,
+  "notifPromo":false,"rewardPoints":340,"ordersCount":28,"couponsCount":3 }
 ```
+- `phone` is `null` for a guest. `ordersCount` and `couponsCount` are computed
+  (unused coupons only), not stored.
 
 ### PATCH /me
 - **Body (any):** `{ "name", "email", "avatarUrl" }`
+- **409** if the email belongs to another account.
 
 ### PATCH /me/settings
-- **Body:** `{ "notifPush": true, "notifPromo": false }`
+- **Body (any):** `{ "notifPush": true, "notifPromo": false, "darkMode": false }`
 
 ### PATCH /me/language
-- **Body:** `{ "language": "hy|ru|en" }`
+- **Body:** `{ "language": "hy|ru|en" }` — **400** on any other value.
 
 ---
 
