@@ -1,0 +1,182 @@
+/* Design tokens from docs/DESIGN_SYSTEM.md, as CSS variables.
+   The back office is a tool, not a storefront: same palette, denser layout. */
+:root {
+  --bg: #f6f5f2;
+  --card: #ffffff;
+  --ink: #1a1712;
+  --ink2: rgba(26, 23, 18, 0.56);
+  --ink3: rgba(26, 23, 18, 0.32);
+  --line: rgba(26, 23, 18, 0.09);
+  --accent: #ea5b12;
+  --accent-soft: #fff0e6;
+  --chip: #f1efea;
+  --good: #12a150;
+  --bad: #e23755;
+  --radius: 14px;
+  --hit: 44px;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #100e0b;
+    --card: #1b1815;
+    --ink: #f6f3ee;
+    --ink2: rgba(246, 243, 238, 0.6);
+    --ink3: rgba(246, 243, 238, 0.34);
+    --line: rgba(246, 243, 238, 0.1);
+    --accent: #ff6a1f;
+    --accent-soft: rgba(255, 106, 31, 0.15);
+    --chip: #26221d;
+    --good: #2ec76f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+button {
+  font: inherit;
+  min-height: var(--hit);
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+button.small {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+input,
+select {
+  font: inherit;
+  min-height: var(--hit);
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--ink);
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.topbar h1 {
+  font-size: 20px;
+  margin: 0 auto 0 0;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+}
+.tab {
+  background: var(--chip);
+  border-color: transparent;
+}
+.tab[aria-selected='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.spread {
+  justify-content: space-between;
+}
+.muted {
+  color: var(--ink2);
+  font-size: 13px;
+}
+.faint {
+  color: var(--ink3);
+  font-size: 13px;
+}
+.strong {
+  font-weight: 700;
+}
+.pickup {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 3px;
+}
+.error {
+  color: var(--bad);
+}
+.badge {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.live {
+  color: var(--good);
+  font-size: 13px;
+}
+.offline {
+  color: var(--ink3);
+  font-size: 13px;
+}
+
+.grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+.signin {
+  max-width: 360px;
+  margin: 15vh auto;
+  display: grid;
+  gap: 12px;
+}

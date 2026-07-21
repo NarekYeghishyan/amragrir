@@ -55,7 +55,7 @@ src/
 ├── catalog/          # public: categories, restaurants, menu, tables
 ├── orders/           # cart quote, orders (pickup), pricing, codes, WS gateway
 ├── payments/         # PaymentProvider interface + dev provider, /payments
-├── owner/            # kitchen queue + status transitions (owner/admin)
+├── owner/            # kitchen queue, status transitions, branches, menu CRUD
 ├── health/           # GET /v1/health (liveness + DB/Redis reachability)
 └── common/           # error filter, i18n resolution, idempotency interceptor
 ```

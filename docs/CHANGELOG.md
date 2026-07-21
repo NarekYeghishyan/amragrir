@@ -354,6 +354,86 @@ endpoint and the exact WebSocket subscribe frame these screens use were
 exercised directly against the running API, and the bundle builds, but **no
 screen has been seen on screen.**
 
+### Phase 6 — Back office: owner menu API and the `apps/admin` panel
+
+`apps/admin` is now a real React + Vite SPA (was a placeholder README): sign in,
+live kitchen queue, menu editing, and the open/closed switch.
+
+**API — branch settings and menu management**
+
+- `GET /owner/branches`, `PATCH /owner/branches/{id}`,
+  `GET|POST|PATCH|DELETE /owner/menu-items`, scoped by the same Prisma filter as
+  the order queue (`branchScopeFor`, `menuScopeFor` alongside `orderScopeFor`),
+  so ownership is part of every query rather than a check afterwards.
+- **The owner endpoints return raw `*_i18n` objects**, unlike the public menu
+  which resolves one language. The owner is editing all three; resolving would
+  make the other two invisible and silently unsaveable.
+- **`nameI18n.hy` is required** — it is the fallback every other language
+  resolves to, so a dish without it renders nameless for most visitors.
+- **Blank translations are dropped before storing.** An empty string is not a
+  translation and it beats the `hy` fallback in `localize()`, which would leave
+  the dish nameless in exactly the language someone chose.
+- **A dish that has ever been ordered cannot be deleted** → 409 telling the
+  owner to mark it unavailable instead. `order_items` points at it, and an order
+  that can no longer say what was bought is not an order. No soft-delete column
+  was added: `isAvailable` already means "not on the menu".
+- **`reservationsEnabled` is refused on a branch** — it lives on the restaurant,
+  so accepting it here would silently change every other branch. Documented
+  rather than quietly half-implemented.
+- **Changing a price does not touch existing orders** (order items store what
+  they were bought at), with a test that asserts nothing else is written.
+- **241 API tests** (up from 227).
+
+**Panel**
+
+- **Status buttons are derived from `ORDER_STATUS_FLOW`**, not written out
+  again — the panel can only offer moves the API accepts, so it cannot show a
+  button that 422s. `paid` is filtered out because only a payment makes an
+  order paid.
+- **Nothing is optimistic.** Advancing a status waits for the server's
+  broadcast; a kitchen acting on a status that did not save is worse than a
+  moment of latency.
+- **One socket for the whole board**, re-subscribing every watched order after a
+  reconnect — a reconnected socket knows nothing about old subscriptions, so
+  tracking them separately is what stops it silently watching nothing.
+- **Token refresh is single-flight.** Refresh tokens are single-use and rotated,
+  so two requests expiring together would each spend the same one and the loser
+  would be logged out. This is not theoretical for a panel left open all shift
+  with a 15-minute access token.
+- `localStorage` for tokens, with the trade-off written down in the README
+  rather than left implicit: readable by any script on the page, accepted for an
+  internal tool, **revisit before exposing it beyond the restaurant's network.**
+- No router — three tabs and nothing to deep-link. 12 tests, 207 kB bundle.
+
+**Two build problems this uncovered, both worth recording**
+
+- **`@amragrir/shared` was CommonJS only**, which Rollup could not take named
+  exports from, so the panel would not build. It now ships **both** builds with
+  an `exports` map (CJS for the NestJS API, ESM for Vite). TypeScript resolves
+  types next to the resolved JavaScript file, so the ESM build emits its own
+  declarations — pointing the ESM condition at the CommonJS `.d.ts` looks
+  tidier but simply does not resolve.
+- **Deleting `dist` did not force a rebuild.** `tsconfig.tsbuildinfo` sat
+  outside it and reported everything current, so `tsc` emitted nothing and every
+  consumer failed with "cannot find module" — the same class of stale-build trap
+  as Phase 0's `incremental` + `deleteOutDir`. The build info now lives inside
+  `dist`, so removing it genuinely resets the build.
+- `esbuild` added to `allowBuilds` in `pnpm-workspace.yaml` (pnpm blocks install
+  scripts by default; Vite needs the platform binary it places).
+
+**Verified live against the running API:** the branch switch (and a 422 when
+ordering from a closed branch), creating a dish with partial translations and
+seeing the public endpoint resolve `ru` and fall back to `hy` for the
+description, price and availability edits, a 422 when ordering a dish just
+marked sold out, a 409 deleting an ordered dish, a successful delete of an
+unordered one, and every scoping and validation path (403 for a customer, 404
+for a branch the owner does not own, 400 for a missing Armenian name and for
+`reservationsEnabled`).
+
+**Not verified:** the panel has not been opened in a browser. It typechecks,
+builds, and every request it makes was exercised directly — but no screen has
+been seen.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

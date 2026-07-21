@@ -141,6 +141,13 @@ Implemented in `apps/api`:
   narrows that scope and can never widen it.
 - **`paid` is not a status the panel may set.** Only a payment makes an order
   paid; a restaurant that could set it could mark an unpaid order as settled.
+- **Owner and admin manage branches and menus** (`GET /owner/branches`,
+  `PATCH /owner/branches/{id}`, `GET|POST|PATCH|DELETE /owner/menu-items`),
+  scoped the same way — a Prisma filter on every query, so a dish or branch
+  outside the caller's restaurants is a 404 rather than a refusal.
+- **The back office is a client like any other.** `apps/admin` signs in with the
+  same OTP flow and holds no privileges of its own; its role check only decides
+  which screens to render, never what the API allows.
 - **WebSocket subscriptions authorise per order**, through the same visibility
   rule as the REST endpoints, so a socket cannot watch an order its holder may
   not read.

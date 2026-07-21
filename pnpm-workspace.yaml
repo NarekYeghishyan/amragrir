@@ -4,8 +4,9 @@ packages:
 
 # Allow these dependencies to run their install scripts (pnpm blocks them by
 # default). Prisma needs its postinstall to fetch the query engine and generate
-# the client.
+# the client; esbuild needs its to place the platform binary Vite runs.
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
+  esbuild: true
   prisma: true

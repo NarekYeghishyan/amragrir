@@ -219,8 +219,8 @@ depends on it — build thin vertical slices, not horizontal layers.
 | 3 | First mobile slice: auth → home → restaurant → menu on the real API | ✅ done |
 | 4 | Basket + orders (pickup), payment, idempotency | ✅ done (API) |
 | 5 | Order tracking: realtime status, countdown + the owner **API** that moves it | ✅ done |
-| 6 | `apps/admin` — owner **screens** (incoming orders, status changes, menu) | |
-| 7 | Table booking (dine-in) + deposit | |
+| 6 | `apps/admin` — owner **screens** (incoming orders, status changes, menu) | ✅ done |
+| 7 | Table booking (dine-in) + deposit | ← current |
 | 8 | Favorites, search, filters, referrals, rewards | |
 | 9 | `apps/web` (Next.js) on the same API | |
 | 10 | `apps/admin` — admin screens (analytics, promos, management) | |
