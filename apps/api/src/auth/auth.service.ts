@@ -41,32 +41,60 @@ export class AuthService {
     return { sent: true, expiresIn };
   }
 
-  async verifyCode(dto: VerifyCodeDto): Promise<AuthResult> {
+  /**
+   * @param callerToken bearer token of the caller, if any. A guest presenting
+   *   their token has this same account upgraded instead of a second one being
+   *   created — otherwise everything they collected while browsing is orphaned.
+   */
+  async verifyCode(dto: VerifyCodeDto, callerToken: string | null = null): Promise<AuthResult> {
     const phone = normalizePhone(dto.phone);
     await this.otp.verify(phone, dto.code);
 
     const existing = await this.prisma.user.findUnique({ where: { phone } });
-    const isNewUser = existing === null;
+    const caller = await this.tokens.tryReadAccess(callerToken);
+    const guestId = caller?.isGuest ? caller.sub : null;
 
-    const user = existing
-      ? await this.prisma.user.update({
-          where: { id: existing.id },
-          // Verifying again also settles a previously unverified record, and
-          // lets the register screen fill in a name that was missing.
-          data: {
-            phoneVerified: true,
-            isGuest: false,
-            ...(dto.name && !existing.name ? { name: dto.name } : {}),
-          },
-        })
-      : await this.prisma.user.create({
-          data: {
-            phone,
-            phoneVerified: true,
-            name: dto.name ?? null,
-            role: 'customer',
-          },
-        });
+    let user: User;
+    let isNewUser: boolean;
+
+    if (existing) {
+      // The phone already has an account — sign into it. A guest session in
+      // flight is simply abandoned; merging two accounts' data is a product
+      // decision, not something to do implicitly here.
+      user = await this.prisma.user.update({
+        where: { id: existing.id },
+        // Verifying again also settles a previously unverified record, and
+        // lets the register screen fill in a name that was missing.
+        data: {
+          phoneVerified: true,
+          isGuest: false,
+          ...(dto.name && !existing.name ? { name: dto.name } : {}),
+        },
+      });
+      isNewUser = false;
+    } else if (guestId) {
+      user = await this.prisma.user.update({
+        where: { id: guestId },
+        data: {
+          phone,
+          phoneVerified: true,
+          isGuest: false,
+          ...(dto.name ? { name: dto.name } : {}),
+        },
+      });
+      isNewUser = true;
+      this.logger.log(`Guest ${guestId} upgraded to a verified account`);
+    } else {
+      user = await this.prisma.user.create({
+        data: {
+          phone,
+          phoneVerified: true,
+          name: dto.name ?? null,
+          role: 'customer',
+        },
+      });
+      isNewUser = true;
+    }
 
     const tokens = await this.tokens.issue(this.claimsFor(user));
     return { ...tokens, isNewUser, user: toPublicUser(user) };

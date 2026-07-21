@@ -25,6 +25,7 @@ const STATUS_CODE: Record<number, string> = {
   [HttpStatus.NOT_FOUND]: 'NOT_FOUND',
   [HttpStatus.CONFLICT]: 'CONFLICT',
   [HttpStatus.UNPROCESSABLE_ENTITY]: 'BUSINESS_RULE',
+  [HttpStatus.TOO_MANY_REQUESTS]: 'RATE_LIMITED',
 };
 
 @Catch()
@@ -63,7 +64,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const message = Array.isArray(obj.message)
         ? 'Validation failed'
         : String(obj.message ?? exception.message);
-      const details = Array.isArray(obj.message) ? { fields: obj.message } : undefined;
+
+      // Anything a thrower attached beyond the standard envelope keys is
+      // context the client needs (e.g. `retryAfter` on a 429) — forward it
+      // rather than silently dropping it.
+      const { message: _message, statusCode: _statusCode, error: _error, ...extra } = obj;
+      const details = Array.isArray(obj.message)
+        ? { fields: obj.message }
+        : Object.keys(extra).length > 0
+          ? extra
+          : undefined;
+
       return { error: { code, message, details } };
     }
 
