@@ -51,6 +51,39 @@
 - **Health check now also probes Redis** (`{"status":"ok","db":"up","redis":"up"}`).
 - **49 tests passing.** Covers OTP rules (hashing, single use, cooldown, attempt burning, per-phone scoping), phone normalisation, role/phone-verification guards, and env validation. Verified end-to-end against the running API: registration, wrong code, replay rejection, `/me` reads and writes, refresh rotation, old-token revocation, logout, and guest sessions.
 
+### Phase 1 review — three defects found and fixed
+
+A self-review of the auth code before building on top of it turned up three real
+problems, each confirmed against the running API before and after the fix:
+
+- **Security: a refresh token was accepted as an access token.** Both kinds are
+  signed with the same secret and nothing distinguished them, so a 30-day
+  refresh token worked as a bearer credential on any endpoint — and because it
+  carries no `role`, `RolesGuard` read `undefined` and would have waved it
+  through anything not naming an explicit role. Both token kinds now carry a
+  `typ` claim that is verified; tokens without one (older builds) are rejected.
+- **Guest upgrade never worked, though the docs said it did.** `verifyCode`
+  looked the user up by phone alone; a guest has none, so it always created a
+  *second* account and orphaned whatever the guest had collected. It now honours
+  an optional bearer on `verify-code` and upgrades that row in place. If the
+  phone already belongs to someone, the caller is signed into that account and
+  the guest session is abandoned rather than the two being merged implicitly.
+- **429 responses were mislabelled `INTERNAL_ERROR` and dropped `retryAfter`.**
+  `TOO_MANY_REQUESTS` was missing from the status→code map, and the error filter
+  rebuilt the body from `message` alone, discarding context the client was
+  documented to receive. Added `RATE_LIMITED`, and extra fields attached by a
+  thrower are now forwarded in `details`.
+
+Also closed a gap DEVELOPMENT_GUIDE.md mandates: **per-IP rate limiting on
+`auth/*`** (`@nestjs/throttler`, 120 req/min globally and 10/min on auth). The
+existing OTP cooldown is per phone number and does nothing against one host
+spraying thousands of different numbers. In-memory storage is fine for a single
+instance — switch to the Redis adapter before scaling out.
+
+**79 tests passing** (up from 49), including regression cover for each defect
+above. API_DOCUMENTATION.md updated with the error-code list, rate limits, token
+non-interchangeability, and the real guest-upgrade semantics.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

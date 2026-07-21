@@ -6,7 +6,15 @@ Common error response:
 ```json
 { "error": { "code": "VALIDATION_ERROR", "message": "…", "details": {} } }
 ```
-Status codes: 200/201 ok, 400 validation, 401 unauthorized, 403 forbidden, 404 not found, 409 conflict (e.g. slot taken), 422 business rule.
+Status codes: 200/201 ok, 400 validation, 401 unauthorized, 403 forbidden, 404 not found, 409 conflict (e.g. slot taken), 422 business rule, 429 rate limited.
+
+`code` values: `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`,
+`CONFLICT`, `BUSINESS_RULE`, `RATE_LIMITED`, `INTERNAL_ERROR`. `details` carries
+field errors as `{ "fields": [...] }` on validation failures, and any extra
+context the endpoint documents (e.g. `{ "retryAfter": 60 }` on a 429).
+
+**Rate limiting:** 120 requests/min per IP globally, 10/min on `/auth/*`.
+Exceeding either returns 429 `RATE_LIMITED`.
 
 ---
 
@@ -19,6 +27,10 @@ Status codes: 200/201 ok, 400 validation, 401 unauthorized, 403 forbidden, 404 n
 > may be called without a bearer token. Access tokens last 15 min, refresh
 > tokens 30 days and are **single-use** (rotated on every refresh, revocable at
 > logout).
+>
+> The two token kinds are **not interchangeable** — each carries a `typ` claim
+> and presenting a refresh token as a bearer credential is rejected with
+> `Not an access token`.
 
 ### POST /auth/send-code · *public*
 Send an OTP to the phone.
@@ -33,6 +45,12 @@ Verify the code, return tokens. Creates the account on first verification.
 - **Body:** `{ "phone": "+37499123456", "code": "1234", "name"?, "referralCode"? }`
 - **Response 200:** `{ "accessToken", "refreshToken", "isNewUser": true, "user": { … } }`
 - `name` is optional and used by the register branch of the auth screen.
+- **Accepts an optional `Authorization` header.** If a guest presents their
+  token and the phone is not yet taken, that same account is upgraded in place
+  (`isGuest → false`) so nothing they collected is lost. If the phone already
+  belongs to an account, the caller is signed into that one and the guest
+  session is abandoned — merging two populated accounts is a product decision,
+  not something done implicitly.
 - **401** wrong, expired or already-used code. The code is single-use, and is
   burned after 5 wrong attempts (a 4-digit code would otherwise be
   brute-forceable inside its window).
