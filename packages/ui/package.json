@@ -1,0 +1,9 @@
+{
+  "name": "@amragrir/ui",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Shared web UI primitives (Button, Input, Card, ...) reused by apps/web and apps/admin, per docs/COMPONENTS.md. Add components as those apps need them.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "@amragrir/web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Customer-facing web — Next.js. Public restaurant/menu pages need SEO, hence Next.js rather than a plain SPA."
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@amragrir/config",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Shared eslint/tsconfig/prettier bases for all apps and packages.",
+  "files": [
+    "tsconfig.base.json",
+    "eslint.config.mjs",
+    "prettier.config.mjs"
+  ]
+}

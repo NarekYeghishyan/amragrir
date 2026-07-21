@@ -1,0 +1,6 @@
+{
+  "name": "@amragrir/admin",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Internal back office — owner + admin roles in one RBAC-gated React+Vite SPA (no SEO/SSR need). Split into separate owner/admin apps later only if scale demands it."
+}

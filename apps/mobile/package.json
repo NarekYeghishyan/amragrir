@@ -1,0 +1,6 @@
+{
+  "name": "@amragrir/mobile",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Customer app — React Native + Expo. See docs/SCREENS.md, docs/USER_FLOW.md, docs/COMPONENTS.md."
+}
