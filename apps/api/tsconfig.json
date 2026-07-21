@@ -8,7 +8,9 @@
     "baseUrl": "./",
     "declaration": false,
     "composite": false,
-    "incremental": true,
+    // No `incremental`: combined with nest-cli's deleteOutDir it produces stale
+    // builds — dist is wiped while the cache says files are unchanged, so they
+    // are never re-emitted.
     "sourceMap": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
