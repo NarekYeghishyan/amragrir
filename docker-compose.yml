@@ -1,0 +1,43 @@
+# Local dev infrastructure for the Amragrir.am monorepo.
+# Start:  docker compose up -d
+# Stop:   docker compose down   (add -v to also drop the data volume)
+#
+# Credentials here are for LOCAL DEVELOPMENT ONLY. apps/api/.env.example points
+# DATABASE_URL / REDIS_URL at these services.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: amragrir_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: amragrir
+      POSTGRES_PASSWORD: amragrir
+      POSTGRES_DB: amragrir
+    ports:
+      - '5432:5432'
+    volumes:
+      - amragrir_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U amragrir -d amragrir']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: amragrir_redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - amragrir_redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  amragrir_pgdata:
+  amragrir_redisdata:
