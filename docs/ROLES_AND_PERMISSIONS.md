@@ -126,9 +126,18 @@ Implemented in `apps/api`:
   lets phone verification upgrade a guest in place rather than creating a
   second account.
 
+- **Ownership is enforced in the query, not by a guard.** Every order lookup
+  filters on `userId`, so there is no code path that loads someone else's
+  order and then decides. The consequence is deliberate: another user's order
+  returns **404, not 403** — a 403 would confirm the id exists.
+- **`@RequiresVerifiedPhone()` gates ordering and paying.** A guest may browse
+  and price a basket (`POST /cart/quote`) but gets 403 from `POST /orders`,
+  matching §1 above.
+
 Not implemented yet:
 
 - **`branchIds` in the JWT** — lands with the owner module, since nothing
   consumes branch scoping until then.
-- **Ownership guard** (own order/reservation/review) — lands with the orders
-  module, which introduces the first owned resources.
+- **Staff/owner order access** — reading and advancing orders for a branch
+  arrives with the owner panel; today only the customer side of an order
+  exists.

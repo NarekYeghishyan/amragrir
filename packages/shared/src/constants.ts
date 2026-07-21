@@ -31,3 +31,19 @@ export const DISTANCE_RANGE_KM = [0.5, 5] as const;
 
 /** OTP validity window, in seconds. */
 export const OTP_TTL_SECONDS = 120;
+
+// ── Ordering limits ─────────────────────────────────────────────────────────
+// [proposed] — no design value exists for these; they are the bounds that keep
+// a basket a basket. Confirm with product before launch.
+
+/** Maximum quantity of a single dish in one order. */
+export const ORDER_MAX_ITEM_QTY = 20;
+
+/** Maximum number of distinct dishes in one order. */
+export const ORDER_MAX_LINES = 50;
+
+/** How far ahead a pre-order may be scheduled, in days. */
+export const ORDER_MAX_LEAD_DAYS = 7;
+
+/** Fallback prep estimate when neither the dish nor the branch declares one, in minutes. */
+export const DEFAULT_PREP_MIN = 15;
