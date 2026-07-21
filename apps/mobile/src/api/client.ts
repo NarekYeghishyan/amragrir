@@ -47,6 +47,33 @@ interface RequestOptions {
   language?: string;
   /** Send the stored bearer. Default true; the auth endpoints opt out. */
   authenticated?: boolean;
+  /**
+   * Required by the money endpoints. The *caller* owns this value and must
+   * reuse it across retries of the same attempt — generating it here would
+   * mint a new key per call and defeat the whole mechanism.
+   */
+  idempotencyKey?: string;
+}
+
+/** Base URL as a WebSocket origin, for the order stream. */
+export function wsUrl(path: string): string {
+  return `${BASE_URL.replace(/^http/, 'ws')}${path}`;
+}
+
+/**
+ * A fresh idempotency key. Generated once per checkout attempt and kept, so a
+ * retry after a dropped connection replays rather than ordering twice.
+ */
+export function newIdempotencyKey(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) {
+    return uuid;
+  }
+  // Fallback for runtimes without WebCrypto. The key only has to be unique
+  // per user — the server namespaces it by account — so this is sufficient.
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}-${Math.random()
+    .toString(36)
+    .slice(2, 12)}`;
 }
 
 function buildUrl(path: string, query?: RequestOptions['query']): string {
@@ -64,7 +91,14 @@ function buildUrl(path: string, query?: RequestOptions['query']): string {
  * and screens deal in typed values and `ApiError` rather than raw responses.
  */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, query, language, authenticated = true } = options;
+  const {
+    method = 'GET',
+    body,
+    query,
+    language,
+    authenticated = true,
+    idempotencyKey,
+  } = options;
 
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) {
@@ -75,6 +109,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
   if (authenticated && accessToken) {
     headers.Authorization = `Bearer ${accessToken}`;
+  }
+  if (idempotencyKey) {
+    headers['Idempotency-Key'] = idempotencyKey;
   }
 
   let response: Response;

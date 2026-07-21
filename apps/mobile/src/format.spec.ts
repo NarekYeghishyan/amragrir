@@ -1,4 +1,51 @@
-import { formatAmd, formatDistance, formatPriceLevel } from './format';
+import {
+  formatAmd,
+  formatCountdown,
+  formatDistance,
+  formatOrderStatus,
+  formatPriceLevel,
+  formatTime,
+} from './format';
+
+describe('formatCountdown', () => {
+  it.each([
+    [480, '8:00'],
+    [61, '1:01'],
+    [9, '0:09'],
+    [0, '0:00'],
+  ])('renders %ds as %s', (seconds, expected) => {
+    expect(formatCountdown(seconds)).toBe(expected);
+  });
+
+  it('never shows a negative countdown for a late order', () => {
+    expect(formatCountdown(-30)).toBe('0:00');
+  });
+
+  it('is null when there is nothing to count', () => {
+    // A ready or finished order has no time left; rendering "0:00" forever
+    // would read as a stuck timer.
+    expect(formatCountdown(null)).toBeNull();
+  });
+});
+
+describe('formatOrderStatus', () => {
+  it('turns a status value into a label', () => {
+    expect(formatOrderStatus('almost_ready')).toBe('Almost ready');
+    expect(formatOrderStatus('preparing')).toBe('Preparing');
+  });
+});
+
+describe('formatTime', () => {
+  it('is null for a missing or unparseable time', () => {
+    expect(formatTime(null)).toBeNull();
+    expect(formatTime('not a date')).toBeNull();
+  });
+
+  it('renders zero-padded local hours and minutes', () => {
+    const iso = new Date(2026, 6, 21, 9, 5).toISOString();
+    expect(formatTime(iso)).toBe('09:05');
+  });
+});
 
 describe('formatAmd', () => {
   // Money arrives as an integer in dram and is only ever formatted, never
