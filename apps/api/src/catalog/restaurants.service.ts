@@ -3,8 +3,19 @@ import { Prisma } from '@prisma/client';
 import { Language } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { localize, type I18nField } from '../common/i18n';
-import { distanceKm, roundKm } from './geo';
+import { boundingBox, distanceKm, roundKm } from './geo';
 import { ListRestaurantsDto, MenuQueryDto, RestaurantSort } from './dto';
+
+/**
+ * Implicit radius for `sort=nearest` when the caller sets no `distMax`. This is
+ * an order-ahead product — a branch 40 km away is not a result anyone wants —
+ * and without a bound the query degenerates into a full scan. Matches the top
+ * of the design's distance filter (DISTANCE_RANGE_KM).
+ */
+const NEAREST_RADIUS_KM = 5;
+
+/** Backstop on how many rows a distance query may materialise. */
+const MAX_DISTANCE_CANDIDATES = 500;
 
 export interface RestaurantListItem {
   id: string;
@@ -20,6 +31,39 @@ export interface RestaurantListItem {
   services: string[];
   reservationsEnabled: boolean;
   coverUrl: string | null;
+}
+
+export interface RestaurantDetail {
+  id: string;
+  restaurantId: string;
+  slug: string;
+  name: string;
+  cuisine: string | null;
+  priceLevel: number | null;
+  rating: number;
+  reviewsCount: number;
+  services: string[];
+  reservationsEnabled: boolean;
+  coverUrl: string | null;
+  branch: {
+    id: string;
+    name: string | null;
+    address: string | null;
+    city: string;
+    lat: number | null;
+    lng: number | null;
+    phone: string | null;
+    openHours: unknown;
+    isOpen: boolean;
+    prepMin: number | null;
+  };
+}
+
+export interface TableDto {
+  id: string;
+  tableNo: string;
+  seats: number;
+  zone: string | null;
 }
 
 export interface MenuItemDto {
@@ -51,46 +95,67 @@ export class RestaurantsService {
    */
   async list(
     query: ListRestaurantsDto,
-    language: Language,
+    _language: Language,
   ): Promise<{ items: RestaurantListItem[]; total: number; page: number }> {
-    const where = this.buildWhere(query);
-
+    const origin = this.origin(query);
     // Distance is computed in the app (see geo.ts), so a distance filter or
-    // sort has to be applied before paging — fetch the filtered set, then page.
+    // sort has to be applied before paging — fetch the candidate set, then page.
     const usesDistance =
-      query.lat !== undefined &&
-      query.lng !== undefined &&
-      (query.sort === RestaurantSort.Nearest || query.distMax !== undefined);
+      origin !== null && (query.sort === RestaurantSort.Nearest || query.distMax !== undefined);
 
+    const radiusKm = usesDistance ? (query.distMax ?? NEAREST_RADIUS_KM) : undefined;
+    const where = this.buildWhere(query, origin && radiusKm ? { origin, radiusKm } : undefined);
+
+    if (!usesDistance) {
+      const [rows, total] = await Promise.all([
+        this.prisma.restaurantBranch.findMany({
+          where,
+          include: { restaurant: true },
+          orderBy: this.orderBy(query.sort),
+          ...this.pageArgs(query),
+        }),
+        this.prisma.restaurantBranch.count({ where }),
+      ]);
+      return { items: rows.map((row) => this.toListItem(row, origin)), total, page: query.page };
+    }
+
+    // The bounding box above already narrows this in SQL; the cap is a backstop
+    // so a dense city can never materialise an unbounded result set.
     const rows = await this.prisma.restaurantBranch.findMany({
       where,
       include: { restaurant: true },
-      ...(usesDistance ? {} : this.pageArgs(query)),
-      ...(usesDistance ? {} : { orderBy: this.orderBy(query.sort) }),
+      orderBy: this.orderBy(query.sort),
+      take: MAX_DISTANCE_CANDIDATES,
     });
 
-    let items = rows.map((row) => this.toListItem(row, query, language));
+    // Filter on the true distance, not the rounded display value, so a branch
+    // just outside the radius cannot round its way in.
+    let scored = rows
+      .map((row) => ({ row, km: this.exactDistanceKm(row, origin) }))
+      .filter(({ km }) => km !== null && km <= radiusKm!);
 
-    if (usesDistance) {
-      if (query.distMax !== undefined) {
-        items = items.filter((i) => i.distanceKm !== null && i.distanceKm <= query.distMax!);
-      }
-      if (query.sort === RestaurantSort.Nearest) {
-        items.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
-      }
-      const total = items.length;
-      const start = (query.page - 1) * query.limit;
-      return { items: items.slice(start, start + query.limit), total, page: query.page };
+    if (query.sort === RestaurantSort.Nearest) {
+      scored.sort((a, b) => a.km! - b.km!);
     }
+    // Any other sort keeps the database ordering applied above, which the
+    // stable `Array.prototype.sort` and the untouched order both preserve.
 
-    const total = await this.prisma.restaurantBranch.count({ where });
-    return { items, total, page: query.page };
+    const total = scored.length;
+    const start = (query.page - 1) * query.limit;
+    scored = scored.slice(start, start + query.limit);
+
+    return {
+      items: scored.map(({ row }) => this.toListItem(row, origin)),
+      total,
+      page: query.page,
+    };
   }
 
-  async findOne(idOrSlug: string, language: Language): Promise<Record<string, unknown>> {
+  async findOne(idOrSlug: string, _language: Language): Promise<RestaurantDetail> {
     const branch = await this.prisma.restaurantBranch.findFirst({
       where: this.identityWhere(idOrSlug),
       include: { restaurant: true },
+      orderBy: RestaurantsService.BRANCH_PICK_ORDER,
     });
 
     if (!branch) {
@@ -122,9 +187,6 @@ export class RestaurantsService {
         isOpen: branch.isOpen,
         prepMin: branch.avgPrepMin,
       },
-      // Language is resolved for the caller even though these columns are not
-      // localised yet — keeps the contract stable if they become so.
-      language,
     };
   }
 
@@ -161,14 +223,18 @@ export class RestaurantsService {
     };
   }
 
-  async tables(idOrSlug: string): Promise<{ tables: unknown[] }> {
+  async tables(idOrSlug: string): Promise<{ tables: TableDto[] }> {
     const branch = await this.resolveBranch(idOrSlug);
 
     const tables = await this.prisma.table.findMany({
       where: { branchId: branch.id, isActive: true },
-      orderBy: { tableNo: 'asc' },
       select: { id: true, tableNo: true, seats: true, zone: true },
     });
+
+    // `table_no` is a varchar, so ordering it in SQL puts "10" before "2".
+    // Sort numerically when both sides are numbers, alphabetically otherwise
+    // (a branch may label tables "A1", "Terrace-2").
+    tables.sort((a, b) => compareTableNo(a.tableNo, b.tableNo));
 
     return { tables };
   }
@@ -177,6 +243,7 @@ export class RestaurantsService {
     const branch = await this.prisma.restaurantBranch.findFirst({
       where: this.identityWhere(idOrSlug),
       select: { id: true },
+      orderBy: RestaurantsService.BRANCH_PICK_ORDER,
     });
     if (!branch) {
       throw new NotFoundException('Restaurant not found');
@@ -192,7 +259,21 @@ export class RestaurantsService {
       : { restaurant: { slug: idOrSlug } };
   }
 
-  private buildWhere(query: ListRestaurantsDto): Prisma.RestaurantBranchWhereInput {
+  /**
+   * Deterministic tie-break for the lookups above. A restaurant id or slug can
+   * match several branches, and `findFirst` without an order returns whichever
+   * row the database happens to yield — so the same URL could serve a
+   * different branch's menu and prices on each request.
+   */
+  private static readonly BRANCH_PICK_ORDER: Prisma.RestaurantBranchOrderByWithRelationInput[] = [
+    { createdAt: 'asc' },
+    { id: 'asc' },
+  ];
+
+  private buildWhere(
+    query: ListRestaurantsDto,
+    bounds?: { origin: { lat: number; lng: number }; radiusKm: number },
+  ): Prisma.RestaurantBranchWhereInput {
     const restaurant: Prisma.RestaurantWhereInput = {};
 
     if (query.minRating !== undefined) {
@@ -226,6 +307,15 @@ export class RestaurantsService {
       where.menuItems = { some: menuItem };
     }
 
+    // Narrow a distance query in SQL so the app never scans the whole table
+    // to answer "near me". Corners of the box are trimmed by the exact
+    // distance check afterwards.
+    if (bounds) {
+      const box = boundingBox(bounds.origin, bounds.radiusKm);
+      where.lat = { gte: box.minLat, lte: box.maxLat };
+      where.lng = { gte: box.minLng, lte: box.maxLng };
+    }
+
     return where;
   }
 
@@ -248,22 +338,31 @@ export class RestaurantsService {
     return { skip: (query.page - 1) * query.limit, take: query.limit };
   }
 
+  /** Caller coordinates, or null when the request supplied only one of the pair. */
+  private origin(query: ListRestaurantsDto): { lat: number; lng: number } | null {
+    return query.lat !== undefined && query.lng !== undefined
+      ? { lat: query.lat, lng: query.lng }
+      : null;
+  }
+
+  /** True (unrounded) distance in km, or null when either side lacks coordinates. */
+  private exactDistanceKm(
+    row: BranchWithRestaurant,
+    origin: { lat: number; lng: number } | null,
+  ): number | null {
+    if (!origin || row.lat === null || row.lng === null) {
+      return null;
+    }
+    return distanceKm(origin, { lat: Number(row.lat), lng: Number(row.lng) });
+  }
+
   private toListItem(
     row: BranchWithRestaurant,
-    query: ListRestaurantsDto,
-    _language: Language,
+    origin: { lat: number; lng: number } | null,
   ): RestaurantListItem {
     const { restaurant } = row;
-
-    let distance: number | null = null;
-    if (query.lat !== undefined && query.lng !== undefined && row.lat !== null && row.lng !== null) {
-      distance = roundKm(
-        distanceKm(
-          { lat: query.lat, lng: query.lng },
-          { lat: Number(row.lat), lng: Number(row.lng) },
-        ),
-      );
-    }
+    const exact = this.exactDistanceKm(row, origin);
+    const distance = exact === null ? null : roundKm(exact);
 
     return {
       id: row.id,
@@ -286,4 +385,17 @@ export class RestaurantsService {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(value: string): boolean {
   return UUID.test(value);
+}
+
+/** Numeric where possible so "2" precedes "10"; falls back to locale compare. */
+export function compareTableNo(a: string, b: string): number {
+  const na = Number(a);
+  const nb = Number(b);
+  if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) {
+    return na - nb;
+  }
+  if (Number.isFinite(na) !== Number.isFinite(nb)) {
+    return Number.isFinite(na) ? -1 : 1;
+  }
+  return a.localeCompare(b, undefined, { numeric: true });
 }

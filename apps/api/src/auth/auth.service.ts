@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Role } from '@amragrir/shared';
-import type { User } from '@prisma/client';
+import { Prisma, type User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OtpService } from './otp.service';
 import { JwtPayload, TokenPair, TokenService } from './token.service';
@@ -85,15 +85,27 @@ export class AuthService {
       isNewUser = true;
       this.logger.log(`Guest ${guestId} upgraded to a verified account`);
     } else {
-      user = await this.prisma.user.create({
-        data: {
-          phone,
-          phoneVerified: true,
-          name: dto.name ?? null,
-          role: 'customer',
-        },
-      });
-      isNewUser = true;
+      // The find-then-create above is not atomic: two requests carrying the
+      // same valid code race, both see no account, and the loser hits the
+      // unique index on `phone`. Fall back to reading the row the winner
+      // created rather than surfacing a 500.
+      try {
+        user = await this.prisma.user.create({
+          data: {
+            phone,
+            phoneVerified: true,
+            name: dto.name ?? null,
+            role: 'customer',
+          },
+        });
+        isNewUser = true;
+      } catch (err) {
+        if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') {
+          throw err;
+        }
+        user = await this.prisma.user.findUniqueOrThrow({ where: { phone } });
+        isNewUser = false;
+      }
     }
 
     const tokens = await this.tokens.issue(this.claimsFor(user));
