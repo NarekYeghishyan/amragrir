@@ -201,9 +201,9 @@ depends on it — build thin vertical slices, not horizontal layers.
 |---|---|---|
 | 0 | API foundation: NestJS, Prisma schema, Postgres/Redis, health, seed | ✅ done |
 | 1 | Auth: OTP, JWT sessions, guards, `/me` | ✅ done |
-| 2 | Catalog (read-only): categories, restaurants, branches, menu | ← current |
-| 3 | First mobile slice: auth → home → restaurant → menu on the real API | |
-| 4 | Basket + orders (pickup), payment, idempotency | |
+| 2 | Catalog (read-only): categories, restaurants, branches, menu | ✅ done |
+| 3 | First mobile slice: auth → home → restaurant → menu on the real API | ✅ done |
+| 4 | Basket + orders (pickup), payment, idempotency | ← current |
 | 5 | Order tracking: realtime status, countdown | |
 | 6 | `apps/admin` — owner screens (incoming orders, status changes, menu) | |
 | 7 | Table booking (dine-in) + deposit | |

@@ -144,6 +144,25 @@ thrower attaches (it needs a decision on whitelisting versus the current
 convenience), and the catalog DTO tests still bypass class-transformer, so the
 query-array parsing has no direct coverage.
 
+### Phase 3 — First mobile slice
+
+`apps/mobile` is now a real Expo app (SDK 57, expo-router) rendering live data
+from the API: **auth → home → restaurant → menu**.
+
+- **Read the versioned Expo docs rather than writing from memory.** The template ships an `AGENTS.md` warning that Expo has changed; SDK 57 pairs React 19.2 with React Native 0.86, and the router setup was taken from the current installation guide instead of an older recollection.
+- **Screens:** `index` (greeting, category rail, nearby restaurants sorted by distance), `auth` (phone → OTP, two steps), `restaurant/[id]` (cover, rating, hours, menu tabs backed by `MenuTab` from `@amragrir/shared`).
+- **`src/theme`** transcribes DESIGN_SYSTEM.md into tokens with a `ThemeColors` interface, so adding a colour to one theme without the other is a compile error rather than an `undefined` at runtime. Components read `useTheme()`; no raw hex anywhere else.
+- **`src/api`** is the only place that talks to the server: it decodes the error envelope into a single `ApiError` type (network failures included, so screens have one error shape), and exposes typed calls rather than letting screens build URLs.
+- **A guest session is created on launch**, so browsing works before sign-in; verifying a phone sends that bearer along and the server upgrades the same account. Token persistence is deliberately absent — it needs secure storage, which lands with checkout.
+- **Money is formatted, never computed** on the client, per DEVELOPMENT_GUIDE.md.
+- **14 tests** on the display helpers, and the app **bundles cleanly (788 modules)** — which is what proves `@amragrir/shared` resolves through pnpm's symlinks in Metro, the one genuinely uncertain part of the setup.
+- **`pnpm` now has to be a real binary on PATH.** Both Turborepo and `expo install` shell out to it and fail with the corepack shim; installing it globally also cleared the `turbo run build` "known issue" recorded earlier.
+
+**Not verified:** rendering, navigation and gestures on a device or simulator —
+that needs a human to run `pnpm --filter @amragrir/mobile dev`. Every endpoint
+the app calls was exercised directly, and the bundle builds, but no screen has
+been seen on screen.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

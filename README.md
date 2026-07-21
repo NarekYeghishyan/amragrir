@@ -21,9 +21,10 @@ packages/
 └── config/   # eslint/tsconfig/prettier bases
 ```
 
-**Status:** `apps/api` is scaffolded (Phase 0 — foundation: NestJS + Prisma
-schema + health + docker-compose + seed). `apps/mobile`, `apps/web`,
-`apps/admin` are still placeholder READMEs with their scaffold commands. See
+**Status:** `apps/api` runs (foundation, auth, public catalog) and
+`apps/mobile` has its first slice (auth → home → restaurant → menu against the
+real API). `apps/web` and `apps/admin` are still placeholder READMEs with their
+scaffold commands. See
 [docs/DEVELOPMENT_GUIDE.md](./docs/DEVELOPMENT_GUIDE.md) for the full
 architecture and build order.
 
@@ -35,16 +36,15 @@ docker compose up -d                 # Postgres + Redis (needs Docker Desktop)
 ```
 
 Then follow [apps/api/README.md](./apps/api/README.md) to migrate, seed and run
-the backend (`GET http://localhost:3000/v1/health` to smoke-test).
+the backend (`GET http://localhost:3000/v1/health` to smoke-test), and
+[apps/mobile/README.md](./apps/mobile/README.md) to start the app against it.
 
 ## Tooling
 
-pnpm workspaces + Turborepo.
+pnpm workspaces + Turborepo. **pnpm must be on PATH as a real binary**
+(`npm i -g pnpm`) — Turborepo and `expo install` both shell out to it and fail
+with a corepack shim.
 
-- Package scripts run per-package: `corepack pnpm --filter @amragrir/api <script>`.
+- Package scripts run per-package: `pnpm --filter @amragrir/api <script>`.
 - `allowBuilds` in `pnpm-workspace.yaml` whitelists Prisma's install scripts
   (pnpm blocks postinstall by default).
-- **Known issue:** `turbo run build` fails with *"Unable to find package
-  manager binary"* when pnpm is provided only through the corepack shim. Until
-  pnpm is on PATH as a real binary (`corepack enable` with admin rights, or a
-  global install), run builds per-package with `--filter` instead.
