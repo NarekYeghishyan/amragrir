@@ -3,9 +3,19 @@
   "private": true,
   "version": "0.0.0",
   "description": "Shared eslint/tsconfig/prettier bases for all apps and packages.",
+  "type": "module",
+  "exports": {
+    "./eslint": "./eslint.config.mjs",
+    "./prettier": "./prettier.config.mjs",
+    "./tsconfig.base.json": "./tsconfig.base.json"
+  },
   "files": [
     "tsconfig.base.json",
     "eslint.config.mjs",
     "prettier.config.mjs"
-  ]
+  ],
+  "dependencies": {
+    "@eslint/js": "^9.18.0",
+    "typescript-eslint": "^8.20.0"
+  }
 }
