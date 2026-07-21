@@ -8,6 +8,7 @@ import { RedisModule } from './redis/redis.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { CatalogModule } from './catalog/catalog.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 
@@ -26,6 +27,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     RedisModule,
     AuthModule,
     UsersModule,
+    CatalogModule,
     HealthModule,
   ],
   providers: [

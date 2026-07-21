@@ -86,8 +86,62 @@ apps/mobile/
 ### Backend
 - All money calculations (subtotal, service fee, deposit, total) — **on the server**; do not trust the client.
 - Business-rule checks before mutation: slot availability, capacity, working hours, restaurant status, status transitions (state machine).
-- DB migrations versioned; dev seeds (4 restaurants, menu, categories from the design).
+- DB migrations versioned; dev seeds cover the design's fixtures (categories, restaurants, menu, tables).
 - Logging, rate-limit on `auth/*`, OTP TTL in Redis (120s).
+
+### API conventions
+
+These are contracts, not preferences — clients depend on them. Full reference
+in API_DOCUMENTATION.md.
+
+- **Every route lives under `/v1`.** Breaking a published response shape means a
+  new version, not an edit.
+- **One error envelope everywhere:** `{ "error": { code, message, details? } }`,
+  produced centrally by `AllExceptionsFilter` — never hand-roll an error body in
+  a controller. `code` is a stable machine-readable string; `message` is for
+  humans and may change; `details` carries field errors (`{ fields: [...] }`) or
+  documented extras (`{ retryAfter }`).
+- **Status codes carry meaning:** 400 validation · 401 unauthenticated ·
+  403 authenticated-but-not-allowed · 404 missing · 409 conflict (slot taken,
+  duplicate email) · 422 business rule violated · 429 rate limited.
+- **Secure by default:** `JwtAuthGuard` is global; a new endpoint is protected
+  unless it declares `@Public()`. Never disable the guard globally to "make it
+  work" — mark the specific route.
+- **List endpoints paginate** and return `{ items, total, page }`. Always cap
+  `limit` server-side; an uncapped list is a denial-of-service waiting to happen.
+- **Localised columns** (`name_i18n`, `desc_i18n`) are resolved **server-side**
+  from `Accept-Language`, falling back to `hy`. Clients receive a plain string,
+  never the raw JSON blob.
+- **Never return internals.** No stack traces, driver errors, or connection
+  strings in responses — the exception filter collapses unknown errors to a
+  generic 500.
+
+### Security baseline
+
+- **Never trust the client** for amounts, roles, ownership, or prices. Re-read
+  and recompute server-side.
+- **Distinguish token kinds.** Access and refresh tokens are signed with the
+  same secret, so each carries a `typ` claim that is verified. Without it a
+  long-lived refresh token works as a bearer credential.
+- **Refresh tokens are single-use and revocable** (registered in Redis by id).
+  A signed token you cannot revoke stays valid until it expires.
+- **Secrets and codes are never stored in a readable form** — OTP codes are
+  hashed at rest so a cache dump does not hand over live logins.
+- **Rate-limit anything unauthenticated and anything that costs money** (SMS).
+  Per-resource cooldowns are not a substitute for a per-IP ceiling: a per-phone
+  cooldown does nothing against one host spraying thousands of numbers.
+- **Config fails fast.** Required env vars are validated at boot; the process
+  refuses to start rather than failing at the first request.
+- **No PII in logs.** Phone numbers are masked (`+374******56`). Logs get IDs,
+  not personal data.
+
+### Observability
+
+- `GET /v1/health` reports liveness plus each dependency (`db`, `redis`) and
+  stays **200 with a `down` marker** rather than throwing — an orchestrator must
+  be able to tell "process up, dependency unreachable" from a crash.
+- Log at the boundary of meaningful operations with identifiers that allow
+  tracing a request; keep bodies and credentials out.
 
 ### Frontend
 - Screen = container (data/navigation) + presentational components (props).
@@ -96,24 +150,80 @@ apps/mobile/
 - Skeletons for all loads (pattern from the design).
 - Accessibility: hit target ≥ 44px, contrast, dark-theme support.
 
+### Testing
+
+- **Test business rules, not the framework.** Value is in "the deposit is
+  credited, not charged", "a used OTP cannot be replayed", "a guest cannot
+  order" — not in proving that Nest injects a dependency.
+- **A green build is not a working app.** `typecheck` and `build` pass on code
+  that cannot boot: a mistyped env var, a stale compiled artifact, a missing
+  runtime import. Before calling anything done, **run it and exercise the real
+  endpoint.** Both of Phase 0's boot failures passed CI-grade checks.
+- **Every bug fix gets a regression test** that fails on the old code, with a
+  comment saying what broke — that comment is why the test may not be deleted.
+- Levels: unit for service rules (fast, mock the DB), e2e for critical flows
+  (order, booking, payment). Prefer a handful of meaningful e2e tests over
+  many shallow ones.
+
 ### Git / process
-- Branches: `feat/*`, `fix/*`, `chore/*`; PR with review.
+- Branches: `feat/*`, `fix/*`, `chore/*`; PR with review. Do not commit to
+  `main` directly.
 - Conventional commits. CI: lint + typecheck + tests.
-- Tests: unit (services), e2e (critical flows: order, booking, payment).
+- Commit messages explain **why**, not what — the diff already shows what.
 
 ---
 
-## 4. Implementation priorities (roadmap)
+## 4. Definition of Done
 
-1. **Customer MVP:** auth+OTP, catalog, restaurant+menu, basket, pre-order (pickup), checkout, payment, tracking, orders.
-2. Table booking (dine-in) + deposit.
-3. Favorites, search, filters, referrals, rewards.
-4. `apps/admin` — owner-facing screens first (orders, menu, tables, reservations) — needed early to seed demo restaurants/menus for 1–3.
-5. `apps/admin` — admin-only screens (analytics, promos, user/restaurant management).
+A change is done when **all** of these hold. "It compiles" is not on the list.
+
+1. Business rules checked against BUSINESS_LOGIC.md; permissions enforced on
+   the backend, not just hidden in the UI.
+2. Input validated at the boundary (DTO + `class-validator`).
+3. Types, statuses and constants come from `packages/shared` — nothing
+   redeclared as a string literal.
+4. `lint`, `typecheck` and `test` all pass.
+5. New rules have tests; fixed bugs have regression tests.
+6. **The running app was exercised** — the actual endpoint or screen, not just
+   the test suite.
+7. Affected docs updated per AI_CONTEXT.md's sync map, plus a CHANGELOG.md entry.
+8. Anything deliberately left out is written down (in the docs, not only in the
+   commit) so a gap is not mistaken for an oversight.
+
+---
+
+## 5. Implementation priorities (roadmap)
+
+Order is chosen so each step can be exercised end-to-end before the next
+depends on it — build thin vertical slices, not horizontal layers.
+
+| # | Scope | Status |
+|---|---|---|
+| 0 | API foundation: NestJS, Prisma schema, Postgres/Redis, health, seed | ✅ done |
+| 1 | Auth: OTP, JWT sessions, guards, `/me` | ✅ done |
+| 2 | Catalog (read-only): categories, restaurants, branches, menu | ← current |
+| 3 | First mobile slice: auth → home → restaurant → menu on the real API | |
+| 4 | Basket + orders (pickup), payment, idempotency | |
+| 5 | Order tracking: realtime status, countdown | |
+| 6 | `apps/admin` — owner screens (incoming orders, status changes, menu) | |
+| 7 | Table booking (dine-in) + deposit | |
+| 8 | Favorites, search, filters, referrals, rewards | |
+| 9 | `apps/web` (Next.js) on the same API | |
+| 10 | `apps/admin` — admin screens (analytics, promos, management) | |
+
+Rationale for the two orderings that are easy to get wrong:
+
+- **Catalog before any client.** A client with nothing real to render proves
+  nothing; the seed already provides data for it.
+- **Owner screens before dine-in.** Once real orders exist, a human has to move
+  them through their statuses, otherwise nothing ever reaches `ready`.
 
 ### Open questions (confirm with product)
 - Exact `ready_at` calculation by kitchen load.
 - Deposit refund / no-show policy.
 - Reward points accrual rates.
-- SMS and acquiring provider for Armenia.
+- SMS and acquiring provider for Armenia — the app depends on a `SmsSender`
+  interface, so choosing one is a provider swap, not a rewrite.
 - Referral discount stacking rules (up to 25%).
+- Price-per-person filter (design: 4000–24000֏) has no backing column; it needs
+  either a stored average or derivation from menu prices.

@@ -52,13 +52,14 @@ src/
 ├── sms/              # SmsSender interface + dev console sender
 ├── auth/             # OTP, JWT issue/rotate, guards, decorators
 ├── users/            # GET/PATCH /me, settings, language
+├── catalog/          # public: categories, restaurants, menu, tables
 ├── health/           # GET /v1/health (liveness + DB/Redis reachability)
-└── common/filters/   # AllExceptionsFilter — { error: { code, message, details } }
+└── common/           # error filter, i18n resolution
 ```
 
-Modules to come, per DEVELOPMENT_GUIDE.md §2: `restaurants`, `branches`,
-`menu`, `categories`, `cart`, `orders`, `reservations`, `payments`,
-`favorites`, `referrals`, `reviews`, `notifications`, `owner`, `admin`.
+Modules to come, per DEVELOPMENT_GUIDE.md §2: `cart`, `orders`, `reservations`,
+`payments`, `favorites`, `referrals`, `reviews`, `notifications`, `owner`,
+`admin`.
 
 ## Auth notes
 

@@ -115,9 +115,26 @@ with the referrals module (see BUSINESS_LOGIC.md §7).
 
 ## Restaurants
 
+> **Implemented and public** — no token required at all. Browsing is open to
+> unauthenticated visitors (ROLES_AND_PERMISSIONS.md) and the web app needs
+> these pages crawlable.
+>
+> Each item is a **branch**: that is what a guest travels to, and what carries
+> hours, coordinates and prep time. `id` is the branch id; `slug` identifies the
+> restaurant. Localised fields are resolved from `Accept-Language` (default `hy`).
+
 ### GET /restaurants
 Nearby list with filters (Home feed).
-- **Query:** `lat, lng, sort(recommended|nearest|fastest|top_rated), priceMax, distMax, minRating, dietary[]=vegan…, service[]=pickup|dine_in|reserve, category, q, page, limit`
+- **Query:** `lat, lng, sort(recommended|nearest|fastest|top_rated), distMax, minRating, dietary[]=vegan…, service[]=pickup|dinein|reserve, category, q, page, limit`
+- Array params accept either `?dietary=vegan,halal` or repeated `?dietary=vegan&dietary=halal`.
+- `distanceKm` is `null` unless `lat`/`lng` are supplied; `distMax` and
+  `sort=nearest` are ignored without them (`nearest` then falls back to the
+  default ordering rather than inventing one).
+- `category` and `dietary` select restaurants having **at least one matching
+  menu item**, not attributes of the restaurant row.
+- `limit` is capped at **50**; exceeding it is a 400.
+- **`priceMax` is not implemented** — the design's price-per-person filter has
+  no backing column (see DEVELOPMENT_GUIDE.md open questions).
 - **Response 200:**
 ```json
 { "items": [ {
@@ -129,22 +146,28 @@ Nearby list with filters (Home feed).
 
 ### GET /restaurants/{id}
 Restaurant profile + branch.
-- **Response 200:** restaurant object + `branch { address, lat, lng, openHours, isOpen }`.
+- `{id}` accepts a **branch id, a restaurant id, or a restaurant slug** —
+  clients hold whichever the previous screen supplied.
+- **Response 200:** restaurant object + `branch { id, name, address, city, lat, lng, phone, openHours, isOpen, prepMin }`.
+- **404** if nothing matches.
 
 ### GET /restaurants/{id}/menu
 - **Query:** `menuTab=popular|mains|sides|drinks, category`
+- `name` and `desc` are resolved from `Accept-Language`; clients never see the
+  raw `*_i18n` JSON.
 - **Response 200:**
 ```json
 { "items": [ { "id","name","desc","priceAmd":5800,"caloriesKcal":520,
-  "prepMin":12,"photoUrl","dietaryTags":["vegetarian"],"isAvailable":true } ] }
+  "prepMin":12,"photoUrl","dietaryTags":["vegetarian"],"isAvailable":true,
+  "menuTab":"popular","categoryId" } ] }
 ```
 
 ### GET /restaurants/{id}/tables
-Tables (for dine-in).
+Tables (for dine-in). Inactive tables are omitted.
 - **Response 200:** `{ "tables": [ { "id","tableNo":"12","seats":4,"zone" } ] }`
 
-### GET /restaurants/{id}/availability
-Available slots for a date.
+### GET /restaurants/{id}/availability — **not implemented**
+Available slots for a date. Lands with the reservations module.
 - **Query:** `date=YYYY-MM-DD, guests=2, mode=dine_in|pickup`
 - **Response 200:**
 ```json
@@ -157,8 +180,9 @@ Available slots for a date.
 
 ## Categories / Search
 
-### GET /categories
-- **Response 200:** `{ "items": [ { "key":"sushi","icon":"🍣","name":"Sushi" } ] }`
+### GET /categories · *implemented, public*
+Ordered by `sortOrder`. `name` is resolved from `Accept-Language` (default `hy`).
+- **Response 200:** `{ "items": [ { "id","key":"sushi","icon":"🍣","name":"Sushi" } ] }`
 
 ### GET /search
 - **Query:** `q, lat, lng`
