@@ -10,6 +10,22 @@ export interface PaymentProvider {
   charge(request: ChargeRequest): Promise<ChargeResult>;
   /** Returns the money for an already-captured charge. */
   refund(providerRef: string | null, amountAmd: number): Promise<void>;
+
+  /**
+   * Holds an amount without taking it — what a table deposit actually is
+   * (BUSINESS_LOGIC.md §3: authorized at booking, captured or released later).
+   *
+   * Distinct from `charge` because the difference is the product promise: a
+   * guest who cancels in time never had the money taken, and a hold that
+   * expires costs them nothing. Every real acquirer models this separately.
+   */
+  authorize(request: ChargeRequest): Promise<ChargeResult>;
+
+  /** Takes a previously authorized amount. */
+  capture(providerRef: string | null, amountAmd: number): Promise<void>;
+
+  /** Lets an authorization go without taking anything. */
+  release(providerRef: string | null): Promise<void>;
 }
 
 export interface ChargeRequest {

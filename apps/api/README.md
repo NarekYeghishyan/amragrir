@@ -54,7 +54,8 @@ src/
 ├── users/            # GET/PATCH /me, settings, language
 ├── catalog/          # public: categories, restaurants, menu, tables
 ├── orders/           # cart quote, orders (pickup), pricing, codes, WS gateway
-├── payments/         # PaymentProvider interface + dev provider, /payments
+├── payments/         # PaymentProvider interface + dev provider, /payments, deposits
+├── reservations/     # availability, table booking, deposit lifecycle
 ├── owner/            # kitchen queue, status transitions, branches, menu CRUD
 ├── health/           # GET /v1/health (liveness + DB/Redis reachability)
 └── common/           # error filter, i18n resolution, idempotency interceptor
@@ -90,8 +91,17 @@ To move an order through the kitchen locally, sign in as the seeded owner
   Add `@Idempotent(scope)` to any new endpoint that creates money or an
   obligation; the interceptor is registered globally and inert without it.
 - **The dev payment provider approves everything** and logs it. Send
-  `"token": "decline"` to force a decline and exercise the failure path.
-  Replace the `useClass` in `PaymentsModule` when an acquirer is chosen.
+  `"token": "decline"` (or `depositToken` when booking) to force a decline and
+  exercise the failure path. Replace the `useClass` in `PaymentsModule` when an
+  acquirer is chosen.
+- **Deposits are holds, not sales** — `DepositsService` uses
+  `authorize`/`capture`/`release`, and `depositOutcomeFor` in
+  `@amragrir/shared` decides which applies. Do not add a second copy of that
+  rule to a new caller.
+- **Booking runs in a serializable transaction with a retry.** If you touch
+  `claimTable`, keep both: the isolation level is what makes "check then
+  insert" indivisible, and serialization failures are expected under
+  contention, not bugs.
 
 ## Auth notes
 

@@ -46,6 +46,11 @@ function build(options: { order?: unknown; charge?: jest.Mock } = {}) {
   const provider: PaymentProvider = {
     charge: options.charge ?? jest.fn().mockResolvedValue({ providerRef: 'dev_1' }),
     refund: jest.fn().mockResolvedValue(undefined),
+    // Deposits go through DepositsService, not here; present so the stub
+    // satisfies the interface.
+    authorize: jest.fn().mockResolvedValue({ providerRef: 'dev_auth_1' }),
+    capture: jest.fn().mockResolvedValue(undefined),
+    release: jest.fn().mockResolvedValue(undefined),
   };
 
   const events = { publish: jest.fn(), subscribe: jest.fn() };

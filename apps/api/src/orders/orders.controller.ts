@@ -17,8 +17,12 @@ export class OrdersController {
    */
   @Post('cart/quote')
   @HttpCode(200)
-  quote(@Body() dto: BasketDto, @Headers('accept-language') acceptLanguage?: string) {
-    return this.orders.quote(dto, resolveLanguage(acceptLanguage));
+  quote(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: BasketDto,
+    @Headers('accept-language') acceptLanguage?: string,
+  ) {
+    return this.orders.quote(dto, resolveLanguage(acceptLanguage), user.sub);
   }
 
   @Post('orders')

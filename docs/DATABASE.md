@@ -14,8 +14,9 @@ users 1─* favorites             users 1─* reviews
 users 1─* notifications         users 1─1 referrals (own code)
 restaurants 1─* branches        branches 1─* tables
 branches 1─* menu_items         categories 1─* menu_items
-orders 1─* order_items          orders 1─1 payments
+orders 1─* order_items          orders 1─0..1 payments
 orders 1─0..1 reservations      reservations 1─0..1 tables
+reservations 1─0..1 payments    (a payment settles an order XOR a reservation)
 restaurants 1─* reviews         menu_items *─* dietary_tags
 ```
 
@@ -173,7 +174,16 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | deposit_amd | integer | deposit |
 | deposit_credited | boolean DEFAULT false | credited to bill |
 | status | enum(`pending`,`confirmed`,`seated`,`completed`,`cancelled`,`no_show`) | |
+| active_slot | timestamptz NULL | mirrors `reserved_for` while the booking holds the table |
 | created_at / updated_at | timestamptz | |
+
+`UNIQUE (table_id, active_slot)` is what makes a table exclusive. It is keyed on
+`active_slot` rather than `reserved_for` because Postgres treats NULLs in a
+unique index as distinct: ending a booking sets `active_slot = NULL`, which
+**frees the slot for rebooking**, where a constraint on `reserved_for` would
+have blocked that table and time forever. The overlap check (a seating spans
+several slots) runs in a serializable transaction; this index is the guarantee
+that survives if that isolation level is ever relaxed.
 
 ---
 
@@ -182,12 +192,24 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | Field | Type | Description |
 |---|---|---|
 | id | uuid PK | |
-| order_id | uuid FK→orders.id | |
+| order_id | uuid FK→orders.id UNIQUE NULL | set for a food payment |
+| reservation_id | uuid FK→reservations.id UNIQUE NULL | set for a table deposit |
 | method | enum(`apple_pay`,`google_pay`,`card`,`cash`) | |
 | amount_amd | integer | |
 | status | enum(`pending`,`authorized`,`captured`,`refunded`,`failed`,`cancelled`) | |
 | provider_ref | varchar(120) NULL | provider transaction id |
 | created_at / updated_at | timestamptz | |
+
+A payment settles **exactly one** of the two, enforced by
+`CHECK ((order_id IS NULL) <> (reservation_id IS NULL))` — Prisma cannot
+express it, so it lives in the migration. Without it, "nullable order_id" would
+quietly permit an orphan payment that no reconciliation could attribute to
+anything. A separate `deposits` table was the alternative and would have
+duplicated every provider field and status transition for no gain.
+
+Deposits use `authorized` → `captured` (kept or credited) or `cancelled`
+(released). `refunded` is for money that was actually taken first, which for a
+deposit never happens.
 
 ---
 

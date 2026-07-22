@@ -144,6 +144,16 @@ in API_DOCUMENTATION.md.
   a snapshot; by the time the write lands, another request may have moved the
   row. Put the expected status in the `WHERE` clause so the loser of a race
   fails instead of overwriting.
+- **When "check then insert" must be indivisible, say so to the database.** Two
+  guests booking the last table both pass a `findMany` check and both insert.
+  A serializable transaction makes Postgres abort one — which means the code
+  must **retry**, since serialization failures are contention, not bugs. Back
+  it with a unique constraint too: the constraint is what still holds if the
+  isolation level is ever relaxed.
+- **Take money in the order that leaves the customer whole.** Hold or reverse
+  funds *before* the status write, so a failure leaves them with the booking
+  they paid for rather than neither booking nor money — and log the window
+  where both cannot be satisfied as needing manual reconciliation.
 - **Config fails fast.** Required env vars are validated at boot; the process
   refuses to start rather than failing at the first request.
 - **No PII in logs.** Phone numbers are masked (`+374******56`). Logs get IDs,
@@ -220,8 +230,8 @@ depends on it — build thin vertical slices, not horizontal layers.
 | 4 | Basket + orders (pickup), payment, idempotency | ✅ done (API) |
 | 5 | Order tracking: realtime status, countdown + the owner **API** that moves it | ✅ done |
 | 6 | `apps/admin` — owner **screens** (incoming orders, status changes, menu) | ✅ done |
-| 7 | Table booking (dine-in) + deposit | ← current |
-| 8 | Favorites, search, filters, referrals, rewards | |
+| 7 | Table booking (dine-in) + deposit | ✅ done (API) |
+| 8 | Favorites, search, filters, referrals, rewards | ← current |
 | 9 | `apps/web` (Next.js) on the same API | |
 | 10 | `apps/admin` — admin screens (analytics, promos, management) | |
 
@@ -244,7 +254,15 @@ directly, but that is not the same as having seen it.
 
 ### Open questions (confirm with product)
 - Exact `ready_at` calculation by kitchen load.
-- Deposit refund / no-show policy.
+- ~~Deposit refund / no-show policy.~~ **Answered provisionally** (2h free
+  window, held after that and on a no-show, credited on completion) — the
+  numbers are `[proposed]` and want product's confirmation, but the mechanism
+  is built.
+- Seating length (90 min) and slot interval (30 min) — currently platform-wide
+  constants; a steakhouse and a coffee bar do not turn tables at the same rate,
+  so these likely belong on the restaurant.
+- Real opening hours. `open_hours` exists but nothing writes it, so availability
+  falls back to a documented 10:00–23:00 default.
 - Reward points accrual rates.
 - SMS and acquiring provider for Armenia — the app depends on the `SmsSender`
   and `PaymentProvider` interfaces only, so choosing one is a provider swap,

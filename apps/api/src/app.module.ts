@@ -12,6 +12,7 @@ import { CatalogModule } from './catalog/catalog.module';
 import { OrdersModule } from './orders/orders.module';
 import { OrderEventsModule } from './orders/order-events.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ReservationsModule } from './reservations/reservations.module';
 import { OwnerModule } from './owner/owner.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
@@ -36,6 +37,7 @@ import { IdempotencyInterceptor } from './common/idempotency/idempotency.interce
     OrderEventsModule,
     OrdersModule,
     PaymentsModule,
+    ReservationsModule,
     OwnerModule,
     HealthModule,
   ],

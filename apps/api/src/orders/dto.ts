@@ -44,6 +44,14 @@ export class BasketDto {
   @ValidateNested({ each: true })
   @Type(() => OrderItemInputDto)
   items!: OrderItemInputDto[];
+
+  /**
+   * Required for `dine_in`, rejected otherwise by the service: food brought to
+   * a table needs a table, and that means a booking.
+   */
+  @IsUUID()
+  @IsOptional()
+  reservationId?: string;
 }
 
 export class CreateOrderDto extends BasketDto {

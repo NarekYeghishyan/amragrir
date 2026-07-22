@@ -36,6 +36,49 @@ Rules **[proposed based on design]**:
 - Guest count: minimum 1; step ±1; suggested chips + stepper. **[from design]**
 - Defaults: `guests = 2`, `reserveTime = '12:30'`. **[from design]**
 
+### How a table is held (implemented)
+
+- **A booking is a seating, not an instant.** It occupies
+  `RESERVATION_SEATING_MINUTES` (90), which is why 19:00 and 19:30 conflict on
+  the same table. Slots are offered every `RESERVATION_SLOT_MINUTES` (30), and
+  the last one is a full seating before closing — offering 22:30 when the
+  kitchen shuts at 23:00 sells a table nobody can use.
+- **Availability is answered per party size.** "19:00 is free" is meaningless
+  without knowing whether it is free for two or for eight; a slot is available
+  when at least one table big enough is free for the whole seating.
+- **The server picks the table**, always the smallest that fits, so a pair does
+  not consume the only six-seater. A client naming its own table would mean
+  trusting it to have read availability correctly.
+- **Times are Yerevan local.** `reserved_for` is an absolute instant, but a
+  guest choosing "19:00" means 19:00 at the restaurant. Armenia is UTC+4 all
+  year (no DST since 2012), so the offset is a constant — expanding beyond
+  Armenia is a visible change to `YEREVAN_UTC_OFFSET_MINUTES`, not a silent
+  hour-off bug.
+- **Exclusivity is enforced twice.** The check "is this table free" and the
+  insert that makes it not free run in one **serializable** transaction, and a
+  unique index on `(table_id, active_slot)` backs it up. `active_slot` mirrors
+  `reserved_for` while the booking is live and is set to NULL when it ends —
+  Postgres treats NULLs in a unique index as distinct, so **cancelling frees
+  the slot** where a constraint on `reserved_for` would have blocked that table
+  and time forever.
+
+### Deposit lifecycle (implemented)
+
+The deposit is **held, not charged**, at booking — the difference is the
+product promise: a guest who cancels in time never had money taken.
+
+| Ending | Deposit | Why |
+|---|---|---|
+| Cancelled ≥ 2h before | **released** | The table can still be resold. |
+| Cancelled < 2h before | **captured** | It could not be resold; that is what the deposit compensates. |
+| No-show | **captured** | Same, without even the warning. |
+| Completed | **captured and credited** | The guest ate; it comes off the bill rather than being an extra charge. |
+
+`depositOutcomeFor` in `packages/shared` answers this, and both the guest's
+cancel path and the owner panel call it — so the two cannot disagree about who
+keeps the money. A booking that fails after the hold succeeds **releases it**;
+a booking with no deposit is a table given away for nothing.
+
 ### Reservation statuses
 
 ```
@@ -49,7 +92,15 @@ no_show    — guest did not arrive (deposit policy applies)
 
 Transitions: `pending → confirmed → seated → completed`; `cancelled` possible from `pending`/`confirmed`; `confirmed → no_show`.
 
-**Cancellation/no-show policy [proposed]:** free cancellation window (e.g. 2 hours before) → deposit refunded; otherwise/no-show → deposit held per restaurant policy.
+The table lives in `packages/shared/src/reservation-status.ts`
+(`RESERVATION_STATUS_FLOW`, `canTransitionReservation`,
+`isReservationCancellable`). **`no_show` is reachable only from `confirmed`** —
+a table nobody promised to hold cannot be a no-show, and the deposit rule
+depends on that distinction. A guest already `seated` cannot cancel.
+
+**Cancellation/no-show policy:** free up to `RESERVATION_FREE_CANCEL_HOURS`
+(2h) before the booking; after that, and on a no-show, the deposit is held.
+See the deposit table in §3.
 
 ---
 
@@ -175,6 +226,12 @@ For the deposit: `authorized` at booking, `captured`/`credited` at completion, `
 | Referral discount | 2%, stacks to 25% | design |
 | Filter price range | 4000–24000֏ | design |
 | Distance range | 0.5–5 km | design |
+| Booking slot interval | 30 min | proposed |
+| Seating length | 90 min | proposed |
+| Free cancellation window | 2 h | proposed |
+| Max booking lead time | 30 days | proposed |
+| Max party per booking | 12 | proposed |
+| Default open hours (no `open_hours` set) | 10:00–23:00 | proposed |
 | Max qty per dish | 20 | proposed |
 | Max dishes per order | 50 | proposed |
 | Max pre-order lead time | 7 days | proposed |

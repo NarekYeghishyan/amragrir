@@ -434,6 +434,93 @@ for a branch the owner does not own, 400 for a missing Armenian name and for
 builds, and every request it makes was exercised directly — but no screen has
 been seen.
 
+### Phase 7 — Table booking and deposits
+
+`GET /restaurants/{id}/availability`, `POST /reservations`, `GET /reservations`,
+`GET /reservations/{id}`, `POST /reservations/{id}/cancel`, dine-in orders, and
+the owner's booking book.
+
+**A booking is a seating, not an instant.** It holds a table for 90 minutes,
+which is why 19:00 and 19:30 conflict on the same table — modelling a booking
+as a point in time would have sold the same table twice with no error anywhere.
+Slots are offered every 30 minutes, and the last one is a full seating before
+closing: offering 22:30 when the kitchen shuts at 23:00 sells a table nobody
+can use.
+
+**Availability is answered per party size.** "19:00 is free" is meaningless
+without knowing whether it is free for two or for eight. The server also picks
+the table — always the smallest that fits, so a pair does not consume the only
+six-seater — because letting a client name one means trusting it to have read
+availability correctly.
+
+**Times are Yerevan local, deliberately.** A guest choosing "19:00" means 19:00
+at the restaurant; generating slots in UTC would have offered times four hours
+off. Armenia is UTC+4 all year (no DST since 2012), so the offset is a named
+constant — expanding beyond Armenia becomes a visible change to that line
+rather than a silent hour-off bug in every booking.
+
+**Exclusivity is enforced twice, and the second one nearly introduced a bug.**
+The "is this table free" check and the insert that makes it not free run in one
+**serializable** transaction, with a retry, because serialization failures are
+contention rather than errors. A unique index backs it up — but the obvious
+`(table_id, reserved_for)` would have blocked a table and time **forever** once
+anyone cancelled. It is keyed on a new `active_slot` column that mirrors
+`reserved_for` while the booking is live and goes NULL when it ends; Postgres
+treats NULLs in a unique index as distinct, so cancelling frees the slot.
+
+**A deposit is held, not charged.** That distinction is the entire product
+promise — cancel in time and the money was never taken — so `PaymentProvider`
+gained `authorize`/`capture`/`release` alongside `charge`/`refund`. What
+happens at the end is one function in `shared` (`depositOutcomeFor`) that both
+the guest's cancel and the owner panel call, so they cannot disagree about who
+keeps the money: released if cancelled ≥2h ahead, captured on a late
+cancellation or a no-show, captured and credited when the guest actually ate.
+A booking that fails after the hold succeeds releases it; a booking whose
+deposit is declined is not made at all.
+
+**`no_show` is reachable only from `confirmed`.** A table nobody promised to
+hold cannot be a no-show, and the deposit rule depends on that distinction.
+
+**Schema:** `payments.order_id` is now nullable with a new nullable
+`reservation_id`, plus a `CHECK` that exactly one is set — Prisma cannot
+express it, so it is raw SQL in the migration. Without it, "nullable order_id"
+would quietly permit an orphan payment no reconciliation could attribute to
+anything. A separate `deposits` table would have duplicated every provider
+field and status transition for no gain.
+
+**Dine-in orders** now exist: `serviceMode: "dine_in"` requires a
+`reservationId` the caller owns, at the same branch, still active, without an
+order already. The quote gains `dueNowAmd` — the meal minus the deposit
+already held — while `totalAmd` stays the meal, because the deposit is credited
+rather than charged twice.
+
+**A latent hole the tests caught:** `quote` took `userId` as optional, so a
+dine-in basket could skip the reservation check entirely by omitting it. Made
+required.
+
+**307 tests** (up from 241), including the slot arithmetic, every deposit
+outcome, and the cancel-frees-the-slot regression.
+
+**Verified live**, including the two things unit tests cannot prove:
+- **Two simultaneous requests for the last free table: exactly one booked, one
+  got a 409.**
+- **Filling all four tables at 17:00 closed 16:00 through 18:00 and left 15:30
+  and 18:30 open** — the seating window, end to end.
+
+Plus: the deposit held at booking (`authorized`), untouched through
+`confirmed`/`seated`, captured and credited on `completed`; a no-show capturing
+it; a cancellation releasing it and the freed slot immediately rebookable; the
+dine-in order showing 8760 total with 4000 held and 4760 due at the table; and
+every rule and scoping path (off-grid time, past time, oversized party,
+pickup-only restaurant, declined deposit, another guest's booking → 404, a
+customer reading the owner book → 403).
+
+**Not built:** the booking, availability and reservation screens in
+`apps/mobile`, and the booking book in `apps/admin`. This is the API only.
+Deferred and written down: per-restaurant seating lengths, real `open_hours`
+(availability falls back to a documented 10:00–23:00), and table management
+(`/owner/tables`).
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

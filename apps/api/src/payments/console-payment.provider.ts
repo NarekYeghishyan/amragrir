@@ -38,4 +38,27 @@ export class ConsolePaymentProvider implements PaymentProvider {
     this.logger.log(`[dev] refunded ${amountAmd} AMD (${providerRef ?? 'no reference'})`);
     return Promise.resolve();
   }
+
+  authorize(request: ChargeRequest): Promise<ChargeResult> {
+    if (request.token === DECLINE_TOKEN) {
+      this.logger.warn(`[dev] declined a hold of ${request.amountAmd} AMD for ${request.reference}`);
+      return Promise.reject(new PaymentDeclinedError('The deposit was declined'));
+    }
+
+    const providerRef = `dev_auth_${randomUUID()}`;
+    this.logger.log(
+      `[dev] held ${request.amountAmd} AMD via ${request.method} for ${request.reference} (${providerRef})`,
+    );
+    return Promise.resolve({ providerRef });
+  }
+
+  capture(providerRef: string | null, amountAmd: number): Promise<void> {
+    this.logger.log(`[dev] captured ${amountAmd} AMD (${providerRef ?? 'no reference'})`);
+    return Promise.resolve();
+  }
+
+  release(providerRef: string | null): Promise<void> {
+    this.logger.log(`[dev] released the hold (${providerRef ?? 'no reference'})`);
+    return Promise.resolve();
+  }
 }

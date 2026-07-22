@@ -276,30 +276,52 @@ model Reservation {
   depositAmd      Int               @map("deposit_amd")
   depositCredited Boolean           @default(false) @map("deposit_credited")
   status          ReservationStatus @default(pending)
+  // Mirrors `reservedFor` while this booking holds the table, and is set to
+  // NULL the moment it stops (cancelled/no-show/completed). Postgres treats
+  // NULLs in a unique index as distinct, which is exactly the wanted
+  // behaviour: see the @@unique below.
+  activeSlot      DateTime?         @map("active_slot") @db.Timestamptz(6)
   createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  user   User             @relation(fields: [userId], references: [id])
-  branch RestaurantBranch @relation(fields: [branchId], references: [id])
-  table  Table?           @relation(fields: [tableId], references: [id])
-  order  Order?
+  user    User             @relation(fields: [userId], references: [id])
+  branch  RestaurantBranch @relation(fields: [branchId], references: [id])
+  table   Table?           @relation(fields: [tableId], references: [id])
+  order   Order?
+  payment Payment?
 
+  // One table can be held by one live booking per start time. Keyed on
+  // `activeSlot` rather than `reservedFor` so that cancelling frees the slot
+  // instead of blocking it forever.
+  //
+  // The overlap check (a seating spans several slots) runs inside a
+  // serializable transaction; this constraint is the guarantee that still
+  // holds if that isolation level is ever relaxed, and it covers the
+  // collision that matters most — everybody books on the half hour.
+  @@unique([tableId, activeSlot])
   @@index([branchId, reservedFor])
   @@index([userId])
   @@map("reservations")
 }
 
+// A payment settles exactly one of two things: an order (food) or a
+// reservation (a table deposit). Both columns are nullable with a CHECK
+// constraint enforcing exactly one — see the `payment_target` migration.
+// The alternative, a second `deposits` table, would duplicate every provider
+// field and every status transition for no gain.
 model Payment {
-  id          String        @id @default(uuid()) @db.Uuid
-  orderId     String        @unique @map("order_id") @db.Uuid
-  method      PaymentMethod
-  amountAmd   Int           @map("amount_amd")
-  status      PaymentStatus @default(pending)
-  providerRef String?       @map("provider_ref") @db.VarChar(120)
-  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id            String        @id @default(uuid()) @db.Uuid
+  orderId       String?       @unique @map("order_id") @db.Uuid
+  reservationId String?       @unique @map("reservation_id") @db.Uuid
+  method        PaymentMethod
+  amountAmd     Int           @map("amount_amd")
+  status        PaymentStatus @default(pending)
+  providerRef   String?       @map("provider_ref") @db.VarChar(120)
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order       Order?       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reservation Reservation? @relation(fields: [reservationId], references: [id], onDelete: Cascade)
 
   @@map("payments")
 }
