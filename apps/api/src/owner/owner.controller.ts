@@ -15,6 +15,8 @@ import { CurrentUser, Roles } from '../auth/decorators';
 import type { JwtPayload } from '../auth/token.service';
 import { OwnerService } from './owner.service';
 import { MenuService } from './menu.service';
+import { OwnerReservationsService } from './reservations.service';
+import { ListOwnerReservationsDto, SetReservationStatusDto } from '../reservations/dto';
 import { ListOwnerOrdersDto, SetOrderStatusDto } from './dto';
 import {
   CreateMenuItemDto,
@@ -36,6 +38,7 @@ export class OwnerController {
   constructor(
     private readonly owner: OwnerService,
     private readonly menu: MenuService,
+    private readonly reservations: OwnerReservationsService,
   ) {}
 
   @Get('orders')
@@ -50,6 +53,20 @@ export class OwnerController {
     @Body() dto: SetOrderStatusDto,
   ) {
     return this.owner.setStatus(user, id, dto);
+  }
+
+  @Get('reservations')
+  listReservations(@CurrentUser() user: JwtPayload, @Query() query: ListOwnerReservationsDto) {
+    return this.reservations.list(user, query);
+  }
+
+  @Patch('reservations/:id/status')
+  setReservationStatus(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetReservationStatusDto,
+  ) {
+    return this.reservations.setStatus(user, id, dto);
   }
 
   @Get('branches')

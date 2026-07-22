@@ -1,5 +1,6 @@
-import {
+﻿import {
   BadRequestException,
+  ConflictException,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -37,7 +38,7 @@ function menuItem(id: string, over: Record<string, unknown> = {}) {
   return {
     id,
     branchId: BRANCH_ID,
-    nameI18n: { hy: 'Բուրգեր', en: 'Burger' },
+    nameI18n: { hy: 'Ô²Õ¸Ö‚Ö€Õ£Õ¥Ö€', en: 'Burger' },
     priceAmd: 5800,
     prepMin: 12,
     isAvailable: true,
@@ -76,7 +77,28 @@ function orderRow(over: Record<string, unknown> = {}) {
   };
 }
 
-function build(options: { branch?: unknown; menuItems?: unknown[]; order?: unknown } = {}) {
+const RESERVATION = '55555555-5555-4555-8555-555555555555';
+
+function reservationRow(over: Record<string, unknown> = {}) {
+  return {
+    id: RESERVATION,
+    branchId: BRANCH_ID,
+    status: 'confirmed',
+    depositAmd: 4000,
+    table: { tableNo: '2' },
+    order: null,
+    ...over,
+  };
+}
+
+function build(
+  options: {
+    branch?: unknown;
+    menuItems?: unknown[];
+    order?: unknown;
+    reservation?: unknown;
+  } = {},
+) {
   const orderCreate = jest.fn().mockResolvedValue(options.order ?? orderRow());
   const orderUpdate = jest.fn().mockImplementation(({ data }: { data: { status: string } }) =>
     Promise.resolve(orderRow({ status: data.status })),
@@ -104,6 +126,9 @@ function build(options: { branch?: unknown; menuItems?: unknown[]; order?: unkno
       count: jest.fn().mockResolvedValue(1),
     },
     payment: { update: paymentUpdate },
+    reservation: {
+      findFirst: jest.fn().mockResolvedValue(options.reservation ?? null),
+    },
     $transaction: jest.fn((fn: (tx: unknown) => unknown) =>
       Promise.resolve(fn({ order: { update: orderUpdate }, payment: { update: paymentUpdate } })),
     ),
@@ -138,9 +163,9 @@ function dto(over: Partial<CreateOrderDto> = {}): CreateOrderDto {
 
 describe('quote', () => {
   it('prices from the database, ignoring anything the client thinks a dish costs', () => {
-    // The DTO carries ids and quantities only — this is the test that says why.
+    // The DTO carries ids and quantities only â€” this is the test that says why.
     return build({ menuItems: [menuItem(BURGER, { priceAmd: 5800 })] })
-      .service.quote(dto({ items: [{ menuItemId: BURGER, qty: 2 }] }), Language.En)
+      .service.quote(dto({ items: [{ menuItemId: BURGER, qty: 2 }] }), Language.En, 'user-1')
       .then((quote) => {
         expect(quote.subtotalAmd).toBe(11_600);
         expect(quote.totalAmd).toBe(11_600 + SERVICE_FEE_AMD);
@@ -150,13 +175,13 @@ describe('quote', () => {
 
   it('localises the dish name for the caller', async () => {
     const { service } = build();
-    const quote = await service.quote(dto(), Language.En);
+    const quote = await service.quote(dto(), Language.En, 'user-1');
     expect(quote.items[0]?.name).toBe('Burger');
   });
 
   it('reports an unknown dish instead of throwing, so the basket can flag the line', async () => {
     const { service } = build({ menuItems: [] });
-    const quote = await service.quote(dto(), Language.En);
+    const quote = await service.quote(dto(), Language.En, 'user-1');
 
     expect(quote.unavailable).toEqual([{ menuItemId: BURGER, reason: 'not_on_menu' }]);
     expect(quote.canOrder).toBe(false);
@@ -164,9 +189,9 @@ describe('quote', () => {
 
   it('treats a dish from another branch as not on the menu', async () => {
     // The query is scoped to the branch, so a dish belonging elsewhere simply
-    // does not come back — ordering it at its own price is not possible.
+    // does not come back â€” ordering it at its own price is not possible.
     const { service, prisma } = build({ menuItems: [] });
-    await service.quote(dto(), Language.En);
+    await service.quote(dto(), Language.En, 'user-1');
 
     expect(prisma.menuItem.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ branchId: BRANCH_ID }) }),
@@ -175,30 +200,61 @@ describe('quote', () => {
 
   it('reports a sold-out dish', async () => {
     const { service } = build({ menuItems: [menuItem(BURGER, { isAvailable: false })] });
-    const quote = await service.quote(dto(), Language.En);
+    const quote = await service.quote(dto(), Language.En, 'user-1');
 
     expect(quote.unavailable).toEqual([{ menuItemId: BURGER, reason: 'sold_out' }]);
   });
 
   it('still prices a closed restaurant but refuses to let it be ordered', async () => {
     const { service } = build({ branch: branch({ isOpen: false }) });
-    const quote = await service.quote(dto(), Language.En);
+    const quote = await service.quote(dto(), Language.En, 'user-1');
 
     expect(quote.subtotalAmd).toBe(5800);
     expect(quote.branchIsOpen).toBe(false);
     expect(quote.canOrder).toBe(false);
   });
 
-  it('rejects dine-in until table booking exists', async () => {
+  it('refuses a dine-in basket with no booking behind it', async () => {
+    // Food brought to a table needs a table, which means a reservation —
+    // that is what keeps orders.reservation_id meaningful.
     const { service } = build();
-    await expect(service.quote(dto({ serviceMode: ServiceMode.DineIn }), Language.En)).rejects.toThrow(
-      UnprocessableEntityException,
-    );
+    await expect(
+      service.quote(dto({ serviceMode: ServiceMode.DineIn }), Language.En, 'user-1'),
+    ).rejects.toThrow(UnprocessableEntityException);
   });
 
   it('404s for an unknown branch', async () => {
     const { service } = build({ branch: null });
-    await expect(service.quote(dto(), Language.En)).rejects.toThrow(NotFoundException);
+    await expect(service.quote(dto(), Language.En, 'user-1')).rejects.toThrow(NotFoundException);
+  });
+
+  it('credits a table deposit against the bill instead of charging it again', async () => {
+    // BUSINESS_LOGIC §3: the deposit was taken at booking. `totalAmd` is the
+    // meal; `dueNowAmd` is what is actually left to pay at the table.
+    const { service } = build({ reservation: reservationRow({ depositAmd: 4000 }) });
+
+    const quote = await service.quote(
+      dto({ serviceMode: ServiceMode.DineIn, reservationId: RESERVATION }),
+      Language.En,
+      'user-1',
+    );
+
+    expect(quote.totalAmd).toBe(5800 + SERVICE_FEE_AMD);
+    expect(quote.depositAmd).toBe(4000);
+    expect(quote.dueNowAmd).toBe(5800 + SERVICE_FEE_AMD - 4000);
+    expect(quote.tableNo).toBe('2');
+  });
+
+  it('never reports a negative amount due when the deposit exceeds the bill', async () => {
+    const { service } = build({ reservation: reservationRow({ depositAmd: 99_000 }) });
+
+    const quote = await service.quote(
+      dto({ serviceMode: ServiceMode.DineIn, reservationId: RESERVATION }),
+      Language.En,
+      'user-1',
+    );
+
+    expect(quote.dueNowAmd).toBe(0);
   });
 
   it('rejects the same dish twice rather than merging it silently', async () => {
@@ -214,6 +270,7 @@ describe('quote', () => {
           ],
         }),
         Language.En,
+        'user-1',
       ),
     ).rejects.toThrow(BadRequestException);
   });
@@ -293,6 +350,72 @@ describe('create', () => {
 
     await expect(service.create('user-1', dto({ readyAt: tooFar }), Language.En)).rejects.toThrow(
       UnprocessableEntityException,
+    );
+  });
+
+  it('links a dine-in order to its booking', async () => {
+    const { service, orderCreate } = build({ reservation: reservationRow() });
+
+    await service.create(
+      'user-1',
+      dto({ serviceMode: ServiceMode.DineIn, reservationId: RESERVATION }),
+      Language.En,
+    );
+
+    const data = orderCreate.mock.calls[0][0].data;
+    expect(data.reservationId).toBe(RESERVATION);
+    expect(data.depositAmd).toBe(4000);
+    // Recorded, never added: the guest already paid it at booking.
+    expect(data.totalAmd).toBe(5800 + SERVICE_FEE_AMD);
+  });
+
+  it('refuses to order against a cancelled booking', async () => {
+    const { service } = build({ reservation: reservationRow({ status: 'cancelled' }) });
+
+    await expect(
+      service.create(
+        'user-1',
+        dto({ serviceMode: ServiceMode.DineIn, reservationId: RESERVATION }),
+        Language.En,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('refuses a second order on one booking', async () => {
+    const { service } = build({ reservation: reservationRow({ order: { id: 'order-9' } }) });
+
+    await expect(
+      service.create(
+        'user-1',
+        dto({ serviceMode: ServiceMode.DineIn, reservationId: RESERVATION }),
+        Language.En,
+      ),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('refuses a booking made at a different restaurant', async () => {
+    const { service } = build({ reservation: reservationRow({ branchId: 'other-branch' }) });
+
+    await expect(
+      service.create(
+        'user-1',
+        dto({ serviceMode: ServiceMode.DineIn, reservationId: RESERVATION }),
+        Language.En,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it("scopes the booking lookup to the caller, so another guest's table is not found", async () => {
+    const { service, prisma } = build({ reservation: reservationRow() });
+
+    await service.create(
+      'user-1',
+      dto({ serviceMode: ServiceMode.DineIn, reservationId: RESERVATION }),
+      Language.En,
+    );
+
+    expect(prisma.reservation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: RESERVATION, userId: 'user-1' } }),
     );
   });
 
@@ -406,3 +529,4 @@ describe('countdown', () => {
     expect(countdown(null, OrderStatus.Preparing)).toBeNull();
   });
 });
+

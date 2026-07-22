@@ -173,15 +173,23 @@ Restaurant profile + branch.
 Tables (for dine-in). Inactive tables are omitted.
 - **Response 200:** `{ "tables": [ { "id","tableNo":"12","seats":4,"zone" } ] }`
 
-### GET /restaurants/{id}/availability — **not implemented**
-Available slots for a date. Lands with the reservations module.
-- **Query:** `date=YYYY-MM-DD, guests=2, mode=dine_in|pickup`
+### GET /restaurants/{id}/availability · *implemented, public*
+Bookable times for a local date, **answered per party size**.
+- **Query:** `date=YYYY-MM-DD` (Yerevan local calendar), `guests` (1–12, default 2)
 - **Response 200:**
 ```json
-{ "date":"2026-07-25",
-  "slots":[ {"time":"12:30","available":true},{"time":"13:00","available":false} ],
-  "capacityLeft": 6 }
+{ "branchId","date":"2026-07-28","guests":2,
+  "slots":[ { "time":"19:00","at":"2026-07-28T15:00:00.000Z","available":true } ],
+  "depositAmd":4000,"maxSeats":6,"reservationsEnabled":true }
 ```
+- `time` is Yerevan local (what the picker shows); `at` is the instant to send
+  back when booking.
+- A slot is available when **at least one table big enough is free for the
+  whole 90-minute seating** — which is why booking 19:00 also closes 19:30.
+- Slots in the past are never `available`.
+- An empty `slots` array is a real answer, not an error: the restaurant does
+  not take bookings (`reservationsEnabled: false`), the day is closed, or no
+  table seats that party (compare `guests` with `maxSeats`).
 
 ---
 
@@ -334,17 +342,57 @@ is written into every access log along the way.
 
 ## Reservations
 
-### POST /reservations
-- **Body:** `{ "branchId","reservedFor":"2026-07-25T19:00:00+04:00","guests":4 }`
-- **Response 201:** `{ "id","status":"pending","depositAmd":8000,"tableNo" }`
-- **409** if slot/capacity unavailable.
+> **Implemented.** Every route requires a **verified phone** and sees only the
+> caller's own bookings — another guest's is `404`, never `403`.
+
+### POST /reservations · **requires `Idempotency-Key`**
+Books a table and **holds** the deposit.
+- **Body:** `{ "branchId","reservedFor":"2026-07-28T15:00:00.000Z","guests":4,"depositMethod"?,"depositToken"?,"notes"? }`
+- **No amount field** — the deposit is `guests × 2000֏`, computed server-side.
+- `reservedFor` must land **exactly on an offered slot**; anything else is
+  **422** with the local time it resolved to. That is what stops a client
+  booking 19:07 and bypassing availability.
+- The **server picks the table** — always the smallest that fits.
+- **Response 201:**
+```json
+{ "id","status":"pending","branch":{ "id","name","address" },"restaurantName",
+  "reservedFor","localTime":"19:00","localDate":"2026-07-28","guests":2,
+  "tableNo":"1","depositAmd":4000,"depositStatus":"authorized",
+  "depositCredited":false,"freeCancellationUntil","orderId":null,"createdAt" }
+```
+- **409** when no table is free at that time — including when two requests race
+  for the last one; exactly one wins.
+- **422** for a past time, beyond 30 days ahead, a party larger than any table
+  (with `maxSeats`), a restaurant that does not take bookings, or a **declined
+  deposit**. A booking whose deposit cannot be held is not made.
 
 ### GET /reservations
-- **Query:** `status`
-- **Response 200:** `{ "items":[ { "id","restaurantName","reservedFor","guests","status","depositAmd" } ] }`
+- **Query:** `status=upcoming|past, page, limit`
+- **Response 200:** `{ "items":[ … ], "total", "page" }` — same object as above.
+
+### GET /reservations/{id}
+- **Response 200:** the same object.
 
 ### POST /reservations/{id}/cancel
-- **Response 200:** `{ "status":"cancelled","depositRefunded":true|false }`
+- **Response 200:** the booking with `status: "cancelled"`.
+- The deposit is **released** (`depositStatus: "cancelled"` — never charged, so
+  the guest sees a hold disappear rather than a charge and a refund) when
+  cancelling at least 2 hours ahead, and **captured** after that.
+- Cancelling **frees the slot**, so the table can be booked again immediately.
+- **422** once the guest has been seated.
+
+### Dine-in orders
+
+A dine-in order is food brought to a table, so it needs a booking:
+`POST /cart/quote` and `POST /orders` take `serviceMode: "dine_in"` **plus
+`reservationId`**.
+
+- **422** without one, for a booking that is not active, or for one at a
+  different restaurant. **409** if that booking already has an order
+  (`orders.reservation_id` is unique). Another guest's booking is **404**.
+- The quote gains **`dueNowAmd`** — the meal total minus the deposit already
+  held — and `tableNo`. `totalAmd` is unchanged: the deposit is credited, not
+  charged twice (BUSINESS_LOGIC.md §3). `dueNowAmd` never goes below zero.
 
 ---
 
@@ -487,7 +535,21 @@ Rules worth knowing:
 - **Changing a price does not touch existing orders**: every order item stores
   the price it was bought at.
 
+### GET /owner/reservations · *implemented*
+The book for a service, chronological.
+- **Query:** `branchId?, date=YYYY-MM-DD?` (local day), `status?`, `page`, `limit`
+- Defaults to everything still active. `date` is a **Yerevan** calendar day —
+  a restaurant's "today" is not UTC's.
+- **Response 200:** the reservation object plus `customerName` and
+  `customerPhone`.
+
+### PATCH /owner/reservations/{id}/status · *implemented*
+- **Body:** `{ "status": "confirmed|seated|completed|no_show|cancelled" }`
+- Legality comes from `RESERVATION_STATUS_FLOW`, so the panel can only offer
+  moves the API accepts. **422** otherwise.
+- `confirmed` and `seated` **leave the deposit alone**; only an ending decides
+  the money, per the table in BUSINESS_LOGIC.md §3.
+
 ### Not implemented yet
 - `GET|POST|PATCH /owner/tables` — manage tables.
-- `GET /owner/reservations` + `PATCH /owner/reservations/{id}/status`.
 - `GET /admin/*` — manage users, restaurants, moderate reviews, metrics.

@@ -9,10 +9,12 @@ import {
 import { Prisma } from '@prisma/client';
 import {
   ACTIVE_ORDER_STATUSES,
+  ACTIVE_RESERVATION_STATUSES,
   Language,
   ORDER_MAX_LEAD_DAYS,
   OrderStatus,
   PaymentStatus,
+  ReservationStatus,
   Role,
   ServiceMode,
   TERMINAL_ORDER_STATUSES,
@@ -60,6 +62,10 @@ export interface QuoteResult {
   serviceFeeAmd: number;
   depositAmd: number;
   totalAmd: number;
+  /** Left to pay after a table deposit is credited; equals `totalAmd` for pickup. */
+  dueNowAmd: number;
+  /** The booked table, for a dine-in basket. */
+  tableNo: string | null;
   prepMin: number;
   earliestReadyAt: string;
   branchIsOpen: boolean;
@@ -113,6 +119,10 @@ export interface OrderListItem {
 
 type BranchWithRestaurant = Prisma.RestaurantBranchGetPayload<{ include: { restaurant: true } }>;
 
+type ReservationForOrder = Prisma.ReservationGetPayload<{
+  include: { table: true; order: { select: { id: true } } };
+}>;
+
 /** What `loadBasket` resolves a client basket into: real prices from the
  *  database, plus whatever the client asked for that cannot be sold. */
 interface ResolvedBasket {
@@ -139,11 +149,13 @@ export class OrdersService {
    * arithmetic, so this endpoint exists to make sure no client ever computes a
    * total (DEVELOPMENT_GUIDE.md "never trust the client").
    */
-  async quote(dto: BasketDto, language: Language): Promise<QuoteResult> {
-    this.assertServiceModeSupported(dto.serviceMode);
+  // `userId` is required, not optional: an optional caller would let a dine-in
+  // quote skip the reservation check entirely by omitting it.
+  async quote(dto: BasketDto, language: Language, userId: string): Promise<QuoteResult> {
+    const reservation = await this.resolveReservation(userId, dto);
 
     const { branch, lines, unavailable } = await this.loadBasket(dto, language);
-    const totals = priceOrder(lines);
+    const totals = priceOrder(lines, reservation?.depositAmd ?? 0);
     const prepMin = estimatePrepMinutes(lines, branch.avgPrepMin);
 
     return {
@@ -153,6 +165,10 @@ export class OrdersService {
       items: lines.map(({ prepMin: _prepMin, ...line }) => line),
       unavailable,
       ...totals,
+      // What is actually left to pay at the table: the deposit was taken at
+      // booking and is credited, not charged again (BUSINESS_LOGIC.md §3).
+      dueNowAmd: Math.max(0, totals.totalAmd - (reservation?.depositAmd ?? 0)),
+      tableNo: reservation?.table?.tableNo ?? null,
       prepMin,
       earliestReadyAt: new Date(Date.now() + prepMin * 60_000).toISOString(),
       branchIsOpen: branch.isOpen,
@@ -161,7 +177,7 @@ export class OrdersService {
   }
 
   async create(userId: string, dto: CreateOrderDto, language: Language): Promise<OrderDetail> {
-    this.assertServiceModeSupported(dto.serviceMode);
+    const reservation = await this.resolveReservation(userId, dto);
 
     const { branch, lines, unavailable } = await this.loadBasket(dto, language);
 
@@ -177,7 +193,7 @@ export class OrdersService {
 
     const prepMin = estimatePrepMinutes(lines, branch.avgPrepMin);
     const readyAt = this.resolveReadyAt(dto.readyAt, prepMin);
-    const totals = priceOrder(lines);
+    const totals = priceOrder(lines, reservation?.depositAmd ?? 0);
 
     const order = await this.createWithUniqueCode(branch.id, (code) => ({
       code,
@@ -187,9 +203,12 @@ export class OrdersService {
       status: OrderStatus.Created,
       subtotalAmd: totals.subtotalAmd,
       serviceFeeAmd: totals.serviceFeeAmd,
+      // Recorded so the bill shows what was already held, but never added to
+      // the total — `priceOrder` is what guarantees that.
       depositAmd: totals.depositAmd,
       totalAmd: totals.totalAmd,
       readyAt,
+      reservationId: reservation?.id ?? null,
       notes: dto.notes ?? null,
       items: {
         create: lines.map((line) => ({
@@ -399,12 +418,49 @@ export class OrdersService {
     return { branch, lines, unavailable };
   }
 
-  private assertServiceModeSupported(mode: ServiceMode): void {
-    if (mode !== ServiceMode.Pickup) {
+  /**
+   * Resolves the reservation a dine-in order belongs to.
+   *
+   * A dine-in order is food brought to a table, so it needs a table — which
+   * means a booking. Requiring one here is what keeps `orders.reservation_id`
+   * meaningful instead of usually-null, and it is why the table number on the
+   * order can be trusted.
+   */
+  private async resolveReservation(
+    userId: string,
+    dto: BasketDto,
+  ): Promise<ReservationForOrder | null> {
+    if (dto.serviceMode !== ServiceMode.DineIn) {
+      return null;
+    }
+    if (!dto.reservationId) {
       throw new UnprocessableEntityException(
-        'Only pickup orders are supported yet; dine-in arrives with table booking',
+        'A dine-in order needs the reservation it belongs to',
       );
     }
+
+    const reservation = await this.prisma.reservation.findFirst({
+      where: { id: dto.reservationId, userId },
+      include: { table: true, order: { select: { id: true } } },
+    });
+    if (!reservation) {
+      throw new NotFoundException('Reservation not found');
+    }
+    if (reservation.branchId !== dto.branchId) {
+      throw new UnprocessableEntityException('That booking is for a different restaurant');
+    }
+    if (!ACTIVE_RESERVATION_STATUSES.includes(reservation.status as ReservationStatus)) {
+      throw new UnprocessableEntityException(
+        `A booking that is ${reservation.status} cannot be ordered against`,
+      );
+    }
+    // `orders.reservation_id` is unique, so a second order would fail at the
+    // database anyway; catching it here says why.
+    if (reservation.order) {
+      throw new ConflictException('This booking already has an order');
+    }
+
+    return reservation;
   }
 
   private resolveReadyAt(requested: string | undefined, prepMin: number): Date {

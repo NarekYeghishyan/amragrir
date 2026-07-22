@@ -148,6 +148,11 @@ Implemented in `apps/api`:
 - **The back office is a client like any other.** `apps/admin` signs in with the
   same OTP flow and holds no privileges of its own; its role check only decides
   which screens to render, never what the API allows.
+- **Table bookings follow the same two rules.** A guest needs a verified phone
+  to book (`POST /reservations`) and only ever sees their own — another
+  guest's is a 404. Owner and admin read and advance bookings for their own
+  branches (`GET /owner/reservations`, `PATCH /owner/reservations/{id}/status`)
+  through the same Prisma scope filter.
 - **WebSocket subscriptions authorise per order**, through the same visibility
   rule as the REST endpoints, so a socket cannot watch an order its holder may
   not read.

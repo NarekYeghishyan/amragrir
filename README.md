@@ -21,13 +21,15 @@ packages/
 └── config/   # eslint/tsconfig/prettier bases
 ```
 
-**Status:** `apps/api` runs (auth, public catalog, orders and payments for
-pickup, live order status over WebSocket, and the owner queue that moves an
-order through the kitchen). `apps/mobile` covers the whole ordering path —
+**Status:** `apps/api` runs (auth, public catalog, orders and payments, live
+order status over WebSocket, the owner queue that moves an order through the
+kitchen, and table booking with held deposits). `apps/mobile` covers the whole
+ordering path —
 auth → home → restaurant → basket → checkout → live tracking — against the real
 API, and `apps/admin` is a working back office (live kitchen queue, menu, the
-open/closed switch). `apps/web` is still a placeholder README with its scaffold
-command. See
+open/closed switch). The booking screens on mobile and the booking book in the
+back office are not built yet. `apps/web` is still a placeholder README with
+its scaffold command. See
 [docs/DEVELOPMENT_GUIDE.md](./docs/DEVELOPMENT_GUIDE.md) for the full
 architecture and build order.
 
