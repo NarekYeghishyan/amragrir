@@ -79,8 +79,13 @@ the app instead.
 That call is worth revisiting, but it is a product decision rather than a
 missing task: it is the difference between the web being a shop window and the
 web being a second storefront. Also outstanding from that design: the quick
-filter chips, and a manual light/dark toggle (only the system preference is
-honoured today).
+filter chips.
+
+The light/dark toggle **is** built. It works entirely off the tokens —
+`tokens.css` emits `:root[data-theme='…']` blocks that beat the system
+preference — so the toggle only sets one attribute on `<html>` and stores the
+choice. A tiny inline script in the layout applies the stored theme before the
+first paint, so there is no flash of the wrong theme on load.
 
 The footer's column items are plain text because the pages behind them —
 About us, Careers, Terms — do not exist. They become links when the pages do.

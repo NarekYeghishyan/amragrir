@@ -6,6 +6,7 @@ import { LANGUAGES, parseLanguage, t } from '@/lib/language';
 import { SITE_URL, homePath, searchPath } from '@/lib/site';
 import { SearchBar } from '@/components/SearchBar';
 import { Footer } from '@/components/Footer';
+import { ThemeToggle, THEME_KEY } from '@/components/ThemeToggle';
 import '../globals.css';
 
 export const metadata: Metadata = {
@@ -44,7 +45,18 @@ export default async function LangLayout({
   const label = t(language);
 
   return (
-    <html lang={language}>
+    // suppressHydrationWarning: the script below sets data-theme on <html>
+    // before React hydrates, which would otherwise be flagged as a mismatch.
+    <html lang={language} suppressHydrationWarning>
+      <head>
+        {/* Applies the stored theme before the first paint. Anything later —
+            an effect, a component — flashes the wrong theme for a frame. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem('${THEME_KEY}');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;}catch(e){}`,
+          }}
+        />
+      </head>
       <body>
         <header className="site">
           <div className="inner">
@@ -68,6 +80,7 @@ export default async function LangLayout({
                 </Link>
               ))}
             </nav>
+            <ThemeToggle label={label('theme')} />
           </div>
         </header>
         <main className="wrap">{children}</main>

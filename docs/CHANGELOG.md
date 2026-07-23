@@ -810,6 +810,16 @@ Built from the web design:
 Verified live in all three languages, and that the hero and footer text still
 survive with every `<script>` stripped.
 
+- **A light/dark toggle** on the web, matching the design's per-screen switch.
+  It cost almost nothing because the tokens already carry it: the CSS generator
+  emits `:root[data-theme='…']` blocks that beat `prefers-color-scheme`, so the
+  toggle sets one attribute on `<html>` and stores the choice. A pre-paint inline
+  script in the layout applies the stored theme before the first frame, so there
+  is no flash of the wrong theme; `<html suppressHydrationWarning>` plus a
+  neutral SSR glyph keep React from flagging the attribute the script writes.
+  Still outstanding from the web design: the quick-filter chips, and the
+  ordering flow (the open product question above).
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,
