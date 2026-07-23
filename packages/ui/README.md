@@ -20,6 +20,16 @@ Now there is one file, and a test that fails if anything drifts from it.
 | `apps/web` | `@import './tokens.css'` in `globals.css` |
 | `apps/admin` | `@import './tokens.css'` in `styles.css` |
 
+Because `apps/mobile` imports this package **from source** (`main` is
+`src/index.ts`, bundled by Metro), the barrel `src/index.ts` must re-export with
+**no file extension** — Metro cannot map a `./tokens.js` specifier to
+`tokens.ts`, and the mobile app fails to bundle with every other check still
+green. The CSS generator (`src/css.ts`) is deliberately kept out of the barrel:
+it is web/build-only, its compiled form is imported directly from `dist` by
+`scripts/build-css.mjs`, and pulling it through the barrel would drag it — and
+its own `./tokens.js` import — into the mobile bundle. Both rules have guard
+tests in `src/tokens.spec.ts`.
+
 `tokens.css` is **generated**, not written. After changing `src/tokens.ts`:
 
 ```bash

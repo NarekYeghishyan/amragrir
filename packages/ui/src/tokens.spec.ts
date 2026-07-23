@@ -77,3 +77,28 @@ describe('renderTokensCss', () => {
     expect(css.startsWith('/* GENERATED FILE')).toBe(true);
   });
 });
+
+describe('the package barrel', () => {
+  // apps/mobile imports `@amragrir/ui` and Metro bundles it from THIS source
+  // file (package `main` points at src). Metro resolves a bare `./tokens` to
+  // tokens.ts, but a `./tokens.js` specifier makes it look for a file that does
+  // not exist ("Unable to resolve module ./tokens.js"); it also cannot resolve
+  // css.ts's own `./tokens.js` import, so the CSS generator must stay out of the
+  // barrel entirely. Neither rule is enforced by tsc, Vitest resolution or the
+  // web build — only Metro, which no unit test runs — so this guards both
+  // against a silent reintroduction that would break the mobile app alone.
+  const source = readFileSync(join(here, 'index.ts'), 'utf8');
+  const specifiers = [...source.matchAll(/from\s+'([^']+)'/g)].map((match) => match[1]);
+
+  it('re-exports with no file extension (Metro cannot map ./x.js to x.ts)', () => {
+    for (const specifier of specifiers) {
+      expect(specifier, specifier).not.toMatch(/\.[a-z]+$/);
+    }
+  });
+
+  it('does not re-export the CSS generator into the mobile bundle', async () => {
+    const barrel = await import('./index.js');
+    expect(barrel.palette).toBeDefined();
+    expect('renderTokensCss' in barrel).toBe(false);
+  });
+});
