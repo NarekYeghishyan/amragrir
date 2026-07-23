@@ -1,33 +1,11 @@
-/* Tokens from docs/DESIGN_SYSTEM.md. Same palette as the app and the back
-   office; wider measure, because this is read on a desktop. */
-:root {
-  --bg: #f6f5f2;
-  --card: #ffffff;
-  --ink: #1a1712;
-  --ink2: rgba(26, 23, 18, 0.56);
-  --ink3: rgba(26, 23, 18, 0.32);
-  --line: rgba(26, 23, 18, 0.09);
-  --accent: #ea5b12;
-  --accent-soft: #fff0e6;
-  --chip: #f1efea;
-  --good: #12a150;
-  --radius: 16px;
-  color-scheme: light dark;
-}
+/* Palette and scale come from @amragrir/ui — one source for all three apps.
+   Regenerate with: pnpm --filter @amragrir/ui build:css */
+@import './tokens.css';
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #100e0b;
-    --card: #1b1815;
-    --ink: #f6f3ee;
-    --ink2: rgba(246, 243, 238, 0.6);
-    --ink3: rgba(246, 243, 238, 0.34);
-    --line: rgba(246, 243, 238, 0.1);
-    --accent: #ff6a1f;
-    --accent-soft: rgba(255, 106, 31, 0.15);
-    --chip: #26221d;
-    --good: #2ec76f;
-  }
+/* Web-only: a wider corner radius, because this is read on a desktop rather
+   than on a phone. */
+:root {
+  --radius: 16px;
 }
 
 * {

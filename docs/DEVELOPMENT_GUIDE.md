@@ -79,6 +79,10 @@ apps/mobile/
 3. **Money — integers in AMD** (`*_amd`). Formatting only in UI (`formatMoney`).
 4. **i18n:** no hardcoded strings in UI — dictionary keys only. `hy` is the default language.
 5. **Theme tokens:** colors/radii/spacing — from `theme`, do not hardcode hex (see DESIGN_SYSTEM.md).
+   **A raw colour value belongs in exactly one file: `packages/ui/src/tokens.ts`.**
+   Web and admin read the CSS variables generated from it; mobile imports the
+   objects. Copying a palette per app is how a brand colour ends up different on
+   the phone and the website with nothing to catch it.
 6. **Permissions — on the backend** (guards). UI only hides what's unavailable.
 7. **DTO validation** via `class-validator` at the API boundary.
 8. **Idempotency** for `POST /orders`, `POST /payments` (idempotency key).

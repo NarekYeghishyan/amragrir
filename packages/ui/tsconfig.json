@@ -1,9 +1,16 @@
 {
   "extends": "../config/tsconfig.base.json",
   "compilerOptions": {
+    "module": "ES2022",
+    "moduleResolution": "bundler",
     "outDir": "dist",
     "rootDir": "src",
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "composite": false,
+    // Kept inside dist: with the default location, deleting dist leaves the
+    // build info claiming everything is current, so tsc emits nothing and the
+    // CSS generator imports a file that is not there.
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src"]
 }

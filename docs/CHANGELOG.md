@@ -730,6 +730,44 @@ the self-change refusal fires first when an admin targets themselves.
   into the database, which changes how every order is priced rather than adding
   a screen. It stays an open question with the numbers it affects.
 
+### Design tokens moved into `packages/ui`
+
+The palette was hand-copied into three files — `apps/mobile/src/theme/tokens.ts`,
+`apps/admin/src/styles.css` and `apps/web/src/app/globals.css`. Changing the
+accent colour meant three edits, and nothing caught a missed one: the phone and
+the website could disagree about the brand colour with every test still green.
+`packages/ui` had existed since the first commit for exactly this and was empty.
+
+- **One source:** `packages/ui/src/tokens.ts`. Mobile imports the objects
+  (React Native needs numbers, not CSS strings); web and admin `@import` a
+  `tokens.css` **generated** from it.
+- **The generated files are checked in, and a test compares them against the
+  generator.** Editing the source and forgetting to regenerate fails the test
+  rather than shipping a mismatch. Verified by deliberately corrupting a
+  generated file and watching the test go red, then restoring it — a drift test
+  nobody has seen fail is not evidence of anything.
+- App-specific values that are *not* design-system tokens stay in that app's own
+  stylesheet, layered on top: web keeps its wider corner radius, the back office
+  its tighter one. Admin's `--bad` and `--hit` now alias the generated
+  `--destructive` and `--hit-target` instead of restating the values.
+- The generator emits both themes plus `[data-theme]` overrides, so an explicit
+  theme choice beats the system preference — the apps offer a switch.
+- 10 tests, including "both themes define the same keys" and "these four values
+  match what DESIGN_SYSTEM.md quotes", so a silent edit makes the documentation
+  wrong rather than merely stale.
+
+Also fixed while looking at the web app: **every internal link was a plain
+`<a href>`, so each click reloaded the page.** The comment justifying it claimed
+crawlers need real anchors — true, but `next/link` renders exactly the same
+`<a href>` into the HTML while also giving client-side navigation. The
+justification was simply wrong, and the site gave up navigation for nothing.
+All internal links now use `next/link`; `tel:` stays a plain anchor because it
+leaves the app. The search form became the site's only client component,
+progressively enhanced: `action`/`method` still work with JavaScript off, and
+`router.push` upgrades the same submit to a client navigation. Re-verified that
+the HTML still carries real `href`s, that content survives with every `<script>`
+stripped, and that canonical, `hreflang` and JSON-LD are untouched.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

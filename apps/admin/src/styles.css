@@ -1,35 +1,13 @@
-/* Design tokens from docs/DESIGN_SYSTEM.md, as CSS variables.
-   The back office is a tool, not a storefront: same palette, denser layout. */
-:root {
-  --bg: #f6f5f2;
-  --card: #ffffff;
-  --ink: #1a1712;
-  --ink2: rgba(26, 23, 18, 0.56);
-  --ink3: rgba(26, 23, 18, 0.32);
-  --line: rgba(26, 23, 18, 0.09);
-  --accent: #ea5b12;
-  --accent-soft: #fff0e6;
-  --chip: #f1efea;
-  --good: #12a150;
-  --bad: #e23755;
-  --radius: 14px;
-  --hit: 44px;
-  color-scheme: light dark;
-}
+/* Palette and scale come from @amragrir/ui — one source for all three apps.
+   Regenerate with: pnpm --filter @amragrir/ui build:css */
+@import './tokens.css';
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #100e0b;
-    --card: #1b1815;
-    --ink: #f6f3ee;
-    --ink2: rgba(246, 243, 238, 0.6);
-    --ink3: rgba(246, 243, 238, 0.34);
-    --line: rgba(246, 243, 238, 0.1);
-    --accent: #ff6a1f;
-    --accent-soft: rgba(255, 106, 31, 0.15);
-    --chip: #26221d;
-    --good: #2ec76f;
-  }
+/* Back-office-only: a tool, not a storefront, so a tighter radius. `--bad` and
+   `--hit` alias generated tokens rather than restating their values. */
+:root {
+  --radius: 14px;
+  --bad: var(--destructive);
+  --hit: var(--hit-target);
 }
 
 * {

@@ -2,8 +2,19 @@
   "name": "@amragrir/ui",
   "private": true,
   "version": "0.0.0",
-  "description": "Shared web UI primitives (Button, Input, Card, ...) reused by apps/web and apps/admin, per docs/COMPONENTS.md. Add components as those apps need them.",
+  "description": "Design tokens — the single source for colours, spacing, radii and type, transcribed from docs/DESIGN_SYSTEM.md. Mobile imports them as objects; web and admin consume the generated tokens.css. Shared web primitives land here too as those apps need them.",
   "type": "module",
   "main": "./src/index.ts",
-  "types": "./src/index.ts"
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:css": "pnpm build && node scripts/build-css.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@amragrir/config": "workspace:*",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
 }

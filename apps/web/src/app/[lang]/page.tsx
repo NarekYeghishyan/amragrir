@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { api } from '@/lib/api';
 import { LANGUAGES, parseLanguage, t } from '@/lib/language';
@@ -49,10 +50,12 @@ export default async function HomePage({ params }: Props) {
           <ul className="chips">
             {categories.items.map((category) => (
               <li key={category.id}>
-                {/* Real links, not click handlers: a crawler follows these. */}
-                <a className="chip" href={searchPath(language, category.name)}>
+                {/* `Link` renders a real <a href> into the HTML, so a crawler
+                    follows it exactly as before — and a visitor gets client
+                    navigation instead of a full reload. */}
+                <Link className="chip" href={searchPath(language, category.name)}>
                   {category.icon} {category.name}
-                </a>
+                </Link>
               </li>
             ))}
           </ul>
