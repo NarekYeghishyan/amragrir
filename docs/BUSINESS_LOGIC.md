@@ -185,6 +185,15 @@ For the deposit: `authorized` at booking, `captured`/`credited` at completion, `
 - **Restaurant status:** `open` / `closed` (affects ability to order). **[from design]**
 - **Sort [from design]:** Recommended, Nearest, Fastest (by prep), Top rated.
 - **Filters [from design]:** price/person (4000–24000֏), max distance (0.5–5 km), min rating, dietary (Vegetarian/Vegan/Halal/Gluten-free), service (Pickup/Dine-in/Reserve). Active filters are counted in a badge; results recompute the `results count`.
+- **Price per person is derived, not stored:** the average price of a branch's
+  *available* dishes. There is no per-person column, and adding one would mean
+  keeping a denormalised figure in step with every menu edit. This is an
+  approximation and is documented as one.
+- **Search returns restaurants and dishes as two lists**, not one blended one:
+  "Sushi" is both a cuisine and a dish, and someone looking for a place to eat
+  wants different rows from someone looking for a specific plate. Dish search
+  matches **any language**, so typing "Burger" on a Russian phone still finds
+  «Бургер».
 - **Quick filters on Home [from design]:** Near Me, Ready in 15 min, Open Now, Reserve Table, Pickup, Dine In, Special Offers, Highest Rated.
 
 ---
@@ -197,12 +206,49 @@ For the deposit: `authorized` at booking, `captured`/`credited` at completion, `
 - Referrer is credited **after the invitee's first paid order**. **[proposed]**
 - Statistics: friends invited, discount earned. **[from design]**
 
+### How this is implemented
+
+- The code is generated on **first read** of `GET /referrals/me` — most accounts
+  never open the screen, and a code nobody has seen is a row nobody needs. The
+  alphabet omits `0/O` and `1/I/L`, because these codes get read aloud.
+- **Attribution happens at signup** (`referralCode` on `verify-code`) and only
+  for a genuinely new account: re-verifying an existing phone with a friend's
+  code would otherwise mint a discount.
+- An unknown or self-referring code is **ignored, not rejected** — the signup
+  succeeds without attribution rather than failing on a typo.
+- **The inviter is paid when the invitee first pays**, not at signup: otherwise
+  inviting a hundred throwaway numbers would earn the full 25% for free. The
+  `users.referred_by` link is cleared in the same transaction, which is what
+  makes the credit once-per-invitee rather than once-per-order.
+- **Stacking is accumulation into one coupon**, not a pile of 2% ones: the
+  design shows a single "discount earned" figure, and the 25% cap is
+  meaningless unless something adds up to be capped. A spent coupon starts
+  again from 2%.
+- A coupon is **claimed** when an order is created (a conditional update, so
+  two simultaneous orders cannot both spend it), **returned** if that order is
+  cancelled, and only *previewed* — never spent — by a basket quote.
+- The discount applies to the **subtotal**, not the total: the service fee is
+  the platform's, and a referral discount is a discount on food. It is rounded
+  down, so rounding never costs the customer.
+
 ---
 
 ## 8. Rewards and coupons
 
 - The profile stores: **reward points** (e.g. 340), **orders count** (28), **coupons** (3). **[from design]**
 - Points accrual mechanic **[proposed]:** X points per paid order / % of amount; redeemed as a discount. Align rates with product.
+
+### How this is implemented
+
+- **Accrual only.** One point per 100֏ of order **subtotal**, credited when the
+  order is paid. On the subtotal so the platform's own fee does not mint points.
+- **Redemption is deliberately not implemented.** The design shows a balance but
+  no redemption screen, and inventing a second rate would invent an economy
+  nobody agreed to. Points accumulate and display; spending them needs a product
+  decision (see DEVELOPMENT_GUIDE.md open questions).
+- Awarding points and crediting a referrer happen **after** the payment has
+  committed, and a failure in either is logged rather than raised — loyalty
+  bookkeeping must never tell a customer their successful payment failed.
 
 ---
 

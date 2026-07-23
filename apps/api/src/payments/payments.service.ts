@@ -2,6 +2,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -11,9 +12,11 @@ import {
   PaymentMethod,
   PaymentStatus,
   canTransitionOrder,
+  pointsFor,
 } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderEventsService, toStatusEvent } from '../orders/order-events.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import { PAYMENT_PROVIDER, PaymentDeclinedError, type PaymentProvider } from './payment.provider';
 import { CreatePaymentDto } from './dto';
 
@@ -34,7 +37,10 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
     private readonly events: OrderEventsService,
+    private readonly referrals: ReferralsService,
   ) {}
+
+  private readonly logger = new Logger(PaymentsService.name);
 
   methods(): { methods: PaymentMethod[]; default: PaymentMethod } {
     return { methods: Object.values(PaymentMethod), default: DEFAULT_METHOD };
@@ -124,6 +130,36 @@ export class PaymentsService {
     return PaymentStatus.Cancelled;
   }
 
+  /**
+   * Rewards a paid order: points for the buyer, and the referral credit for
+   * whoever invited them.
+   *
+   * After the payment has committed, and each failure swallowed with a log.
+   * Points and referrals are loyalty bookkeeping — losing one is a support
+   * ticket, while failing the request would tell a customer their successful
+   * payment failed and invite them to pay again.
+   */
+  private async reward(userId: string, subtotalAmd: number): Promise<void> {
+    const points = pointsFor(subtotalAmd);
+
+    try {
+      if (points > 0) {
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { rewardPoints: { increment: points } },
+        });
+      }
+    } catch (err) {
+      this.logger.error(`Could not award ${points} points to ${userId}`, err as Error);
+    }
+
+    try {
+      await this.referrals.creditReferrerFor(userId);
+    } catch (err) {
+      this.logger.error(`Could not credit the referrer of ${userId}`, err as Error);
+    }
+  }
+
   /** Writes the payment and moves the order to `paid` in one transaction —
    *  a captured charge with an unpaid order is money the kitchen never hears about. */
   private async settle(
@@ -153,6 +189,8 @@ export class PaymentsService {
     // Paying is a status change like any other, so anyone watching the order
     // hears about it — otherwise the tracking screen would open on stale data.
     this.events.publish(toStatusEvent(order));
+
+    await this.reward(order.userId, order.subtotalAmd);
 
     return {
       id: payment.id,

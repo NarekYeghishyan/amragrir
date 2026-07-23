@@ -148,6 +148,12 @@ Implemented in `apps/api`:
 - **The back office is a client like any other.** `apps/admin` signs in with the
   same OTP flow and holds no privileges of its own; its role check only decides
   which screens to render, never what the API allows.
+- **Favourites, referrals and coupons need a verified phone.** They belong to an
+  account rather than a device, so a guest session would lose them — matching
+  §1's "❌ Favorites, history, rewards, referrals". Browsing and pricing a
+  basket stay open to guests.
+- **A coupon code is personal.** Lookups are keyed on `(user_id, code)`, so
+  knowing someone else's code is worth nothing.
 - **Table bookings follow the same two rules.** A guest needs a verified phone
   to book (`POST /reservations`) and only ever sees their own — another
   guest's is a 404. Owner and admin read and advance bookings for their own

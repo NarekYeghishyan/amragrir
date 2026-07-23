@@ -6,6 +6,7 @@ import { PaymentDeclinedError, type PaymentProvider } from './payment.provider';
 import type { OrderEventsService } from '../orders/order-events.service';
 import { CreatePaymentDto } from './dto';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { ReferralsService } from '../referrals/referrals.service';
 
 const ORDER_ID = '44444444-4444-4444-8444-444444444444';
 
@@ -54,12 +55,19 @@ function build(options: { order?: unknown; charge?: jest.Mock } = {}) {
   };
 
   const events = { publish: jest.fn(), subscribe: jest.fn() };
+  const referrals = { creditReferrerFor: jest.fn().mockResolvedValue(undefined) };
 
   return {
-    service: new PaymentsService(prisma, provider, events as unknown as OrderEventsService),
+    service: new PaymentsService(
+      prisma,
+      provider,
+      events as unknown as OrderEventsService,
+      referrals as unknown as ReferralsService,
+    ),
     prisma,
     provider,
     events,
+    referrals,
     paymentCreate,
     paymentUpdate,
   };

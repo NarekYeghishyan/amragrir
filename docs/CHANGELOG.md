@@ -521,6 +521,88 @@ Deferred and written down: per-restaurant seating lengths, real `open_hours`
 (availability falls back to a documented 10:00–23:00), and table management
 (`/owner/tables`).
 
+### Phase 8 — Favourites, search, filters, referrals and rewards
+
+`GET|POST|DELETE /favorites`, `GET /search`, `GET /search/popular`,
+`GET /referrals/me`, `GET /coupons`, plus `couponCode` on quotes and orders.
+
+- **The referral program now actually pays out.** `referralCode` on
+  `verify-code` was accepted and ignored since Phase 1; it now attributes the
+  account and issues the newcomer's 2% coupon. Guards that matter: attribution
+  only for a genuinely **new** account (re-verifying an existing phone with a
+  friend's code would be a discount generator), self-referral ignored, and an
+  unknown code ignored rather than failing a signup over a typo.
+- **The inviter is paid on the invitee's first *paid* order**, not at signup —
+  otherwise inviting a hundred throwaway numbers earns the full 25% for free.
+  `users.referred_by` is cleared in the same transaction, which is what makes
+  the credit once-per-invitee rather than once-per-order. Verified live: a
+  second paid order left the figure unchanged.
+- **Stacking is accumulation into one coupon**, not a pile of 2% rows. The
+  design shows a single "discount earned" figure, and a 25% cap is meaningless
+  unless something adds up to be capped. A spent reward restarts at 2% —
+  flagged as an open question, since the other reading is defensible.
+- **A quote previews a coupon; an order claims it.** Pricing a basket must not
+  spend the coupon the guest is only looking at. The claim is a conditional
+  update (`usedAt: null` in the filter), so two orders submitted at once cannot
+  both apply it — the loser gets a 422 instead of a double discount.
+- **Cancelling an order returns the coupon**, and an order that fails to insert
+  releases the coupon it just claimed. Both have tests.
+- **A rejected coupon code is reported, not swallowed.** The quote carries
+  `coupon: { code, applied: false }` so the basket can say so, rather than
+  quietly charging full price — the same reasoning that made unknown fields a
+  400 in Phase 4.
+- **Discounts apply to the subtotal, not the total** (the service fee is the
+  platform's), are capped at 25%, and round **down** so rounding never costs the
+  customer.
+- **Reward points: accrual only.** One point per 100֏ of subtotal, on payment.
+  **Redemption is deliberately unbuilt** — the design shows a balance but no way
+  to spend it, and inventing a rate would invent an economy nobody agreed to.
+  Written into the open questions rather than guessed at.
+- Points and referral credit run **after** the payment commits, and each failure
+  is logged rather than raised: loyalty bookkeeping must never tell a customer
+  their successful payment failed.
+- **The price-per-person filter is implemented**, closing an open question left
+  since Phase 2. Derived as the average price of a branch's available dishes
+  rather than a stored column that every menu edit would have to keep in step;
+  documented as the approximation it is. A range matching nothing returns an
+  empty list rather than silently dropping the filter.
+- **Dish search matches any language.** It runs over the whole `name_i18n` blob,
+  so "bowl" finds «Боул с киноа» and "боул" finds "Quinoa Bowl" — verified both
+  directions live. Restaurants and dishes come back as two lists, because
+  "Sushi" is both a cuisine and a dish.
+- **Popular tags are static and labelled as such.** Real popularity needs query
+  logging that does not exist; a table nothing writes to would look like a
+  feature and return nothing.
+- **Favourites are idempotent both ways** — a double tap is not an error, and
+  removing something absent leaves the caller in the state they asked for. They
+  carry a `branchId` so a card links somewhere orderable.
+- Schema: `orders.coupon_id` + `orders.discount_amd` (stored, not recomputed —
+  a referral coupon's percentage grows, and a past order must keep saying what
+  was actually charged), and `coupons` unique on `(user_id, code)` because a
+  coupon code is personal. `ON DELETE SET NULL`, so deleting a coupon can never
+  delete the order that used it.
+- **349 tests** (up from 307).
+
+**One bug found by the live run, not by the suite:** the discount was applied to
+the total but missing from the order response, so the app could not show "you
+saved 168֏". Fixed, with a regression test. The suite had asserted the maths and
+the storage but never the shape of the reply.
+
+**Also caught by lint, not by tests:** `AuthModule` imported `ReferralsModule`
+without adding it to `imports`, which typechecks and passes every unit test but
+fails at boot. Another instance of "a green build is not a working app".
+
+**Verified live:** cross-language dish search, the price filter against real
+menu averages (both restaurants average under 4 500֏, so `priceMin=4500`
+correctly returns nothing), idempotent favourites, signup attribution, the
+coupon surviving a quote and being spent by an order, 422 on reuse, the coupon
+coming back after a cancellation, 84 points for an 8 400֏ subtotal, the inviter
+credited exactly once, and 403 for guests on favourites and referrals.
+
+**Not built:** the favourites, search and referral **screens** in `apps/mobile`,
+and `POST /referrals/share` (sharing happens in the OS share sheet; there is
+nothing for the server to do until share analytics are wanted).
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

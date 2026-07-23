@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { SmsModule } from '../sms/sms.module';
+import { ReferralsModule } from '../referrals/referrals.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { OtpService } from './otp.service';
@@ -10,6 +11,8 @@ import { TokenService } from './token.service';
 @Module({
   imports: [
     SmsModule,
+    // AuthService attributes a referral code at signup.
+    ReferralsModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

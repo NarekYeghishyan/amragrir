@@ -4,6 +4,7 @@ import { Language } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { localize, type I18nField } from '../common/i18n';
 import { boundingBox, distanceKm, roundKm } from './geo';
+import { SearchService } from './search.service';
 import { ListRestaurantsDto, MenuQueryDto, RestaurantSort } from './dto';
 
 /**
@@ -87,7 +88,10 @@ type BranchWithRestaurant = Prisma.RestaurantBranchGetPayload<{
 
 @Injectable()
 export class RestaurantsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly search: SearchService,
+  ) {}
 
   /**
    * Nearby list for the home feed. Each row is a *branch* — that is what a
@@ -98,13 +102,29 @@ export class RestaurantsService {
     _language: Language,
   ): Promise<{ items: RestaurantListItem[]; total: number; page: number }> {
     const origin = this.origin(query);
+
+    // Resolved before the main query because it is an aggregate over dishes,
+    // which Prisma cannot express as a relation filter. An empty result means
+    // "no branch matches", not "no filter" — hence the explicit null check.
+    const priceFiltered =
+      query.priceMin !== undefined || query.priceMax !== undefined
+        ? await this.search.branchIdsInPriceRange(query.priceMin, query.priceMax)
+        : null;
+
+    if (priceFiltered !== null && priceFiltered.length === 0) {
+      return { items: [], total: 0, page: query.page };
+    }
     // Distance is computed in the app (see geo.ts), so a distance filter or
     // sort has to be applied before paging — fetch the candidate set, then page.
     const usesDistance =
       origin !== null && (query.sort === RestaurantSort.Nearest || query.distMax !== undefined);
 
     const radiusKm = usesDistance ? (query.distMax ?? NEAREST_RADIUS_KM) : undefined;
-    const where = this.buildWhere(query, origin && radiusKm ? { origin, radiusKm } : undefined);
+    const where = this.buildWhere(
+      query,
+      origin && radiusKm ? { origin, radiusKm } : undefined,
+      priceFiltered,
+    );
 
     if (!usesDistance) {
       const [rows, total] = await Promise.all([
@@ -273,6 +293,7 @@ export class RestaurantsService {
   private buildWhere(
     query: ListRestaurantsDto,
     bounds?: { origin: { lat: number; lng: number }; radiusKm: number },
+    priceFilteredBranchIds?: string[] | null,
   ): Prisma.RestaurantBranchWhereInput {
     const restaurant: Prisma.RestaurantWhereInput = {};
 
@@ -314,6 +335,10 @@ export class RestaurantsService {
       const box = boundingBox(bounds.origin, bounds.radiusKm);
       where.lat = { gte: box.minLat, lte: box.maxLat };
       where.lng = { gte: box.minLng, lte: box.maxLng };
+    }
+
+    if (priceFilteredBranchIds) {
+      where.id = { in: priceFilteredBranchIds };
     }
 
     return where;

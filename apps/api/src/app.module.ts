@@ -10,6 +10,8 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { OrdersModule } from './orders/orders.module';
+import { FavoritesModule } from './favorites/favorites.module';
+import { ReferralsModule } from './referrals/referrals.module';
 import { OrderEventsModule } from './orders/order-events.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ReservationsModule } from './reservations/reservations.module';
@@ -37,6 +39,8 @@ import { IdempotencyInterceptor } from './common/idempotency/idempotency.interce
     OrderEventsModule,
     OrdersModule,
     PaymentsModule,
+    FavoritesModule,
+    ReferralsModule,
     ReservationsModule,
     OwnerModule,
     HealthModule,

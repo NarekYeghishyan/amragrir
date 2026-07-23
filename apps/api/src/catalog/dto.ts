@@ -85,6 +85,25 @@ export class ListRestaurantsDto {
   @MaxLength(120)
   q?: string;
 
+  /**
+   * Typical spend per person, in AMD (the design's 4000–24000 slider).
+   *
+   * Derived from the average price of a branch's available dishes — there is
+   * no stored per-person figure, and adding one would mean keeping a
+   * denormalised column in step with every menu edit.
+   */
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  @Type(() => Number)
+  priceMin?: number;
+
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  @Type(() => Number)
+  priceMax?: number;
+
   @IsInt()
   @IsOptional()
   @Min(1)
@@ -99,6 +118,22 @@ export class ListRestaurantsDto {
   @Max(50)
   @Type(() => Number)
   limit = 20;
+}
+
+export class SearchQueryDto {
+  @IsString()
+  @MaxLength(120)
+  q!: string;
+
+  @IsLatitude()
+  @IsOptional()
+  @Type(() => Number)
+  lat?: number;
+
+  @IsLongitude()
+  @IsOptional()
+  @Type(() => Number)
+  lng?: number;
 }
 
 export class MenuQueryDto {

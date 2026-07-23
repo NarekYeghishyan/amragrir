@@ -52,6 +52,13 @@ export class BasketDto {
   @IsUUID()
   @IsOptional()
   reservationId?: string;
+
+  /** A coupon the caller holds. Priced server-side; the client never says how
+   *  much it is worth. */
+  @IsString()
+  @IsOptional()
+  @MaxLength(20)
+  couponCode?: string;
 }
 
 export class CreateOrderDto extends BasketDto {

@@ -24,6 +24,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { localize, type I18nField } from '../common/i18n';
 import { PaymentsService } from '../payments/payments.service';
 import { orderScopeFor } from '../owner/branch-access';
+import { CouponsService } from '../referrals/coupons.service';
 import type { JwtPayload } from '../auth/token.service';
 import { OrderEventsService, countdown, toStatusEvent } from './order-events.service';
 import { generateOrderCode, pickupCodeFrom } from './order-code';
@@ -62,6 +63,11 @@ export interface QuoteResult {
   serviceFeeAmd: number;
   depositAmd: number;
   totalAmd: number;
+  discountAmd: number;
+  /** Null unless a coupon code was supplied; `applied: false` says the code
+   *  was rejected, which the basket screen must show rather than silently
+   *  charging full price. */
+  coupon: { code: string; applied: boolean; discountAmd: number } | null;
   /** Left to pay after a table deposit is credited; equals `totalAmd` for pickup. */
   dueNowAmd: number;
   /** The booked table, for a dine-in basket. */
@@ -94,6 +100,9 @@ export interface OrderDetail {
   subtotalAmd: number;
   serviceFeeAmd: number;
   depositAmd: number;
+  /** What a coupon took off. The client shows "you saved …", so it has to be
+   *  here and not merely folded into `totalAmd`. */
+  discountAmd: number;
   totalAmd: number;
   readyAt: string | null;
   secondsLeft: number | null;
@@ -139,6 +148,7 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly payments: PaymentsService,
     private readonly events: OrderEventsService,
+    private readonly coupons: CouponsService,
   ) {}
 
   /**
@@ -155,7 +165,15 @@ export class OrdersService {
     const reservation = await this.resolveReservation(userId, dto);
 
     const { branch, lines, unavailable } = await this.loadBasket(dto, language);
-    const totals = priceOrder(lines, reservation?.depositAmd ?? 0);
+
+    const subtotal = lines.reduce((sum, line) => sum + line.lineTotalAmd, 0);
+    // Priced, not claimed: a quote must not spend a coupon the guest is only
+    // looking at.
+    const applied = dto.couponCode
+      ? await this.coupons.preview(userId, dto.couponCode, subtotal)
+      : null;
+
+    const totals = priceOrder(lines, reservation?.depositAmd ?? 0, applied?.discountAmd ?? 0);
     const prepMin = estimatePrepMinutes(lines, branch.avgPrepMin);
 
     return {
@@ -165,6 +183,14 @@ export class OrdersService {
       items: lines.map(({ prepMin: _prepMin, ...line }) => line),
       unavailable,
       ...totals,
+      coupon:
+        dto.couponCode === undefined
+          ? null
+          : {
+              code: dto.couponCode.toUpperCase(),
+              applied: applied !== null,
+              discountAmd: applied?.discountAmd ?? 0,
+            },
       // What is actually left to pay at the table: the deposit was taken at
       // booking and is credited, not charged again (BUSINESS_LOGIC.md §3).
       dueNowAmd: Math.max(0, totals.totalAmd - (reservation?.depositAmd ?? 0)),
@@ -193,33 +219,58 @@ export class OrdersService {
 
     const prepMin = estimatePrepMinutes(lines, branch.avgPrepMin);
     const readyAt = this.resolveReadyAt(dto.readyAt, prepMin);
-    const totals = priceOrder(lines, reservation?.depositAmd ?? 0);
 
-    const order = await this.createWithUniqueCode(branch.id, (code) => ({
-      code,
-      userId,
-      branchId: branch.id,
-      serviceMode: dto.serviceMode,
-      status: OrderStatus.Created,
-      subtotalAmd: totals.subtotalAmd,
-      serviceFeeAmd: totals.serviceFeeAmd,
-      // Recorded so the bill shows what was already held, but never added to
-      // the total — `priceOrder` is what guarantees that.
-      depositAmd: totals.depositAmd,
-      totalAmd: totals.totalAmd,
-      readyAt,
-      reservationId: reservation?.id ?? null,
-      notes: dto.notes ?? null,
-      items: {
-        create: lines.map((line) => ({
-          menuItemId: line.menuItemId,
-          nameSnapshot: line.name,
-          unitPriceAmd: line.unitPriceAmd,
-          qty: line.qty,
-          lineTotalAmd: line.lineTotalAmd,
-        })),
-      },
-    }));
+    const subtotal = lines.reduce((sum, line) => sum + line.lineTotalAmd, 0);
+    // Claimed now, so two orders submitted at once cannot both spend it. If
+    // the order then fails to insert, it is handed back below.
+    const applied = dto.couponCode
+      ? await this.coupons.claim(userId, dto.couponCode, subtotal)
+      : null;
+
+    const totals = priceOrder(lines, reservation?.depositAmd ?? 0, applied?.discountAmd ?? 0);
+
+    let order;
+    try {
+      order = await this.createWithUniqueCode(branch.id, (code) => ({
+        code,
+        userId,
+        branchId: branch.id,
+        serviceMode: dto.serviceMode,
+        status: OrderStatus.Created,
+        subtotalAmd: totals.subtotalAmd,
+        serviceFeeAmd: totals.serviceFeeAmd,
+        // Recorded so the bill shows what was already held, but never added to
+        // the total — `priceOrder` is what guarantees that.
+        depositAmd: totals.depositAmd,
+        discountAmd: totals.discountAmd,
+        couponId: applied?.coupon.id ?? null,
+        totalAmd: totals.totalAmd,
+        readyAt,
+        reservationId: reservation?.id ?? null,
+        notes: dto.notes ?? null,
+        items: {
+          create: lines.map((line) => ({
+            menuItemId: line.menuItemId,
+            nameSnapshot: line.name,
+            unitPriceAmd: line.unitPriceAmd,
+            qty: line.qty,
+            lineTotalAmd: line.lineTotalAmd,
+          })),
+        },
+      }));
+    } catch (err) {
+      // The coupon was claimed a moment ago; an order that never existed must
+      // not consume it.
+      if (applied) {
+        await this.coupons.release(applied.coupon.id).catch((releaseErr: unknown) => {
+          this.logger.error(
+            `Claimed coupon ${applied.coupon.id} for an order that failed, and could not release it`,
+            releaseErr as Error,
+          );
+        });
+      }
+      throw err;
+    }
 
     return this.toDetail(order);
   }
@@ -303,6 +354,11 @@ export class OrdersService {
       next === OrderStatus.Cancelled && order.payment
         ? await this.payments.reverse(order.payment)
         : null;
+
+    // A cancelled order never enjoyed its discount, so the coupon goes back.
+    if (next === OrderStatus.Cancelled && order.couponId) {
+      await this.coupons.release(order.couponId);
+    }
 
     const updated = await this.prisma
       .$transaction(async (tx) => {
@@ -576,6 +632,7 @@ export class OrdersService {
       subtotalAmd: order.subtotalAmd,
       serviceFeeAmd: order.serviceFeeAmd,
       depositAmd: order.depositAmd,
+      discountAmd: order.discountAmd,
       totalAmd: order.totalAmd,
       readyAt: order.readyAt?.toISOString() ?? null,
       secondsLeft: countdown(order.readyAt, order.status as OrderStatus),

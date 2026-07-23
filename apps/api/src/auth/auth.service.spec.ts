@@ -1,6 +1,7 @@
 import { Prisma, type User } from '@prisma/client';
 import { Role } from '@amragrir/shared';
 import { AuthService } from './auth.service';
+import type { ReferralsService } from '../referrals/referrals.service';
 import type { OtpService } from './otp.service';
 import type { TokenService, JwtPayload } from './token.service';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -50,7 +51,18 @@ function build(opts: { existing?: User | null; caller?: JwtPayload | null } = {}
     tryReadAccess: jest.fn().mockResolvedValue(opts.caller ?? null),
   } as unknown as TokenService;
 
-  return { service: new AuthService(prisma, otp, tokens), update, create, otp, tokens };
+  const referrals = {
+    attribute: jest.fn().mockResolvedValue(undefined),
+  } as unknown as ReferralsService;
+
+  return {
+    service: new AuthService(prisma, otp, tokens, referrals),
+    update,
+    create,
+    otp,
+    tokens,
+    referrals,
+  };
 }
 
 const guestClaims: JwtPayload = {

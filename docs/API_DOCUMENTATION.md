@@ -79,8 +79,11 @@ Anonymous session — browsing and basket only.
   invalid token is not an error.
 
 ### `referralCode` on verify-code
-Accepted and validated, but **not yet applied** — referral attribution lands
-with the referrals module (see BUSINESS_LOGIC.md §7).
+**Applied.** Attributes the new account to the inviter and issues the
+newcomer's 2% welcome coupon. Only for a genuinely new account — re-verifying
+an existing phone with a friend's code changes nothing, or it would be a
+discount generator. An unknown or self-referring code is ignored rather than
+failing the signup.
 
 ---
 
@@ -138,8 +141,10 @@ Nearby list with filters (Home feed).
 - `category` and `dietary` select restaurants having **at least one matching
   menu item**, not attributes of the restaurant row.
 - `limit` is capped at **50**; exceeding it is a 400.
-- **`priceMax` is not implemented** — the design's price-per-person filter has
-  no backing column (see DEVELOPMENT_GUIDE.md open questions).
+- **`priceMin` / `priceMax`** filter on typical spend per person, derived as the
+  average price of a branch's *available* dishes. There is no stored
+  per-person column; this is an approximation, and a range that matches nothing
+  returns an empty list rather than silently dropping the filter.
 - **Response 200:**
 ```json
 { "items": [ {
@@ -199,12 +204,21 @@ Bookable times for a local date, **answered per party size**.
 Ordered by `sortOrder`. `name` is resolved from `Accept-Language` (default `hy`).
 - **Response 200:** `{ "items": [ { "id","key":"sushi","icon":"🍣","name":"Sushi" } ] }`
 
-### GET /search
-- **Query:** `q, lat, lng`
-- **Response 200:** `{ "restaurants": [...], "dishes": [...] }`
+### GET /search · *implemented, public*
+- **Query:** `q` (required), `lat`, `lng`
+- **Response 200:** `{ "restaurants": [...], "dishes": [...], "query" }`
+- Two lists rather than one blended one — "Sushi" is both a cuisine and a dish.
+- Restaurants match on name and cuisine; `distanceKm` is filled in when
+  `lat`/`lng` are supplied.
+- **Dishes match in any language.** The search runs over the whole `name_i18n`
+  blob, so "Burger" finds «Бургер»; the returned `name` is then resolved from
+  `Accept-Language`. An empty query returns empty lists, not everything.
 
-### GET /search/popular
+### GET /search/popular · *implemented, public*
 - **Response 200:** `{ "tags": ["Lunch deals","Sushi","Poke bowls","Ramen","Cold brew","Vegan"] }`
+- **Static, deliberately.** Real popularity needs query logging that does not
+  exist yet; a table nothing writes to would look like a feature and return
+  nothing.
 
 ---
 
@@ -441,19 +455,60 @@ keeps across retries).
 
 ## Favorites
 
-### GET /favorites → `{ "items":[ restaurant… ] }`
-### POST /favorites → **Body:** `{ "restaurantId" }`
+> **Implemented.** All routes require a **verified phone** — favourites belong
+> to an account, and a guest session is per-device and would lose them.
+
+### GET /favorites
+- **Response 200:** `{ "items":[ { "restaurantId","branchId","slug","name","cuisine","priceLevel","rating","reviewsCount","coverUrl","prepMin","isOpen","services","addedAt" } ] }`
+- `branchId` is included so a card links straight to a page that can be ordered
+  from; it is `null` for a restaurant that has no branch yet.
+
+### POST /favorites
+- **Body:** `{ "restaurantId" }` → **200** `{ "favorited": true }`
+- **Idempotent** — favouriting twice is what a double tap does, not an error.
+- **404** if the restaurant does not exist.
+
 ### DELETE /favorites/{restaurantId} → **204**
+- Also idempotent: removing something absent leaves the caller in the state
+  they asked for.
 
 ---
 
-## Referrals
+## Referrals and coupons
+
+> **Implemented.** Both routes require a verified phone.
 
 ### GET /referrals/me
-- **Response 200:** `{ "code":"ARAM5","link":"amragrir.am/i/ARAM5","invitedCount":3,"discountEarnedPct":6 }`
+- **Response 200:**
+```json
+{ "code":"ARAM5","link":"amragrir.am/i/ARAM5","invitedCount":3,
+  "discountEarnedPct":6,"maxStackPct":25,
+  "coupon":{ "code":"FRIENDS","discountPct":6,"validUntil":"…" } }
+```
+- The code is **created on first read** — most accounts never open this screen.
+- `discountEarnedPct` is the lifetime figure; `coupon` is the reward actually
+  waiting to be used. They differ once a reward has been spent.
 
-### POST /referrals/share
+### GET /coupons
+- **Response 200:** `{ "items":[ { "id","code","discountPct","discountAmd","source","validUntil" } ] }`
+- Unused and unexpired only. Expired coupons are kept (history, support) but not
+  offered.
+
+### Using a coupon
+`couponCode` is accepted by **`POST /cart/quote`** and **`POST /orders`**.
+
+- A quote **prices** the coupon and never spends it; the response carries
+  `{ coupon: { code, applied, discountAmd } }` so a rejected code is *shown*
+  rather than silently charging full price.
+- An order **claims** it. Two orders submitted at once cannot both spend one
+  coupon; the loser gets **422**.
+- Cancelling an order **returns** the coupon.
+- The discount applies to the **subtotal** and is capped at **25%**.
+
+### POST /referrals/share — **not implemented**
 - **Body:** `{ "channel":"link|whatsapp|telegram" }` → `{ "shared": true }`
+- Sharing happens in the OS share sheet; there is nothing for the server to do
+  until share analytics are wanted.
 
 ---
 
