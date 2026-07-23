@@ -27,9 +27,14 @@ kitchen, and table booking with held deposits). `apps/mobile` covers the whole
 ordering path —
 auth → home → restaurant → basket → checkout → live tracking — against the real
 API, and `apps/admin` is a working back office (live kitchen queue, menu, the
-open/closed switch). `apps/web` serves the public, indexable restaurant pages in
-all three languages. The booking screens on mobile, the booking book in the back
-office, and ordering on the web are not built yet. See
+open/closed switch) that also carries the platform-admin screens — metrics,
+role changes, restaurant creation and promo coupons. `apps/web` serves the
+public, indexable restaurant pages in all three languages.
+
+**All ten roadmap phases are done.** Still open and written down rather than
+skipped: the booking screens on mobile, the booking book in the back office,
+ordering on the web, review moderation (there is no review API yet), and
+editable platform settings. See
 [docs/DEVELOPMENT_GUIDE.md](./docs/DEVELOPMENT_GUIDE.md) for the full
 architecture and build order.
 

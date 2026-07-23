@@ -154,6 +154,28 @@ Implemented in `apps/api`:
   basket stay open to guests.
 - **A coupon code is personal.** Lookups are keyed on `(user_id, code)`, so
   knowing someone else's code is worth nothing.
+
+### Role changes
+
+`PATCH /admin/users/{id}/role` is admin-only and carries four refusals, each
+protecting against a state the platform cannot recover from:
+
+| Refusal | Why |
+|---|---|
+| Your own role (422) | An admin who demotes themselves loses the panel with no way back |
+| A guest or unverified account (422) | Staff powers would go to an anonymous device |
+| The last administrator (409) | Nobody could restore one afterwards |
+| An owner who still has restaurants (409) | Their restaurants would become unmanageable |
+
+**Changing a role revokes every session that account holds.** Access tokens
+carry `role` in their claims — that is what lets a guard decide without touching
+the database — so a demoted account keeps its old powers until the current token
+expires (15 minutes). Revoking the refresh tokens is what stops that window
+being extended indefinitely, and it is the reason the access TTL is short.
+
+The consequence is visible and intended: a promoted user must **sign in again**
+before the new role reaches their claims. `GET /me` reads the database and shows
+the new role immediately; the guards do not.
 - **Table bookings follow the same two rules.** A guest needs a verified phone
   to book (`POST /reservations`) and only ever sees their own — another
   guest's is a 404. Owner and admin read and advance bookings for their own

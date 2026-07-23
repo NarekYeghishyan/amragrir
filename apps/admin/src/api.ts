@@ -211,6 +211,36 @@ export interface OwnerMenuItem {
   isAvailable: boolean;
 }
 
+export interface Metrics {
+  from: string;
+  to: string;
+  orders: { total: number; earning: number; cancelled: number; abandonedPct: number };
+  revenue: {
+    grossAmd: number;
+    serviceFeeAmd: number;
+    discountAmd: number;
+    averageOrderAmd: number;
+  };
+  byStatus: { status: string; count: number }[];
+  topRestaurants: { name: string; orders: number; revenueAmd: number }[];
+  users: { total: number; verified: number; newInPeriod: number };
+  reservations: { total: number; seated: number; noShow: number };
+}
+
+export interface AdminUser {
+  id: string;
+  name: string | null;
+  /** Masked by the API — the panel never sees a full number. */
+  phone: string | null;
+  email: string | null;
+  role: string;
+  isGuest: boolean;
+  phoneVerified: boolean;
+  ordersCount: number;
+  rewardPoints: number;
+  createdAt: string;
+}
+
 // ── endpoints ───────────────────────────────────────────────────────────────
 
 export const api = {
@@ -256,4 +286,34 @@ export const api = {
     request<OwnerMenuItem>(`/owner/menu-items/${id}`, { method: 'PATCH', body: patch }),
 
   deleteMenuItem: (id: string) => request<void>(`/owner/menu-items/${id}`, { method: 'DELETE' }),
+
+  // ── admin only ────────────────────────────────────────────────────────────
+
+  metrics: (from?: string, to?: string) => request<Metrics>('/admin/metrics', { query: { from, to } }),
+
+  reconciliation: () =>
+    request<{ items: { orderCode: string; issue: string }[] }>('/admin/metrics/reconciliation'),
+
+  users: (q?: string, role?: string) =>
+    request<{ items: AdminUser[]; total: number; page: number }>('/admin/users', {
+      query: { q, role, limit: '50' },
+    }),
+
+  setUserRole: (id: string, role: string) =>
+    request<AdminUser>(`/admin/users/${id}/role`, { method: 'PATCH', body: { role } }),
+
+  createRestaurant: (data: {
+    slug: string;
+    name: string;
+    ownerId: string;
+    cuisine?: string;
+    priceLevel?: number;
+  }) => request<{ id: string; slug: string }>('/admin/restaurants', { method: 'POST', body: data }),
+
+  issuePromo: (data: {
+    code: string;
+    discountPct?: number;
+    discountAmd?: number;
+    validUntil?: string;
+  }) => request<{ code: string; issued: number }>('/admin/promos', { method: 'POST', body: data }),
 };

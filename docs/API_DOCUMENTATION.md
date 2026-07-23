@@ -605,6 +605,66 @@ The book for a service, chronological.
 - `confirmed` and `seated` **leave the deposit alone**; only an ending decides
   the money, per the table in BUSINESS_LOGIC.md §3.
 
+### Admin · *implemented*
+
+> `admin` role only. Everything below is refused with **403** for owner, staff
+> and customer alike.
+
+#### GET /admin/metrics
+- **Query:** `from`, `to` (ISO); defaults to the last 30 days.
+- **Response 200:** orders (total, earning, cancelled, `abandonedPct`), revenue
+  (gross, service fees, discounts given, average order), `byStatus`,
+  `topRestaurants`, users, reservations.
+- **Revenue counts `paid` and later only.** A `created` order is an abandoned
+  basket and a `cancelled` one was refunded; counting either would misreport
+  the business in both directions.
+
+#### GET /admin/metrics/reconciliation
+Payments and orders that disagree — a captured payment on a cancelled order, or
+a failed payment on an order that says it is paid. **Empty is the expected
+answer**; anything here needs a human.
+
+#### GET /admin/users
+- **Query:** `q` (phone, name or email), `role`, `page`, `limit`
+- **Phone numbers come back masked** (`+374******56`). An admin list is not a
+  reason to hand out every number in full.
+
+#### PATCH /admin/users/{id}/role
+- **Body:** `{ "role": "customer|staff|owner|admin" }` — `guest` is rejected,
+  because it is the `is_guest` flag rather than a database role.
+- **Refusals, each for a reason:**
+  - **422** changing your own role — an admin who demotes themselves loses the
+    panel with no way back.
+  - **422** the target is a guest or has no verified phone.
+  - **409** demoting the last administrator — nobody could restore one.
+  - **409** demoting an owner who still has restaurants; reassign them first,
+    or they become unmanageable.
+- **Every session the account holds is revoked.** Access tokens carry `role`
+  and cannot be recalled, so the old one keeps working until it expires (15
+  min); killing the refresh tokens is what stops that window being extended.
+  The user must sign in again before the new role reaches their claims.
+
+#### POST /admin/restaurants
+- **Body:** `{ "slug","name","ownerId","cuisine"?,"priceLevel"? }`
+- `slug` must be lowercase words separated by hyphens — it becomes a public URL
+  on `apps/web`.
+- **422** if `ownerId` is not an owner or admin: the restaurant would exist with
+  an "owner" who cannot open it in the panel. **409** on a duplicate slug.
+
+#### POST /admin/promos
+- **Body:** `{ "code","discountPct"? | "discountAmd"?,"validUntil"?,"userIds"? }`
+- **Exactly one** of `discountPct` / `discountAmd`; **400** otherwise.
+  `discountPct` is capped at 25, the same ceiling as stacked referrals.
+- Goes to every **verified, non-guest** account unless `userIds` is given.
+- Re-issuing the same code **tops up accounts that joined since** and skips
+  those who already hold it; the response reports what was actually created,
+  not what was asked for.
+
 ### Not implemented yet
 - `GET|POST|PATCH /owner/tables` — manage tables.
-- `GET /admin/*` — manage users, restaurants, moderate reviews, metrics.
+- **Review moderation.** There is no review API at all yet — moderating content
+  that cannot be created would be theatre.
+- **Platform settings** (fees, deposit rates). They live in
+  `packages/shared/src/constants.ts`; making them editable means moving pricing
+  into the database, which changes how every order is priced rather than adding
+  a screen.
