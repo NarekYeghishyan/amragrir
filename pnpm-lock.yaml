@@ -142,6 +142,9 @@ importers:
       '@amragrir/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@amragrir/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       expo:
         specifier: ~57.0.7
         version: 57.0.7(1ed791e66037779c4f068ffbcd8784cf)
@@ -254,7 +257,17 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  packages/ui: {}
+  packages/ui:
+    devDependencies:
+      '@amragrir/config':
+        specifier: workspace:*
+        version: link:../config
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(jsdom@20.0.3(supports-color@8.1.1))(lightningcss@1.33.0)(supports-color@8.1.1)(terser@5.49.0)(yaml@2.9.0)
 
 packages:
 

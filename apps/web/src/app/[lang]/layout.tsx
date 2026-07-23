@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { LANGUAGES, parseLanguage, t } from '@/lib/language';
 import { SITE_URL, homePath, searchPath } from '@/lib/site';
+import { SearchBar } from '@/components/SearchBar';
 import '../globals.css';
 
 export const metadata: Metadata = {
@@ -45,28 +47,24 @@ export default async function LangLayout({
       <body>
         <header className="site">
           <div className="inner">
-            <a className="brand" href={homePath(language)}>
+            <Link className="brand" href={homePath(language)}>
               {label('brand')}
-            </a>
-            <form className="searchbar" action={searchPath(language)} method="get" role="search">
-              <input
-                type="search"
-                name="q"
-                placeholder={label('searchPlaceholder')}
-                aria-label={label('search')}
-              />
-              <button type="submit">{label('search')}</button>
-            </form>
+            </Link>
+            <SearchBar
+              action={searchPath(language)}
+              placeholder={label('searchPlaceholder')}
+              label={label('search')}
+            />
             <nav className="langs" aria-label="Language">
               {LANGUAGES.map((code) => (
-                <a
+                <Link
                   key={code}
                   className={code === language ? 'lang current' : 'lang'}
                   href={homePath(code)}
                   hrefLang={code}
                 >
                   {code.toUpperCase()}
-                </a>
+                </Link>
               ))}
             </nav>
           </div>

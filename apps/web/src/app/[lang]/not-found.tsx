@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Language } from '@amragrir/shared';
 import { t } from '@/lib/language';
 import { homePath } from '@/lib/site';
@@ -16,9 +17,9 @@ export default function NotFound() {
       <h1>{label('notFound')}</h1>
       <p className="lede">{label('notFoundHint')}</p>
       <p>
-        <a className="chip" href={homePath(Language.Hy)}>
+        <Link className="chip" href={homePath(Language.Hy)}>
           {label('backHome')}
-        </a>
+        </Link>
       </p>
     </>
   );

@@ -2,6 +2,14 @@
 
 > Amragrir.am design system. Values are extracted directly from the design (CSS variables, inline styles). Warm amber palette, light/dark themes.
 
+**In code these live in `packages/ui/src/tokens.ts` — one source for all three
+apps.** `apps/mobile` imports the objects; `apps/web` and `apps/admin` consume
+`tokens.css`, which is generated from that file
+(`pnpm --filter @amragrir/ui build:css`). A test fails if a generated file
+drifts from the source, so the palette cannot quietly differ between the phone
+and the website. This document stays the human-readable spec — when a value
+changes, change both.
+
 ---
 
 ## 1. Colors (CSS variables)

@@ -1,0 +1,92 @@
+/* GENERATED FILE — do not edit.
+ *
+ * Source: packages/ui/src/tokens.ts
+ * Regenerate: pnpm --filter @amragrir/ui build:css
+ *
+ * Editing this by hand puts it out of step with the mobile app, which reads
+ * the same tokens as JavaScript. A test fails if this file drifts.
+ */
+
+:root {
+  --bg: #F6F5F2;
+  --card: #FFFFFF;
+  --ink: #1A1712;
+  --ink2: rgba(26,23,18,0.56);
+  --ink3: rgba(26,23,18,0.32);
+  --line: rgba(26,23,18,0.09);
+  --accent: #EA5B12;
+  --accent2: #FF8A3D;
+  --accent-soft: #FFF0E6;
+  --chip: #F1EFEA;
+  --placeholder: #EFE7DD;
+  --good: #12A150;
+  --shadow: rgba(60,40,15,0.12);
+
+  --star: #F5A623;
+  --destructive: #E23755;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-xxl: 28px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+  --hit-target: 44px;
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #100E0B;
+    --card: #1B1815;
+    --ink: #F6F3EE;
+    --ink2: rgba(246,243,238,0.6);
+    --ink3: rgba(246,243,238,0.34);
+    --line: rgba(246,243,238,0.1);
+    --accent: #FF6A1F;
+    --accent2: #FF9A52;
+    --accent-soft: rgba(255,106,31,0.15);
+    --chip: #26221D;
+    --placeholder: #241F19;
+    --good: #2EC76F;
+    --shadow: rgba(0,0,0,0.55);
+  }
+}
+
+/* An explicit choice always wins over the system preference — the apps offer a
+   theme switch, and it has to beat the media query above. */
+:root[data-theme='light'] {
+  --bg: #F6F5F2;
+  --card: #FFFFFF;
+  --ink: #1A1712;
+  --ink2: rgba(26,23,18,0.56);
+  --ink3: rgba(26,23,18,0.32);
+  --line: rgba(26,23,18,0.09);
+  --accent: #EA5B12;
+  --accent2: #FF8A3D;
+  --accent-soft: #FFF0E6;
+  --chip: #F1EFEA;
+  --placeholder: #EFE7DD;
+  --good: #12A150;
+  --shadow: rgba(60,40,15,0.12);
+}
+
+:root[data-theme='dark'] {
+  --bg: #100E0B;
+  --card: #1B1815;
+  --ink: #F6F3EE;
+  --ink2: rgba(246,243,238,0.6);
+  --ink3: rgba(246,243,238,0.34);
+  --line: rgba(246,243,238,0.1);
+  --accent: #FF6A1F;
+  --accent2: #FF9A52;
+  --accent-soft: rgba(255,106,31,0.15);
+  --chip: #26221D;
+  --placeholder: #241F19;
+  --good: #2EC76F;
+  --shadow: rgba(0,0,0,0.55);
+}
