@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { LANGUAGES, parseLanguage, t } from '@/lib/language';
 import { SITE_URL, homePath, searchPath } from '@/lib/site';
 import { SearchBar } from '@/components/SearchBar';
+import { Footer } from '@/components/Footer';
 import '../globals.css';
 
 export const metadata: Metadata = {
@@ -70,6 +71,7 @@ export default async function LangLayout({
           </div>
         </header>
         <main className="wrap">{children}</main>
+        <Footer language={language} />
       </body>
     </html>
   );

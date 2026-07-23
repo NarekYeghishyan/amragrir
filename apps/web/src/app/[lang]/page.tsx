@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { LANGUAGES, parseLanguage, t } from '@/lib/language';
 import { SITE_URL, homePath, hreflangFor, searchPath } from '@/lib/site';
 import { RestaurantCard } from '@/components/RestaurantCard';
+import { Hero } from '@/components/Hero';
 
 interface Props {
   params: Promise<{ lang: string }>;
@@ -41,8 +42,7 @@ export default async function HomePage({ params }: Props) {
 
   return (
     <>
-      <h1>{label('nearbyRestaurants')}</h1>
-      <p className="lede">{label('tagline')}</p>
+      <Hero language={language} />
 
       {categories.items.length > 0 && (
         <>
@@ -62,8 +62,9 @@ export default async function HomePage({ params }: Props) {
         </>
       )}
 
-      <h2>
-        {label('restaurants')} <span className="faint">({restaurants.total})</span>
+      {/* The hero CTA anchors here. */}
+      <h2 id="restaurants">
+        {label('nearbyRestaurants')} <span className="faint">({restaurants.total})</span>
       </h2>
       <div className="grid">
         {restaurants.items.map((restaurant) => (
