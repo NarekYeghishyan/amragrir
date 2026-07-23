@@ -768,6 +768,48 @@ progressively enhanced: `action`/`method` still work with JavaScript off, and
 the HTML still carries real `href`s, that content survives with every `<script>`
 stripped, and that canonical, `hreflang` and JSON-LD are untouched.
 
+### Reconciled with the Claude Design artifacts
+
+Unpacked both artifacts and diffed them against the code. Findings, in order of
+how much they matter:
+
+- **There are two artifacts, not one.** The mobile app (820×1020, 12 screens) is
+  the one `DESIGN_SYSTEM.md` and `SCREENS.md` were transcribed from. A **web
+  landing** (1280×860) is new and had never been looked at.
+- **Business numbers are unchanged** — service fee `0.9`, the `n×400/10×10`
+  money formula, `2%`, `25%`, `480s`. Nothing implemented needs revisiting.
+- **The palette matches exactly**, all 26 values, except four opacities where
+  the two artifacts disagree with *each other* (`shadow`, `glass`). Recorded in
+  DESIGN_SYSTEM.md with the mobile artifact named as authoritative, since it is
+  the fuller design and what every app already matches.
+- **Two tokens were missing** and are now in `packages/ui`: `glass` (translucent
+  surface over photos) and `placeholder2` (the skeleton shimmer needs both
+  stops — with one, the gradient has nowhere to travel). `--stage` was
+  deliberately **not** added: it is the backdrop around the phone in the
+  mockup, design-tool chrome rather than a product surface.
+- **The web design contradicts a Phase 9 decision.** It contains a cart,
+  ready-time pills, payment methods and an order-confirmed modal — ordering on
+  the web, which Phase 9 explicitly deferred on the grounds that it would be a
+  second implementation of the riskiest code. Surfaced rather than quietly
+  resolved either way; hero and footer were built first by agreement, and
+  ordering stays open.
+
+Built from the web design:
+
+- **Hero** — the promo badge, headline, subheading and CTA, in all three
+  languages with the artifact's own copy. The CTA is an in-page anchor to the
+  restaurant list, so it works with JavaScript off.
+- **Footer** — three columns, blurb, copyright and "Made in Armenia". The
+  column items render as **plain text, not links**: every destination the design
+  lists (About us, Careers, Gift cards, Terms) is a page that does not exist,
+  and a footer of dead links on the one app built for crawlers is worse than a
+  footer of labels. They become links when the pages do.
+- `packages/i18n` gained 13 keys × 3 languages, taken verbatim from the
+  artifact rather than translated afresh.
+
+Verified live in all three languages, and that the hero and footer text still
+survive with every `<script>` stripped.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

@@ -69,8 +69,18 @@ pages. `follow` keeps the restaurant links discoverable.
 
 ## Not built
 
-The ordering and booking flow. It exists in `apps/mobile`, and duplicating
-checkout, payment and tracking here would be a second implementation of the
-riskiest code in the product for no new capability — the restaurant pages link
-to the app instead. Revisit when there is evidence of web visitors wanting to
-order without installing anything.
+**The ordering flow — and the web design disagrees.** The Claude Design web
+artifact contains a cart drawer, ready-time pills, payment methods and an
+order-confirmed modal. Phase 9 deferred all of it on the grounds that it would
+be a second implementation of the riskiest code in the product (checkout,
+payment, tracking) for no new capability, with the restaurant pages linking to
+the app instead.
+
+That call is worth revisiting, but it is a product decision rather than a
+missing task: it is the difference between the web being a shop window and the
+web being a second storefront. Also outstanding from that design: the quick
+filter chips, and a manual light/dark toggle (only the system preference is
+honoured today).
+
+The footer's column items are plain text because the pages behind them —
+About us, Careers, Terms — do not exist. They become links when the pages do.

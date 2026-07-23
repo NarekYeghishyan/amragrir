@@ -58,6 +58,26 @@ The design is built on CSS custom properties. There are two themes — `:root` (
 
 **Additional spot colors:** rating star `#F5A623`; destructive action (Log out) `#E23755`. QR/barcode drawn in `#111`.
 
+### Two design artifacts, one authority
+
+There are two Claude Design artifacts: the **mobile app** (820×1020, 12 screens
+— the one this document was transcribed from) and a newer **web landing**
+(1280×860). They agree on the whole palette except:
+
+| Token | Mobile | Web |
+|---|---|---|
+| `--shadow` light | `rgba(60,40,15,.12)` | `rgba(60,40,15,.1)` |
+| `--shadow` dark | `rgba(0,0,0,.55)` | `rgba(0,0,0,.5)` |
+| `--glass` light | `rgba(246,245,242,.78)` | `rgba(246,245,242,.8)` |
+| `--glass` dark | `rgba(16,14,11,.72)` | `rgba(16,14,11,.75)` |
+
+**The mobile artifact is authoritative** — it is the fuller design and the one
+every app already matches.
+
+`--stage` is deliberately **not** a code token: it is the backdrop around the
+phone in the mockup, i.e. the design tool's own chrome, not a surface any
+product screen renders.
+
 > **Development rule:** never hardcode hex in components — always use theme tokens. In React Native, extract them into `theme.light` / `theme.dark`.
 
 ---

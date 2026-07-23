@@ -37,8 +37,14 @@ export interface ThemeColors {
   accentSoft: string;
   /** Chip and toggle background. */
   chip: string;
-  /** Image placeholder / skeleton base. */
+  /** Skeleton gradient, first stop (`--ph1` in the design). */
   placeholder: string;
+  /** Skeleton gradient, second stop (`--ph2`). The shimmer runs
+   *  placeholder → placeholder2 → placeholder, so both are needed. */
+  placeholder2: string;
+  /** Translucent surface for elements floating over a photo — the status
+   *  badge on a restaurant card. Pairs with a backdrop blur. */
+  glass: string;
   /** Success, "open", deposit credited. */
   good: string;
   shadow: string;
@@ -59,6 +65,8 @@ export const palette: Record<ThemeName, ThemeColors> = {
     accentSoft: '#FFF0E6',
     chip: '#F1EFEA',
     placeholder: '#EFE7DD',
+    placeholder2: '#E6DACB',
+    glass: 'rgba(246,245,242,0.78)',
     good: '#12A150',
     shadow: 'rgba(60,40,15,0.12)',
   },
@@ -74,10 +82,25 @@ export const palette: Record<ThemeName, ThemeColors> = {
     accentSoft: 'rgba(255,106,31,0.15)',
     chip: '#26221D',
     placeholder: '#241F19',
+    placeholder2: '#2F2820',
+    glass: 'rgba(16,14,11,0.72)',
     good: '#2EC76F',
     shadow: 'rgba(0,0,0,0.55)',
   },
 };
+
+/**
+ * `--stage` from the design is deliberately absent.
+ *
+ * It is the backdrop *around* the phone in the mockup — the design tool's own
+ * chrome, not a surface any product screen renders. Shipping it as a token
+ * would invite someone to use it as a real background.
+ *
+ * The two artifacts also disagree on `shadow` and `glass` (the web one is
+ * lighter: .1/.5 and .8/.75). The mobile artifact is authoritative — it is the
+ * one DESIGN_SYSTEM.md was transcribed from and the one every app already
+ * matches.
+ */
 
 /** Colours that are the same in both themes (DESIGN_SYSTEM.md §1). */
 export const spot = {
