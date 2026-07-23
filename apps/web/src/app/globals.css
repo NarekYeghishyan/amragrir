@@ -165,6 +165,38 @@ p.lede {
   font-size: 14px;
 }
 
+/* ── Quick-filter chips ──────────────────────────────────────────────────── */
+
+.filters {
+  margin: 2px 0 18px;
+}
+.chip.filter {
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+.chip.filter:hover {
+  border-color: var(--accent);
+}
+.chip.filter.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.chip.filter-clear {
+  background: transparent;
+  border: 1px dashed var(--line);
+  color: var(--ink3);
+}
+.chip.filter-clear:hover {
+  color: var(--ink);
+  border-color: var(--ink3);
+}
+
 .badge {
   display: inline-block;
   border-radius: 999px;

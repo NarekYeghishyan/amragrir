@@ -65,6 +65,17 @@ prices would tolerate hours.
 the listings; letting a crawler enumerate them spends its budget on the wrong
 pages. `follow` keeps the restaurant links discoverable.
 
+**Home filter chips are real links, and a filtered home is `noindex`.** The
+quick filters (Open now, Top rated, Ready soonest, Pickup, Reserve, Dine-in) are
+`<Link>`s to `/[lang]?openNow=1&service=…` — they work with JavaScript off and a
+crawler follows them. Each maps to a real `/restaurants` parameter; none is
+decorative. But a filtered view is one of near-infinite permutations that
+duplicate the listing, so — exactly as with search — an active filter makes the
+page `noindex, follow`, and the canonical always points at the bare `/[lang]`.
+The design's "Near me" chip is deliberately not built: it needs the visitor's
+coordinates, which only the browser can supply, so it belongs to a client
+geolocation flow rather than a server-rendered link.
+
 **Money is formatted here and computed nowhere.** The server owns every total.
 
 ## Not built
@@ -78,8 +89,7 @@ the app instead.
 
 That call is worth revisiting, but it is a product decision rather than a
 missing task: it is the difference between the web being a shop window and the
-web being a second storefront. Also outstanding from that design: the quick
-filter chips.
+web being a second storefront.
 
 The light/dark toggle **is** built. It works entirely off the tokens —
 `tokens.css` emits `:root[data-theme='…']` blocks that beat the system

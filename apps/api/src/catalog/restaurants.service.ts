@@ -315,6 +315,12 @@ export class RestaurantsService {
       where.restaurant = restaurant;
     }
 
+    // `isOpen` is a branch column, so this filters the branch row directly
+    // rather than the parent restaurant.
+    if (query.openNow) {
+      where.isOpen = true;
+    }
+
     // Category and dietary filters describe dishes, so they select branches
     // that have at least one matching item.
     const menuItem: Prisma.MenuItemWhereInput = {};

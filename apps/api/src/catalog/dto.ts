@@ -1,6 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsLatitude,
@@ -31,6 +32,18 @@ const toArray = ({ value }: { value: unknown }): string[] | undefined => {
   return raw.map((v) => String(v).trim()).filter(Boolean);
 };
 
+/**
+ * A query string is always text, so `Boolean('false')` would be `true`. Treat
+ * only `1`/`true` as on, and leave the field absent otherwise so an unset flag
+ * never adds a filter.
+ */
+const toBool = ({ value }: { value: unknown }): boolean | undefined => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  return value === true || value === '1' || String(value).toLowerCase() === 'true';
+};
+
 export class ListRestaurantsDto {
   @IsLatitude()
   @IsOptional()
@@ -59,6 +72,12 @@ export class ListRestaurantsDto {
   @Max(5)
   @Type(() => Number)
   minRating?: number;
+
+  /** Only branches open right now (filters on the branch's `isOpen`). */
+  @IsBoolean()
+  @IsOptional()
+  @Transform(toBool)
+  openNow?: boolean;
 
   @IsArray()
   @IsOptional()

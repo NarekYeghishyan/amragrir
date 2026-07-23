@@ -128,8 +128,11 @@ failing the signup.
 
 ### GET /restaurants
 Nearby list with filters (Home feed).
-- **Query:** `lat, lng, sort(recommended|nearest|fastest|top_rated), distMax, minRating, dietary[]=vegan…, service[]=pickup|dinein|reserve, category, q, page, limit`
+- **Query:** `lat, lng, sort(recommended|nearest|fastest|top_rated), distMax, minRating, openNow, dietary[]=vegan…, service[]=pickup|dinein|reserve, category, q, page, limit`
 - Array params accept either `?dietary=vegan,halal` or repeated `?dietary=vegan&dietary=halal`.
+- **`openNow`** (`1`/`true`) returns only branches currently open (filters on the
+  branch `isOpen`). Any other value is treated as off, so a malformed flag never
+  400s — it simply applies no filter.
 - `distanceKm` is `null` unless `lat`/`lng` are supplied; `distMax` and
   `sort=nearest` are ignored without them (`nearest` then falls back to the
   default ordering rather than inventing one).

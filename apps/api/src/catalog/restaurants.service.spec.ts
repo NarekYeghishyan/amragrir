@@ -237,6 +237,22 @@ describe('RestaurantsService.list', () => {
       });
     });
 
+    it('filters to open branches when openNow is set', async () => {
+      const { service, findMany } = build([branchRow()]);
+
+      await service.list(query({ openNow: true }), Language.Hy);
+
+      expect(findMany.mock.calls[0]![0].where.isOpen).toBe(true);
+    });
+
+    it('does not constrain isOpen when openNow is absent', async () => {
+      const { service, findMany } = build([branchRow()]);
+
+      await service.list(query(), Language.Hy);
+
+      expect(findMany.mock.calls[0]![0].where.isOpen).toBeUndefined();
+    });
+
     it('searches name and cuisine together', async () => {
       const { service, findMany } = build([branchRow()]);
 

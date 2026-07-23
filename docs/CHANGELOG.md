@@ -856,6 +856,35 @@ survive with every `<script>` stripped.
   and re-verified live: the rendered script now reads
   `getItem('amragrir.theme')`, with no proxy leak, before `<body>`.
 
+### Home quick-filter chips (2026-07-24)
+
+The last outstanding piece of the web design's landing: six filter chips on the
+home listing, each wired to a real `/restaurants` query parameter so none is
+decorative.
+
+- **Chips are real links, filtered.** Open now, Top rated, Ready soonest,
+  Pickup, Reserve, Dine-in render as `<Link>`s to `/[lang]?…` — they work with
+  JavaScript off and a crawler follows them; with JS they upgrade to client
+  navigation. The server owns the filtering (the listing itself narrows, not
+  just the chip row — verified live: `?service=reserve` drops the pickup-only
+  branch). Sort chips are mutually exclusive; service chips combine (`hasSome`).
+- **One small, honest API addition.** `/restaurants` gained an `openNow` flag
+  (`1`/`true` → filters on the branch `isOpen`); a malformed value applies no
+  filter rather than 400ing. Everything else the chips need already existed
+  (`sort`, `service[]`). "Ready soonest" is `sort=fastest` — an honest label for
+  a prep-time sort, not the design's "Ready in 15 min", which would need a hard
+  prep filter that does not exist.
+- **A filtered home is `noindex, follow`, canonical → bare `/[lang]`.** Same
+  reasoning as search: filter permutations are near-infinite and duplicate the
+  listing, so only the unfiltered landing is indexed and link equity
+  consolidates there.
+- **"Near me" is deliberately not built.** It needs the visitor's coordinates,
+  which only the browser can supply — a client geolocation flow, not a
+  server-rendered link. Deferred rather than faked.
+- Filter state lives in one pure module (`lib/filters.ts`: parse, toggle,
+  serialize, map to API params) with 14 unit tests; a service test proves
+  `openNow` filters on `isOpen`. Updated: API_DOCUMENTATION.md, apps/web/README.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,
