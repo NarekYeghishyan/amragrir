@@ -6,7 +6,8 @@ import { LANGUAGES, parseLanguage, t } from '@/lib/language';
 import { SITE_URL, homePath, searchPath } from '@/lib/site';
 import { SearchBar } from '@/components/SearchBar';
 import { Footer } from '@/components/Footer';
-import { ThemeToggle, THEME_KEY } from '@/components/ThemeToggle';
+import { ThemeToggle } from '@/components/ThemeToggle';
+import { THEME_KEY } from '@/lib/theme';
 import '../globals.css';
 
 export const metadata: Metadata = {

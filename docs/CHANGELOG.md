@@ -820,6 +820,42 @@ survive with every `<script>` stripped.
   Still outstanding from the web design: the quick-filter chips, and the
   ordering flow (the open product question above).
 
+- **Pre-merge review caught a bug that broke the mobile app while every test,
+  typecheck and web build stayed green.** `packages/ui/src/index.ts` re-exported
+  `./tokens.js` and `./css.js` with the `.js` extension (added earlier so Node
+  could run the *compiled* CSS generator from `dist`). But `apps/mobile` imports
+  `@amragrir/ui` **from source** — its `main` is `src/index.ts` — and Metro does
+  not map a `./tokens.js` specifier to `tokens.ts` ("Unable to resolve module
+  ./tokens.js"), so the app failed to bundle. Nothing caught it: the TS compiler
+  and Vitest both resolve the extension, the web/admin builds never touch this
+  barrel, and the mobile tests do not import the theme chain. Fix: the barrel now
+  re-exports `./tokens` with **no** extension and no longer re-exports the CSS
+  generator at all — it is web/build-only (its compiled form is imported directly
+  by `scripts/build-css.mjs` and the drift test), and re-exporting it also dragged
+  css.ts's own `./tokens.js` import into the mobile graph. Added two guard tests
+  (no `.js` extensions in the barrel; the generator is not re-exported) and
+  confirmed the fix by bundling for Android end-to-end: **1244 modules, exported
+  cleanly** — the same command that had failed.
+
+- **The live smoke caught a second bug the earlier "verification" had missed:
+  the pre-paint theme script was broken on every page.** `THEME_KEY` was exported
+  from `ThemeToggle.tsx`, a `'use client'` module, and the Server-Component layout
+  imported it to inline into the `<head>` script. A Server Component importing a
+  value from a client module gets a **client-reference proxy**, not the string —
+  and interpolating it (`getItem('${THEME_KEY}')`) stringified the proxy, so the
+  rendered script read `getItem('function () { throw new Error("Attempted to call
+  THEME_KEY() from the server …") }')`: malformed JavaScript that threw at parse
+  time and applied no theme. The flash-of-wrong-theme guard the whole toggle was
+  built around silently did nothing, and the stored choice never survived a
+  reload (the toggle wrote `amragrir.theme`; the script read garbage). The prior
+  check had confirmed the script's *position* but never its *content*. Fix:
+  `THEME_KEY` (and the `Theme` type) moved to a plain module `src/lib/theme.ts`
+  that both the server layout and the client toggle import, so the server gets
+  the literal. Added guard tests (the key module carries no `'use client'`
+  directive; the layout imports the key from `@/lib/theme`, not the component)
+  and re-verified live: the rendered script now reads
+  `getItem('amragrir.theme')`, with no proxy leak, before `<body>`.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

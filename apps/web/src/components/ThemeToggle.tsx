@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { THEME_KEY, type Theme } from '@/lib/theme';
 
 /**
  * Light/dark toggle, matching the design's per-screen theme switch.
@@ -16,10 +17,6 @@ import { useEffect, useState } from 'react';
  * from the DOM (where the pre-paint script in the layout already applied it)
  * only after mount.
  */
-export const THEME_KEY = 'amragrir.theme';
-
-type Theme = 'light' | 'dark';
-
 export function ThemeToggle({ label }: { label: string }) {
   const [theme, setTheme] = useState<Theme | null>(null);
 

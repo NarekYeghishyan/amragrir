@@ -87,5 +87,12 @@ preference — so the toggle only sets one attribute on `<html>` and stores the
 choice. A tiny inline script in the layout applies the stored theme before the
 first paint, so there is no flash of the wrong theme on load.
 
+The `localStorage` key that script and the toggle share lives in `lib/theme.ts`,
+a plain (non-`'use client'`) module, on purpose: the layout is a Server
+Component, and importing the key from the client toggle would hand the server a
+client-reference proxy instead of the string — the inlined script would render
+as broken JavaScript and apply no theme. A guard test keeps the key module
+server-safe.
+
 The footer's column items are plain text because the pages behind them —
 About us, Careers, Terms — do not exist. They become links when the pages do.
