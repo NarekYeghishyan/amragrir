@@ -231,6 +231,11 @@ model Order {
   subtotalAmd   Int         @map("subtotal_amd")
   serviceFeeAmd Int         @map("service_fee_amd")
   depositAmd    Int         @default(0) @map("deposit_amd")
+  // What a coupon took off, and which coupon did it. Stored rather than
+  // recomputed: the coupon's percentage may change later (referral discounts
+  // accumulate), and an order must keep saying what was actually charged.
+  discountAmd   Int         @default(0) @map("discount_amd")
+  couponId      String?     @map("coupon_id") @db.Uuid
   totalAmd      Int         @map("total_amd")
   readyAt       DateTime?   @map("ready_at") @db.Timestamptz(6)
   reservationId String?     @unique @map("reservation_id") @db.Uuid
@@ -241,6 +246,7 @@ model Order {
   user        User         @relation(fields: [userId], references: [id])
   branch      RestaurantBranch @relation(fields: [branchId], references: [id])
   reservation Reservation? @relation(fields: [reservationId], references: [id])
+  coupon      Coupon?      @relation(fields: [couponId], references: [id])
   items       OrderItem[]
   payment     Payment?
 
@@ -396,8 +402,12 @@ model Coupon {
   usedAt      DateTime?    @map("used_at") @db.Timestamptz(6)
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders Order[]
 
+  // A code is unique per user, not globally: a referral reward is a personal
+  // coupon, and two people may hold the same friendly code.
+  @@unique([userId, code])
   @@index([userId])
   @@map("coupons")
 }

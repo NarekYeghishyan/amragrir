@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { ReferralsModule } from '../referrals/referrals.module';
 import { OrdersController } from './orders.controller';
 import { OrdersGateway } from './orders.gateway';
 import { OrdersService } from './orders.service';
@@ -9,7 +10,7 @@ import { OrdersService } from './orders.service';
  *  way round — PaymentsService reads orders through Prisma, so there is no cycle.
  *  AuthModule is here for the gateway, which verifies tokens itself. */
 @Module({
-  imports: [PaymentsModule, AuthModule],
+  imports: [PaymentsModule, AuthModule, ReferralsModule],
   controllers: [OrdersController],
   providers: [OrdersService, OrdersGateway],
   exports: [OrdersService],

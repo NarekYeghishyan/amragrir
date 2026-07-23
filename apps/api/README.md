@@ -57,6 +57,8 @@ src/
 ├── payments/         # PaymentProvider interface + dev provider, /payments, deposits
 ├── reservations/     # availability, table booking, deposit lifecycle
 ├── owner/            # kitchen queue, status transitions, branches, menu CRUD
+├── favorites/        # saved restaurants
+├── referrals/        # referral codes, coupons, reward points
 ├── health/           # GET /v1/health (liveness + DB/Redis reachability)
 └── common/           # error filter, i18n resolution, idempotency interceptor
 ```

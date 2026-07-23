@@ -82,3 +82,18 @@ export const YEREVAN_UTC_OFFSET_MINUTES = 240;
 
 /** Service window used when a branch has no `open_hours` recorded. [proposed] */
 export const DEFAULT_OPEN_HOURS = { opensMinutes: 10 * 60, closesMinutes: 23 * 60 } as const;
+
+// ── Rewards ─────────────────────────────────────────────────────────────────
+// [proposed] — the design shows a points balance but no accrual or redemption
+// rate. Accrual is implemented at the rate below; **redemption is deliberately
+// not**, because inventing a second rate would invent an economy nobody agreed
+// to. Confirm both with product before launch.
+
+/** AMD of order subtotal that earns one reward point. */
+export const AMD_PER_REWARD_POINT = 100;
+
+/** How long a referral coupon stays usable, in days. */
+export const REFERRAL_COUPON_VALID_DAYS = 90;
+
+/** Length of the generated referral code (after the name prefix). */
+export const REFERRAL_CODE_LENGTH = 6;

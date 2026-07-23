@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { Language } from '@amragrir/shared';
 import { RestaurantsService } from './restaurants.service';
+import type { SearchService } from './search.service';
 import { ListRestaurantsDto, RestaurantSort } from './dto';
 import type { PrismaService } from '../prisma/prisma.service';
 
@@ -51,7 +52,20 @@ function build(rows: ReturnType<typeof branchRow>[], tables: unknown[] = []) {
     table: { findMany: tableFindMany },
   } as unknown as PrismaService;
 
-  return { service: new RestaurantsService(prisma), findMany, count, tableFindMany, prisma };
+  // Only the price filter reaches the search service, and these fixtures do
+  // not set one — so it must never be called.
+  const search = {
+    branchIdsInPriceRange: jest.fn().mockResolvedValue([]),
+  } as unknown as SearchService;
+
+  return {
+    service: new RestaurantsService(prisma, search),
+    findMany,
+    count,
+    tableFindMany,
+    prisma,
+    search,
+  };
 }
 
 function query(over: Partial<ListRestaurantsDto> = {}): ListRestaurantsDto {

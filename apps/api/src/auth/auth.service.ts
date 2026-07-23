@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Role } from '@amragrir/shared';
 import { Prisma, type User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import { OtpService } from './otp.service';
 import { JwtPayload, TokenPair, TokenService } from './token.service';
 import { maskPhone, normalizePhone } from './phone.util';
@@ -32,6 +33,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly otp: OtpService,
     private readonly tokens: TokenService,
+    private readonly referrals: ReferralsService,
   ) {}
 
   async sendCode(dto: SendCodeDto): Promise<{ sent: true; expiresIn: number }> {
@@ -106,6 +108,12 @@ export class AuthService {
         user = await this.prisma.user.findUniqueOrThrow({ where: { phone } });
         isNewUser = false;
       }
+    }
+
+    // Only a genuinely new account can be attributed: otherwise anyone could
+    // re-verify an existing phone with a friend's code and mint a discount.
+    if (isNewUser && dto.referralCode) {
+      await this.referrals.attribute(user.id, dto.referralCode);
     }
 
     const tokens = await this.tokens.issue(this.claimsFor(user));

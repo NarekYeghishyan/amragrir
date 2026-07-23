@@ -17,6 +17,7 @@ import { OrderEventsService, countdown } from './order-events.service';
 import { CreateOrderDto } from './dto';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { PaymentsService } from '../payments/payments.service';
+import type { CouponsService } from '../referrals/coupons.service';
 
 const BRANCH_ID = '11111111-1111-4111-8111-111111111111';
 const BURGER = '22222222-2222-4222-8222-222222222222';
@@ -97,6 +98,7 @@ function build(
     menuItems?: unknown[];
     order?: unknown;
     reservation?: unknown;
+    coupon?: { coupon: { id: string }; discountAmd: number };
   } = {},
 ) {
   const orderCreate = jest.fn().mockResolvedValue(options.order ?? orderRow());
@@ -136,16 +138,23 @@ function build(
 
   const payments = { reverse: jest.fn().mockResolvedValue(PaymentStatus.Refunded) };
   const events = { publish: jest.fn(), subscribe: jest.fn() };
+  const coupons = {
+    preview: jest.fn().mockResolvedValue(options.coupon ?? null),
+    claim: jest.fn().mockResolvedValue(options.coupon ?? null),
+    release: jest.fn().mockResolvedValue(undefined),
+  };
 
   return {
     service: new OrdersService(
       prisma,
       payments as unknown as PaymentsService,
       events as unknown as OrderEventsService,
+      coupons as unknown as CouponsService,
     ),
     prisma,
     payments,
     events,
+    coupons,
     orderCreate,
     orderUpdate,
     paymentUpdate,
@@ -424,6 +433,65 @@ describe('create', () => {
     const order = await service.create('user-1', dto(), Language.En);
 
     expect(order.pickupCode).toBe('4821');
+  });
+});
+
+describe('coupons on an order', () => {
+  it('claims the coupon and stores what it took off', async () => {
+    const { service, orderCreate, coupons } = build({
+      coupon: { coupon: { id: 'coupon-1' }, discountAmd: 168 },
+    });
+
+    await service.create('user-1', dto({ couponCode: 'FRIENDS' }), Language.En);
+
+    expect(coupons.claim).toHaveBeenCalled();
+    const data = orderCreate.mock.calls[0][0].data;
+    expect(data.discountAmd).toBe(168);
+    expect(data.couponId).toBe('coupon-1');
+    // 5800 - 168 + fee
+    expect(data.totalAmd).toBe(5800 - 168 + SERVICE_FEE_AMD);
+  });
+
+  it('reports the discount back to the client', async () => {
+    // Regression: the discount was applied to the total but left out of the
+    // response, so the app could not show "you saved …".
+    const { service } = build({
+      order: orderRow({ discountAmd: 168 }),
+      coupon: { coupon: { id: 'coupon-1' }, discountAmd: 168 },
+    });
+
+    const order = await service.create('user-1', dto({ couponCode: 'FRIENDS' }), Language.En);
+    expect(order.discountAmd).toBe(168);
+  });
+
+  it('hands the coupon back when the order cannot be created', async () => {
+    const { service, prisma, coupons } = build({
+      coupon: { coupon: { id: 'coupon-1' }, discountAmd: 168 },
+    });
+    (prisma.order.create as jest.Mock).mockRejectedValue(new Error('insert failed'));
+
+    await expect(
+      service.create('user-1', dto({ couponCode: 'FRIENDS' }), Language.En),
+    ).rejects.toThrow();
+    expect(coupons.release).toHaveBeenCalledWith('coupon-1');
+  });
+
+  it('returns the coupon when the order is cancelled', async () => {
+    const { service, coupons } = build({ order: orderRow({ couponId: 'coupon-1' }) });
+    await service.cancel('user-1', 'order-1');
+
+    expect(coupons.release).toHaveBeenCalledWith('coupon-1');
+  });
+
+  it('does not spend a coupon just to price a quote', async () => {
+    const { service, coupons } = build({
+      coupon: { coupon: { id: 'coupon-1' }, discountAmd: 168 },
+    });
+
+    await service.quote(dto({ couponCode: 'FRIENDS' }), Language.En, 'user-1');
+
+    expect(coupons.preview).toHaveBeenCalled();
+    expect(coupons.claim).not.toHaveBeenCalled();
   });
 });
 

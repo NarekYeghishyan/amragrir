@@ -3,7 +3,8 @@ import { Public } from '../auth/decorators';
 import { resolveLanguage } from '../common/i18n';
 import { CategoriesService } from './categories.service';
 import { RestaurantsService } from './restaurants.service';
-import { ListRestaurantsDto, MenuQueryDto } from './dto';
+import { SearchService } from './search.service';
+import { ListRestaurantsDto, MenuQueryDto, SearchQueryDto } from './dto';
 
 /**
  * Catalog is public: browsing requires no account at all (guests may browse
@@ -15,11 +16,22 @@ export class CatalogController {
   constructor(
     private readonly categories: CategoriesService,
     private readonly restaurants: RestaurantsService,
+    private readonly searchService: SearchService,
   ) {}
 
   @Get('categories')
   listCategories(@Headers('accept-language') acceptLanguage?: string) {
     return this.categories.list(resolveLanguage(acceptLanguage));
+  }
+
+  @Get('search')
+  search(@Query() query: SearchQueryDto, @Headers('accept-language') acceptLanguage?: string) {
+    return this.searchService.search(query, resolveLanguage(acceptLanguage));
+  }
+
+  @Get('search/popular')
+  popular() {
+    return this.searchService.popular();
   }
 
   @Get('restaurants')

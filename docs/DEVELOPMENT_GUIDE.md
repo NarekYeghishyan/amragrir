@@ -231,7 +231,7 @@ depends on it — build thin vertical slices, not horizontal layers.
 | 5 | Order tracking: realtime status, countdown + the owner **API** that moves it | ✅ done |
 | 6 | `apps/admin` — owner **screens** (incoming orders, status changes, menu) | ✅ done |
 | 7 | Table booking (dine-in) + deposit | ✅ done (API) |
-| 8 | Favorites, search, filters, referrals, rewards | ← current |
+| 8 | Favorites, search, filters, referrals, rewards | ✅ done (API) |
 | 9 | `apps/web` (Next.js) on the same API | |
 | 10 | `apps/admin` — admin screens (analytics, promos, management) | |
 
@@ -263,7 +263,15 @@ directly, but that is not the same as having seen it.
   so these likely belong on the restaurant.
 - Real opening hours. `open_hours` exists but nothing writes it, so availability
   falls back to a documented 10:00–23:00 default.
-- Reward points accrual rates.
+- ~~Reward points accrual rates.~~ **Answered provisionally:** 1 point per 100֏
+  of subtotal, credited on payment. **Redemption is still open and deliberately
+  unbuilt** — the design shows a balance but no way to spend it, and inventing a
+  redemption rate would invent an economy nobody agreed to.
+- Referral coupon validity (90 days) and whether a spent reward should restart
+  from 2% or keep its accumulated percentage. Currently it restarts.
+- Whether "price per person" should stay an average of all available dishes, or
+  weight mains, or become a stored figure the owner sets.
+- Popular search tags are static; real ones need query logging.
 - SMS and acquiring provider for Armenia — the app depends on the `SmsSender`
   and `PaymentProvider` interfaces only, so choosing one is a provider swap,
   not a rewrite. Both currently resolve to console implementations that move

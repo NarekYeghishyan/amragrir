@@ -23,6 +23,7 @@ export interface PriceBreakdown {
   subtotalAmd: number;
   serviceFeeAmd: number;
   depositAmd: number;
+  discountAmd: number;
   totalAmd: number;
 }
 
@@ -41,15 +42,24 @@ export function priceLine(input: {
  * table deposit is credited against the final bill, it is not a surcharge
  * (BUSINESS_LOGIC.md §3). Adding it here would double-charge the guest.
  */
-export function priceOrder(lines: PricedLine[], depositAmd = 0): PriceBreakdown {
+export function priceOrder(
+  lines: PricedLine[],
+  depositAmd = 0,
+  discountAmd = 0,
+): PriceBreakdown {
   const subtotalAmd = lines.reduce((sum, line) => sum + line.lineTotalAmd, 0);
   const serviceFeeAmd = SERVICE_FEE_AMD;
+
+  // A discount never exceeds the food it discounts, so a total cannot go
+  // negative and the platform's fee is never given away.
+  const discount = Math.min(Math.max(discountAmd, 0), subtotalAmd);
 
   return {
     subtotalAmd,
     serviceFeeAmd,
     depositAmd,
-    totalAmd: subtotalAmd + serviceFeeAmd,
+    discountAmd: discount,
+    totalAmd: subtotalAmd - discount + serviceFeeAmd,
   };
 }
 
