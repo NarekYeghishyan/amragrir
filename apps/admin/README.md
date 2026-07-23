@@ -14,8 +14,9 @@ pnpm --filter @amragrir/api dev             # API on :3000
 pnpm --filter @amragrir/admin dev           # panel on :5173
 ```
 
-Sign in as the seeded demo owner: **`+37400000000`**. The OTP is printed to the
-**API** log (`[SMS] [dev] to +374...: Amragrir: 1234`).
+Sign in as the seeded demo owner **`+37400000000`**, or as the demo platform
+admin **`+37400000001`** to see the Dashboard, Users and Platform tabs. The OTP
+is printed to the **API** log (`[SMS] [dev] to +374...: Amragrir: 1234`).
 
 Point it elsewhere with `VITE_API_URL=https://api.example.com/v1 pnpm build`.
 
@@ -31,8 +32,14 @@ src/
     ├── SignIn.tsx       # phone → OTP
     ├── Orders.tsx       # live kitchen queue + status buttons
     ├── Menu.tsx         # price, availability, create, delete
-    └── Branches.tsx     # the open/closed switch
+    ├── Branches.tsx     # the open/closed switch
+    ├── Dashboard.tsx    # admin: metrics + payment reconciliation
+    ├── Users.tsx        # admin: search and role changes
+    └── Platform.tsx     # admin: new restaurants, promo coupons
 ```
+
+The last three render only for `admin`. The API enforces that independently —
+the role check here just avoids offering dead ends.
 
 ## Decisions worth knowing
 

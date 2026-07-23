@@ -56,6 +56,28 @@ export class RedisService implements OnModuleDestroy {
     return count;
   }
 
+  /**
+   * Deletes every key matching a pattern, in batches.
+   *
+   * `SCAN`, never `KEYS`: `KEYS` walks the whole keyspace in one blocking call,
+   * which on a production Redis stalls every other client. This is slower and
+   * that is the point.
+   */
+  async deleteByPattern(pattern: string): Promise<number> {
+    let cursor = '0';
+    let deleted = 0;
+
+    do {
+      const [next, keys] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = next;
+      if (keys.length > 0) {
+        deleted += await this.client.del(...keys);
+      }
+    } while (cursor !== '0');
+
+    return deleted;
+  }
+
   async ping(): Promise<boolean> {
     try {
       return (await this.client.ping()) === 'PONG';

@@ -145,6 +145,11 @@ in API_DOCUMENTATION.md.
   AND user_id = ?` has no path that loads another user's row; a fetch-then-
   compare does, and one early `return` removes it. It also answers 404 rather
   than 403, which does not confirm the id exists.
+- **A privilege change must end the sessions it applies to.** Claims in a token
+  are a snapshot; the token cannot be recalled, so revoke the refresh tokens and
+  let the short access TTL close the gap. A short access lifetime is not
+  ceremony — it is the size of the window in which a demoted account still has
+  its old powers.
 - **Guard a status change on the status you read.** Business checks run against
   a snapshot; by the time the write lands, another request may have moved the
   row. Put the expected status in the `WHERE` clause so the loser of a race
@@ -238,7 +243,7 @@ depends on it — build thin vertical slices, not horizontal layers.
 | 7 | Table booking (dine-in) + deposit | ✅ done (API) |
 | 8 | Favorites, search, filters, referrals, rewards | ✅ done (API) |
 | 9 | `apps/web` (Next.js) on the same API | ✅ done |
-| 10 | `apps/admin` — admin screens (analytics, promos, management) | ← current |
+| 10 | `apps/admin` — admin screens (analytics, promos, management) | ✅ done |
 
 Rationale for the two orderings that are easy to get wrong:
 

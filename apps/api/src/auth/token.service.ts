@@ -129,6 +129,19 @@ export class TokenService {
     }
   }
 
+  /**
+   * Revokes every refresh token a user holds.
+   *
+   * Used when their role changes. Access tokens carry `role` and cannot be
+   * recalled, so a demoted account keeps its old powers until the current one
+   * expires — up to 15 minutes. Killing the refresh tokens is what stops that
+   * window being extended indefinitely, and it is the reason the access TTL is
+   * short in the first place.
+   */
+  async revokeAllFor(userId: string): Promise<number> {
+    return this.redis.deleteByPattern(REFRESH_KEY(userId, '*'));
+  }
+
   /** Best-effort read for endpoints that accept an optional bearer (e.g.
    *  verify-code, which upgrades the caller's guest account when present). */
   async tryReadAccess(token: string | null): Promise<JwtPayload | null> {

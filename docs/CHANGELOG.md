@@ -660,6 +660,76 @@ implementation of the riskiest code in the product for no new capability — the
 restaurant pages link to the app instead. Written down rather than silently
 skipped.
 
+### Phase 10 — Platform administration (the last roadmap phase)
+
+`GET /admin/metrics`, `/admin/metrics/reconciliation`, `/admin/users`,
+`PATCH /admin/users/{id}/role`, `POST /admin/restaurants`, `POST /admin/promos`,
+plus three admin-only tabs in `apps/admin`.
+
+- **Changing a role revokes every session that account holds.** This is the
+  piece that mattered. Access tokens carry `role` so a guard never has to touch
+  the database — which means a demoted account keeps its old powers until the
+  token expires, and a token cannot be recalled. Revoking the refresh tokens
+  bounds that window to the 15-minute access TTL instead of leaving it open for
+  30 days. Added `RedisService.deleteByPattern`, using **SCAN and not KEYS**:
+  `KEYS` walks the whole keyspace in one blocking call and stalls every other
+  client.
+- **Four refusals on a role change**, each protecting a state the platform
+  cannot recover from: your own role (an admin who demotes themselves loses the
+  panel), a guest or unverified account (staff powers to an anonymous device),
+  the last administrator (nobody could restore one), and an owner who still has
+  restaurants (they would be unmanageable). `guest` is rejected as a target
+  role because it is the `is_guest` flag, not a database role.
+- **Revenue counts `paid` and later only.** A `created` order is an abandoned
+  basket and a `cancelled` one was refunded; counting either would misreport
+  the business in both directions. Aggregates run in SQL and in parallel —
+  pulling orders into Node to sum them works on seed data and falls over on a
+  real month.
+- **A reconciliation view** for payments and orders that disagree. Empty is the
+  expected answer, and it is where the "refunded but failed to cancel" case
+  from Phase 4 surfaces instead of living only in a log line.
+- **Phone numbers are masked in the admin user list.** An admin screen is not a
+  reason to hand out every number in full — the same instinct as "no PII in
+  logs".
+- **Promos demand exactly one kind of discount**, cap percentages at the same
+  25% as stacked referrals, target only verified non-guest accounts, and report
+  what was actually created rather than what was asked for. Re-issuing a code
+  tops up accounts that joined since and skips those who already hold it.
+- **Creating a restaurant refuses an owner id that is not an owner** — it would
+  produce a restaurant whose "owner" cannot open it in the panel. The slug is
+  constrained to lowercase hyphenated words because it becomes a public URL on
+  `apps/web`.
+- The panel's admin tabs are gated on the role from `GET /me`, and each screen
+  is guarded on `isAdmin` as well as on the active tab, so a stale tab value in
+  a demoted session cannot render an admin screen. The API enforces all of it
+  independently; the UI only avoids offering dead ends.
+- A **demo admin** (`+37400000001`) joins the demo owner in the seed. There is
+  no bootstrap path for the first admin otherwise, and creating one by hand in
+  SQL is how a production credential ends up undocumented.
+- **379 tests** (up from 349).
+
+**A bug the tests caught:** `abandonedPct` could go negative. The three counts
+behind it are separate queries, so an order cancelled between them makes the
+arithmetic underflow — and a dashboard reading "-60% abandoned" is worse than a
+rounding error. Clamped, with a test that names the race.
+
+**Verified live**, including every refusal: the metrics against real seeded
+data, masked phones, a promotion revoking the old refresh token (401 on reuse),
+the promoted user's pre-promotion token still being refused by the owner queue
+until they sign in again, all four role guards, duplicate and malformed slugs,
+a customer as owner id, promo validation, a promo actually discounting an order
+(4 200 → 420 off), and 403 for customer, guest and owner on every admin route.
+The last-administrator guard is covered by unit test rather than live, because
+the self-change refusal fires first when an admin targets themselves.
+
+**Deliberately not built**, and written down rather than skipped quietly:
+- **Review moderation.** There is no review API at all — moderating content that
+  cannot be created would be theatre.
+- **Editable platform settings** (fees, deposit rates). They live in
+  `packages/shared/src/constants.ts`; making them editable means moving pricing
+  into the database, which changes how every order is priced rather than adding
+  a screen. It stays an open question with the numbers it affects.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,
