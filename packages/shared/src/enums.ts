@@ -10,11 +10,28 @@ export const Role = {
 } as const;
 export type Role = (typeof Role)[keyof typeof Role];
 
+/** Mode of a single order — the value stored in `orders.service_mode`. */
 export const ServiceMode = {
   Pickup: 'pickup',
   DineIn: 'dine_in',
 } as const;
 export type ServiceMode = (typeof ServiceMode)[keyof typeof ServiceMode];
+
+/**
+ * What a restaurant advertises it supports — the values in
+ * `restaurants.services`.
+ *
+ * Deliberately a separate vocabulary from ServiceMode, and spelled `dinein`
+ * because that is what the design and the seeded data use. Keeping both here
+ * makes the difference explicit; the two were previously spelled inconsistently
+ * across the API and the database with nothing to reconcile them.
+ */
+export const RestaurantService = {
+  Pickup: 'pickup',
+  DineIn: 'dinein',
+  Reserve: 'reserve',
+} as const;
+export type RestaurantService = (typeof RestaurantService)[keyof typeof RestaurantService];
 
 // Transitions: created -> paid -> confirmed -> preparing -> almost_ready -> ready -> completed
 // Cancellation allowed before `preparing` (policy TBD, see BUSINESS_LOGIC.md ​§4).

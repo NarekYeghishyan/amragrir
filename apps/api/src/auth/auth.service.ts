@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Role } from '@amragrir/shared';
-import type { User } from '@prisma/client';
+import { Prisma, type User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import { OtpService } from './otp.service';
 import { JwtPayload, TokenPair, TokenService } from './token.service';
 import { maskPhone, normalizePhone } from './phone.util';
@@ -32,6 +33,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly otp: OtpService,
     private readonly tokens: TokenService,
+    private readonly referrals: ReferralsService,
   ) {}
 
   async sendCode(dto: SendCodeDto): Promise<{ sent: true; expiresIn: number }> {
@@ -41,25 +43,56 @@ export class AuthService {
     return { sent: true, expiresIn };
   }
 
-  async verifyCode(dto: VerifyCodeDto): Promise<AuthResult> {
+  /**
+   * @param callerToken bearer token of the caller, if any. A guest presenting
+   *   their token has this same account upgraded instead of a second one being
+   *   created — otherwise everything they collected while browsing is orphaned.
+   */
+  async verifyCode(dto: VerifyCodeDto, callerToken: string | null = null): Promise<AuthResult> {
     const phone = normalizePhone(dto.phone);
     await this.otp.verify(phone, dto.code);
 
     const existing = await this.prisma.user.findUnique({ where: { phone } });
-    const isNewUser = existing === null;
+    const caller = await this.tokens.tryReadAccess(callerToken);
+    const guestId = caller?.isGuest ? caller.sub : null;
 
-    const user = existing
-      ? await this.prisma.user.update({
-          where: { id: existing.id },
-          // Verifying again also settles a previously unverified record, and
-          // lets the register screen fill in a name that was missing.
-          data: {
-            phoneVerified: true,
-            isGuest: false,
-            ...(dto.name && !existing.name ? { name: dto.name } : {}),
-          },
-        })
-      : await this.prisma.user.create({
+    let user: User;
+    let isNewUser: boolean;
+
+    if (existing) {
+      // The phone already has an account — sign into it. A guest session in
+      // flight is simply abandoned; merging two accounts' data is a product
+      // decision, not something to do implicitly here.
+      user = await this.prisma.user.update({
+        where: { id: existing.id },
+        // Verifying again also settles a previously unverified record, and
+        // lets the register screen fill in a name that was missing.
+        data: {
+          phoneVerified: true,
+          isGuest: false,
+          ...(dto.name && !existing.name ? { name: dto.name } : {}),
+        },
+      });
+      isNewUser = false;
+    } else if (guestId) {
+      user = await this.prisma.user.update({
+        where: { id: guestId },
+        data: {
+          phone,
+          phoneVerified: true,
+          isGuest: false,
+          ...(dto.name ? { name: dto.name } : {}),
+        },
+      });
+      isNewUser = true;
+      this.logger.log(`Guest ${guestId} upgraded to a verified account`);
+    } else {
+      // The find-then-create above is not atomic: two requests carrying the
+      // same valid code race, both see no account, and the loser hits the
+      // unique index on `phone`. Fall back to reading the row the winner
+      // created rather than surfacing a 500.
+      try {
+        user = await this.prisma.user.create({
           data: {
             phone,
             phoneVerified: true,
@@ -67,6 +100,21 @@ export class AuthService {
             role: 'customer',
           },
         });
+        isNewUser = true;
+      } catch (err) {
+        if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') {
+          throw err;
+        }
+        user = await this.prisma.user.findUniqueOrThrow({ where: { phone } });
+        isNewUser = false;
+      }
+    }
+
+    // Only a genuinely new account can be attributed: otherwise anyone could
+    // re-verify an existing phone with a friend's code and mint a discount.
+    if (isNewUser && dto.referralCode) {
+      await this.referrals.attribute(user.id, dto.referralCode);
+    }
 
     const tokens = await this.tokens.issue(this.claimsFor(user));
     return { ...tokens, isNewUser, user: toPublicUser(user) };

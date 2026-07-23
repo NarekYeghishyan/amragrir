@@ -112,6 +112,20 @@ async function main(): Promise<void> {
     },
   });
 
+  // Demo platform administrator. Dev-only, like the owner above: there is no
+  // bootstrap path for the first admin otherwise, and creating one by hand in
+  // SQL is how a production credential ends up undocumented.
+  await prisma.user.upsert({
+    where: { phone: '+37400000001' },
+    update: {},
+    create: {
+      phone: '+37400000001',
+      phoneVerified: true,
+      name: 'Demo Admin',
+      role: 'admin',
+    },
+  });
+
   const categoryByKey = new Map<string, string>();
   for (const c of CATEGORIES) {
     const cat = await prisma.category.upsert({

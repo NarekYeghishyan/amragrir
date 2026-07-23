@@ -45,20 +45,66 @@ prisma/
 └── seed.ts           # dev seed from the design
 src/
 ├── main.ts           # bootstrap: /v1 prefix, ValidationPipe, error filter, CORS
-├── app.module.ts     # config + Prisma + Redis + Auth + Users + Health, global guards
+├── app.module.ts     # module wiring; global guards + idempotency interceptor
 ├── config/           # env.validation.ts — fail-fast env schema
 ├── prisma/           # global PrismaModule + PrismaService
 ├── redis/            # global RedisModule — OTP storage, refresh-token registry
 ├── sms/              # SmsSender interface + dev console sender
 ├── auth/             # OTP, JWT issue/rotate, guards, decorators
 ├── users/            # GET/PATCH /me, settings, language
+├── catalog/          # public: categories, restaurants, menu, tables
+├── orders/           # cart quote, orders (pickup), pricing, codes, WS gateway
+├── payments/         # PaymentProvider interface + dev provider, /payments, deposits
+├── reservations/     # availability, table booking, deposit lifecycle
+├── owner/            # kitchen queue, status transitions, branches, menu CRUD
+├── admin/            # metrics, role changes, restaurants, promo coupons
+├── favorites/        # saved restaurants
+├── referrals/        # referral codes, coupons, reward points
 ├── health/           # GET /v1/health (liveness + DB/Redis reachability)
-└── common/filters/   # AllExceptionsFilter — { error: { code, message, details } }
+└── common/           # error filter, i18n resolution, idempotency interceptor
 ```
 
-Modules to come, per DEVELOPMENT_GUIDE.md §2: `restaurants`, `branches`,
-`menu`, `categories`, `cart`, `orders`, `reservations`, `payments`,
-`favorites`, `referrals`, `reviews`, `notifications`, `owner`, `admin`.
+Modules to come, per DEVELOPMENT_GUIDE.md §2: `reservations`, `favorites`,
+`referrals`, `reviews`, `notifications`, `admin`.
+
+## Live order status
+
+`ws://localhost:3000/v1/orders/stream` — plain WebSocket. Authenticate in the
+first message, because a browser cannot set headers on a handshake:
+
+```json
+{ "event": "subscribe", "data": { "token": "<accessToken>", "orderId": "…" } }
+```
+
+The reply is the order's current state; every later change arrives the same
+way. Fan-out is an in-process emitter (`order-events.service.ts`) — **that is
+the file to change before running a second API instance**, since a socket on
+one instance would not hear a change made on another.
+
+To move an order through the kitchen locally, sign in as the seeded owner
+(`+37400000000`, OTP in the API log) and
+`PATCH /v1/owner/orders/{id}/status`.
+
+## Money notes
+
+- **Pricing lives in `orders/pricing.ts`** as pure functions, and both the cart
+  quote and order creation call it — that is what makes a quote and the order
+  it becomes impossible to disagree.
+- **`POST /orders` and `POST /payments` require an `Idempotency-Key` header.**
+  Add `@Idempotent(scope)` to any new endpoint that creates money or an
+  obligation; the interceptor is registered globally and inert without it.
+- **The dev payment provider approves everything** and logs it. Send
+  `"token": "decline"` (or `depositToken` when booking) to force a decline and
+  exercise the failure path. Replace the `useClass` in `PaymentsModule` when an
+  acquirer is chosen.
+- **Deposits are holds, not sales** — `DepositsService` uses
+  `authorize`/`capture`/`release`, and `depositOutcomeFor` in
+  `@amragrir/shared` decides which applies. Do not add a second copy of that
+  rule to a new caller.
+- **Booking runs in a serializable transaction with a retry.** If you touch
+  `claimTable`, keep both: the isolation level is what makes "check then
+  insert" indivisible, and serialization failures are expected under
+  contention, not bugs.
 
 ## Auth notes
 

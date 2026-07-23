@@ -1,9 +1,16 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RefreshDto, SendCodeDto, VerifyCodeDto } from './dto';
 import { Public } from './decorators';
+import { bearerFrom } from './bearer';
 
-/** All routes here are @Public — they are how a caller obtains a token. */
+/**
+ * All routes here are @Public — they are how a caller obtains a token — so
+ * they carry a tighter per-IP limit than the global default. These are the
+ * endpoints worth spraying: OTP sends cost money and code guesses are cheap.
+ */
+@Throttle({ default: { ttl: 60_000, limit: 10 } })
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
@@ -15,11 +22,13 @@ export class AuthController {
     return this.auth.sendCode(dto);
   }
 
+  /** Public, but honours an optional bearer: a guest presenting their token
+   *  gets that account upgraded rather than a second one created. */
   @Public()
   @Post('verify-code')
   @HttpCode(HttpStatus.OK)
-  verifyCode(@Body() dto: VerifyCodeDto) {
-    return this.auth.verifyCode(dto);
+  verifyCode(@Body() dto: VerifyCodeDto, @Headers('authorization') authorization?: string) {
+    return this.auth.verifyCode(dto, bearerFrom(authorization));
   }
 
   @Public()
