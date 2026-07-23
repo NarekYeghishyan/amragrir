@@ -603,6 +603,63 @@ credited exactly once, and 403 for guests on favourites and referrals.
 and `POST /referrals/share` (sharing happens in the OS share sheet; there is
 nothing for the server to do until share analytics are wanted).
 
+### Phase 9 — `apps/web`: the public, indexable front door
+
+`apps/web` is now a real Next.js 15 app (was a placeholder README): restaurant
+listings, search, and the restaurant/menu pages the whole thing exists for.
+
+- **The design follows from one rule: the HTML that leaves the server already
+  contains the content.** Verified by stripping every `<script>` from a
+  restaurant page — the name, menu and prices are still there. That is the
+  reason this app is Next.js and not another Vite SPA.
+- **Language moved into the URL, and this was the phase's real decision.** The
+  app was first built the way the API works, negotiating `Accept-Language`.
+  That is wrong here for one specific reason: a crawler sends a single header,
+  so only one of the three languages would ever be indexed — defeating the
+  purpose of building the app. Every page now lives under `/hy`, `/ru` or
+  `/en`, linked with `hreflang` and `x-default`. `Accept-Language` is still
+  consulted once, in middleware, to decide where a visitor at `/` lands.
+  Recorded as an API convention in DEVELOPMENT_GUIDE.md, since it is the one
+  place the project's own "resolve from the header" rule does not apply.
+- **An unknown prefix is a 404, not a silent fallback** — `/de/r/x` must not
+  serve Armenian at a URL that then gets indexed.
+- **Pages are pre-rendered per restaurant per language** (`generateStaticParams`),
+  with `dynamicParams` left on so a restaurant added after the build is still
+  served and then cached. Data revalidates every 60s: short because `isOpen` is
+  on these pages, where names and prices would tolerate hours.
+- **JSON-LD `Restaurant` with the full menu**, so results can show the rating,
+  address and price range rather than a bare link. Optional blocks are omitted
+  rather than emitted empty — `aggregateRating` with a zero review count is
+  invalid structured data, and a broken block costs more than a missing one.
+- **`sitemap.xml` is generated from the API**, every restaurant × every
+  language with alternates, and pages through the 50-item cap rather than
+  assuming one request returns everything. A hand-kept list would go stale the
+  first time a restaurant was added — the failure nobody notices.
+- **Search is `noindex, follow`.** Per-query pages are near-infinite and
+  duplicate the listings; `follow` keeps the restaurant links discoverable.
+- **`packages/i18n` went from three empty `{}` files to real dictionaries** —
+  only the keys web actually uses, per that package's own rule against
+  speculative keys. `dictionaries` is now typed so every language must define
+  the same keys: adding a string to one file and forgetting the others is a
+  compile error rather than an Armenian word in an English page.
+- 23 web tests, plus a live check of the rendered HTML: negotiation, three
+  languages, canonical, hreflang, JSON-LD, title, description, robots, sitemap,
+  404, and the no-JavaScript check.
+
+**A bug the tests caught, in code from Phase 6.** `formatAmd` used
+`toLocaleString('en-US').replace(/,/g, ' ')` — but the separator depends on the
+runtime's ICU data: the same call returns `5,800` in one Node process and
+`5 800` (U+202F, a narrow no-break space) in another, where the replace
+silently does nothing. Both `apps/web` and `apps/admin` now group digits
+directly, so the output is identical on every machine. The admin test had been
+passing by luck.
+
+**Not built:** the ordering and booking flow on web. It exists in
+`apps/mobile`, and duplicating checkout, payment and tracking would be a second
+implementation of the riskiest code in the product for no new capability — the
+restaurant pages link to the app instead. Written down rather than silently
+skipped.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

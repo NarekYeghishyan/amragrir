@@ -3,8 +3,23 @@ import ru from './ru.json';
 import en from './en.json';
 import { Language } from '@amragrir/shared';
 
+/**
+ * `hy` is the reference dictionary — it is the product default and the
+ * fallback every other language resolves to (docs/AI_CONTEXT.md).
+ */
+export type TranslationKey = keyof typeof hy;
+
+/**
+ * Every language must define exactly the same keys.
+ *
+ * Typed rather than trusted: adding a string to one file and forgetting the
+ * others is the normal way translations rot, and it should be a compile error
+ * here rather than an Armenian word appearing in an English page.
+ */
+type Dictionary = Record<TranslationKey, string>;
+
 export const dictionaries = {
-  [Language.Hy]: hy,
-  [Language.Ru]: ru,
-  [Language.En]: en,
+  [Language.Hy]: hy satisfies Dictionary,
+  [Language.Ru]: ru satisfies Dictionary,
+  [Language.En]: en satisfies Dictionary,
 } as const;
