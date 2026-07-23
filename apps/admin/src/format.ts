@@ -1,8 +1,19 @@
 import { Language } from '@amragrir/shared';
 
-/** Money arrives as an integer in dram and is only ever formatted here. */
+/**
+ * Money arrives as an integer in dram and is only ever formatted here.
+ *
+ * Grouped by hand rather than through `toLocaleString`, whose separator
+ * depends on the runtime's ICU data — the same call returns `5,800` in one
+ * process and `5 800` in another, so a `.replace(/,/g, ' ')` silently does
+ * nothing on the second. This is a plain space everywhere.
+ */
 export function formatAmd(amount: number): string {
-  return `${amount.toLocaleString('en-US').replace(/,/g, ' ')} ֏`;
+  const rounded = Math.round(amount);
+  const digits = Math.abs(rounded)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `${rounded < 0 ? '-' : ''}${digits} ֏`;
 }
 
 export function formatStatus(status: string): string {

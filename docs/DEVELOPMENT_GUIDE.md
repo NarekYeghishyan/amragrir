@@ -112,6 +112,11 @@ in API_DOCUMENTATION.md.
 - **Localised columns** (`name_i18n`, `desc_i18n`) are resolved **server-side**
   from `Accept-Language`, falling back to `hy`. Clients receive a plain string,
   never the raw JSON blob.
+  - **A public web page is the exception**: `apps/web` puts the language in the
+    URL (`/hy`, `/ru`, `/en`) and forwards it as `Accept-Language`. A crawler
+    sends one header, so header negotiation alone would leave two of the three
+    languages unindexed. Anything meant to be *found* needs a URL per language,
+    linked with `hreflang`.
 - **Never return internals.** No stack traces, driver errors, or connection
   strings in responses — the exception filter collapses unknown errors to a
   generic 500.
@@ -232,8 +237,8 @@ depends on it — build thin vertical slices, not horizontal layers.
 | 6 | `apps/admin` — owner **screens** (incoming orders, status changes, menu) | ✅ done |
 | 7 | Table booking (dine-in) + deposit | ✅ done (API) |
 | 8 | Favorites, search, filters, referrals, rewards | ✅ done (API) |
-| 9 | `apps/web` (Next.js) on the same API | |
-| 10 | `apps/admin` — admin screens (analytics, promos, management) | |
+| 9 | `apps/web` (Next.js) on the same API | ✅ done |
+| 10 | `apps/admin` — admin screens (analytics, promos, management) | ← current |
 
 Rationale for the two orderings that are easy to get wrong:
 
