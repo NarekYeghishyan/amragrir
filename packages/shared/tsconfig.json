@@ -4,7 +4,12 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    // Kept inside dist on purpose: with the default location, deleting dist
+    // leaves the build info claiming everything is current, so tsc emits
+    // nothing and every consumer fails with "cannot find module". Putting it
+    // here makes removing dist genuinely reset the build.
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src"]
 }

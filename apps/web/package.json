@@ -2,5 +2,26 @@
   "name": "@amragrir/web",
   "private": true,
   "version": "0.0.0",
-  "description": "Customer-facing web — Next.js. Public restaurant/menu pages need SEO, hence Next.js rather than a plain SPA."
+  "description": "Customer-facing web — Next.js. Public restaurant/menu pages need SEO, hence Next.js rather than a plain SPA.",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@amragrir/i18n": "workspace:*",
+    "@amragrir/shared": "workspace:*",
+    "next": "^15.5.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
 }

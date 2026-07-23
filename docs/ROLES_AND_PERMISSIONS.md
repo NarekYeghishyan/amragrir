@@ -126,9 +126,70 @@ Implemented in `apps/api`:
   lets phone verification upgrade a guest in place rather than creating a
   second account.
 
+- **Ownership is enforced in the query, not by a guard.** Every order lookup
+  filters on `userId`, so there is no code path that loads someone else's
+  order and then decides. The consequence is deliberate: another user's order
+  returns **404, not 403** — a 403 would confirm the id exists.
+- **`@RequiresVerifiedPhone()` gates ordering and paying.** A guest may browse
+  and price a basket (`POST /cart/quote`) but gets 403 from `POST /orders`,
+  matching §1 above.
+
+- **Owner and admin can work the order queue** (`GET /owner/orders`,
+  `PATCH /owner/orders/{id}/status`). Scope is a Prisma filter — owner sees the
+  branches of the restaurants they own, admin sees everything — applied to
+  every query rather than checked afterwards. A `branchId` query parameter
+  narrows that scope and can never widen it.
+- **`paid` is not a status the panel may set.** Only a payment makes an order
+  paid; a restaurant that could set it could mark an unpaid order as settled.
+- **Owner and admin manage branches and menus** (`GET /owner/branches`,
+  `PATCH /owner/branches/{id}`, `GET|POST|PATCH|DELETE /owner/menu-items`),
+  scoped the same way — a Prisma filter on every query, so a dish or branch
+  outside the caller's restaurants is a 404 rather than a refusal.
+- **The back office is a client like any other.** `apps/admin` signs in with the
+  same OTP flow and holds no privileges of its own; its role check only decides
+  which screens to render, never what the API allows.
+- **Favourites, referrals and coupons need a verified phone.** They belong to an
+  account rather than a device, so a guest session would lose them — matching
+  §1's "❌ Favorites, history, rewards, referrals". Browsing and pricing a
+  basket stay open to guests.
+- **A coupon code is personal.** Lookups are keyed on `(user_id, code)`, so
+  knowing someone else's code is worth nothing.
+
+### Role changes
+
+`PATCH /admin/users/{id}/role` is admin-only and carries four refusals, each
+protecting against a state the platform cannot recover from:
+
+| Refusal | Why |
+|---|---|
+| Your own role (422) | An admin who demotes themselves loses the panel with no way back |
+| A guest or unverified account (422) | Staff powers would go to an anonymous device |
+| The last administrator (409) | Nobody could restore one afterwards |
+| An owner who still has restaurants (409) | Their restaurants would become unmanageable |
+
+**Changing a role revokes every session that account holds.** Access tokens
+carry `role` in their claims — that is what lets a guard decide without touching
+the database — so a demoted account keeps its old powers until the current token
+expires (15 minutes). Revoking the refresh tokens is what stops that window
+being extended indefinitely, and it is the reason the access TTL is short.
+
+The consequence is visible and intended: a promoted user must **sign in again**
+before the new role reaches their claims. `GET /me` reads the database and shows
+the new role immediately; the guards do not.
+- **Table bookings follow the same two rules.** A guest needs a verified phone
+  to book (`POST /reservations`) and only ever sees their own — another
+  guest's is a 404. Owner and admin read and advance bookings for their own
+  branches (`GET /owner/reservations`, `PATCH /owner/reservations/{id}/status`)
+  through the same Prisma scope filter.
+- **WebSocket subscriptions authorise per order**, through the same visibility
+  rule as the REST endpoints, so a socket cannot watch an order its holder may
+  not read.
+
 Not implemented yet:
 
-- **`branchIds` in the JWT** — lands with the owner module, since nothing
-  consumes branch scoping until then.
-- **Ownership guard** (own order/reservation/review) — lands with the orders
-  module, which introduces the first owned resources.
+- **`staff` has no branch scope.** The schema has no user-to-branch link, so
+  there is nothing to filter them by; they are **refused** rather than quietly
+  given the owner's reach. Adding staff means adding that table first.
+- **`branchIds` in the JWT** — ownership is currently resolved through a join
+  on every query. That is one extra join, not a correctness problem; the claim
+  becomes worth adding when the panel is under real load.

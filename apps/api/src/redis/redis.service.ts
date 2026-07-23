@@ -20,6 +20,15 @@ export class RedisService implements OnModuleDestroy {
     await this.client.set(key, value, 'EX', ttlSeconds);
   }
 
+  /**
+   * Atomic claim: writes only if the key is free, returns whether it was.
+   * The whole point is that two concurrent retries of the same request cannot
+   * both win — a get-then-set would let both through.
+   */
+  async setIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean> {
+    return (await this.client.set(key, value, 'EX', ttlSeconds, 'NX')) === 'OK';
+  }
+
   async get(key: string): Promise<string | null> {
     return this.client.get(key);
   }
@@ -45,6 +54,28 @@ export class RedisService implements OnModuleDestroy {
       await this.client.expire(key, ttlSeconds);
     }
     return count;
+  }
+
+  /**
+   * Deletes every key matching a pattern, in batches.
+   *
+   * `SCAN`, never `KEYS`: `KEYS` walks the whole keyspace in one blocking call,
+   * which on a production Redis stalls every other client. This is slower and
+   * that is the point.
+   */
+  async deleteByPattern(pattern: string): Promise<number> {
+    let cursor = '0';
+    let deleted = 0;
+
+    do {
+      const [next, keys] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = next;
+      if (keys.length > 0) {
+        deleted += await this.client.del(...keys);
+      }
+    } while (cursor !== '0');
+
+    return deleted;
   }
 
   async ping(): Promise<boolean> {

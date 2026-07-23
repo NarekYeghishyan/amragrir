@@ -5,5 +5,14 @@
   "description": "Shared hy/ru/en dictionaries. hy is the default language (see docs/AI_CONTEXT.md). Populate dictionaries as real screens are built — no speculative keys.",
   "type": "module",
   "main": "./src/index.ts",
-  "types": "./src/index.ts"
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@amragrir/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
 }

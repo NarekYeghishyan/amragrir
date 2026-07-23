@@ -1,1 +1,25 @@
-{}
+{
+  "brand": "Amragrir",
+  "tagline": "Order ahead, skip the queue",
+  "nearbyRestaurants": "Restaurants in Yerevan",
+  "browseByCuisine": "Browse by cuisine",
+  "popularNearYou": "Popular near you",
+  "search": "Search",
+  "searchPlaceholder": "Restaurant or dish",
+  "restaurants": "Restaurants",
+  "dishes": "Dishes",
+  "noResults": "Nothing found",
+  "open": "Open",
+  "closed": "Closed",
+  "minutes": "min",
+  "reviews": "reviews",
+  "menu": "Menu",
+  "address": "Address",
+  "phone": "Phone",
+  "orderInApp": "Order in the app",
+  "orderInAppHint": "Pre-ordering and table booking live in the Amragrir app",
+  "soldOut": "Sold out",
+  "notFound": "Page not found",
+  "notFoundHint": "The restaurant may have been removed, or the address is wrong",
+  "backHome": "Home"
+}

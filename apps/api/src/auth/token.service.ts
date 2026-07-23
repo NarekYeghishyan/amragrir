@@ -5,6 +5,18 @@ import { randomUUID } from 'node:crypto';
 import { Role } from '@amragrir/shared';
 import { RedisService } from '../redis/redis.service';
 
+/**
+ * Both token kinds are signed with the same secret, so the payload must say
+ * which one it is. Without this a refresh token verifies fine as a bearer
+ * credential — and since it carries no `role`, guards would read `undefined`
+ * and wave through anything that does not name an explicit role.
+ */
+export const TokenType = {
+  Access: 'access',
+  Refresh: 'refresh',
+} as const;
+export type TokenType = (typeof TokenType)[keyof typeof TokenType];
+
 /** Claims carried by the access token. Guards read these — never the DB — on
  *  the hot path, so anything a guard needs must live here. */
 export interface JwtPayload {
@@ -12,11 +24,13 @@ export interface JwtPayload {
   role: Role;
   isGuest: boolean;
   phoneVerified: boolean;
+  typ?: TokenType;
 }
 
 interface RefreshPayload {
   sub: string;
   jti: string;
+  typ?: TokenType;
 }
 
 export interface TokenPair {
@@ -48,9 +62,12 @@ export class TokenService {
   async issue(payload: JwtPayload): Promise<TokenPair> {
     const jti = randomUUID();
 
-    const accessToken = await this.jwt.signAsync(payload, { expiresIn: this.accessTtl });
+    const accessToken = await this.jwt.signAsync(
+      { ...payload, typ: TokenType.Access },
+      { expiresIn: this.accessTtl },
+    );
     const refreshToken = await this.jwt.signAsync(
-      { sub: payload.sub, jti } satisfies RefreshPayload,
+      { sub: payload.sub, jti, typ: TokenType.Refresh } satisfies RefreshPayload,
       { expiresIn: this.refreshTtl },
     );
 
@@ -60,11 +77,18 @@ export class TokenService {
   }
 
   async verifyAccess(token: string): Promise<JwtPayload> {
+    let payload: JwtPayload;
     try {
-      return await this.jwt.verifyAsync<JwtPayload>(token);
+      payload = await this.jwt.verifyAsync<JwtPayload>(token);
     } catch {
       throw new UnauthorizedException('Invalid or expired token');
     }
+
+    if (payload.typ !== TokenType.Access) {
+      throw new UnauthorizedException('Not an access token');
+    }
+
+    return payload;
   }
 
   /**
@@ -80,7 +104,7 @@ export class TokenService {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    if (!payload.jti) {
+    if (payload.typ !== TokenType.Refresh || !payload.jti) {
       throw new UnauthorizedException('Not a refresh token');
     }
 
@@ -97,11 +121,37 @@ export class TokenService {
   async revokeRefresh(token: string): Promise<void> {
     try {
       const payload = await this.jwt.verifyAsync<RefreshPayload>(token);
-      if (payload.jti) {
+      if (payload.typ === TokenType.Refresh && payload.jti) {
         await this.redis.del(REFRESH_KEY(payload.sub, payload.jti));
       }
     } catch {
       // Logging out with an already-invalid token is not an error.
+    }
+  }
+
+  /**
+   * Revokes every refresh token a user holds.
+   *
+   * Used when their role changes. Access tokens carry `role` and cannot be
+   * recalled, so a demoted account keeps its old powers until the current one
+   * expires — up to 15 minutes. Killing the refresh tokens is what stops that
+   * window being extended indefinitely, and it is the reason the access TTL is
+   * short in the first place.
+   */
+  async revokeAllFor(userId: string): Promise<number> {
+    return this.redis.deleteByPattern(REFRESH_KEY(userId, '*'));
+  }
+
+  /** Best-effort read for endpoints that accept an optional bearer (e.g.
+   *  verify-code, which upgrades the caller's guest account when present). */
+  async tryReadAccess(token: string | null): Promise<JwtPayload | null> {
+    if (!token) {
+      return null;
+    }
+    try {
+      return await this.verifyAccess(token);
+    } catch {
+      return null;
     }
   }
 }

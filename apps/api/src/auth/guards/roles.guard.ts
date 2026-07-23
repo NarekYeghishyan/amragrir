@@ -13,6 +13,12 @@ export class RolesGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
+    // Same reasoning as JwtAuthGuard: WebSocket handlers carry no
+    // request.user, and authorize themselves per subscription instead.
+    if (context.getType() !== 'http') {
+      return true;
+    }
+
     const targets = [context.getHandler(), context.getClass()];
     const roles = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, targets);
     const needsVerifiedPhone = this.reflector.getAllAndOverride<boolean>(
