@@ -2,6 +2,14 @@
 
 > Amragrir.am design system. Values are extracted directly from the design (CSS variables, inline styles). Warm amber palette, light/dark themes.
 
+**In code these live in `packages/ui/src/tokens.ts` — one source for all three
+apps.** `apps/mobile` imports the objects; `apps/web` and `apps/admin` consume
+`tokens.css`, which is generated from that file
+(`pnpm --filter @amragrir/ui build:css`). A test fails if a generated file
+drifts from the source, so the palette cannot quietly differ between the phone
+and the website. This document stays the human-readable spec — when a value
+changes, change both.
+
 ---
 
 ## 1. Colors (CSS variables)
@@ -49,6 +57,26 @@ The design is built on CSS custom properties. There are two themes — `:root` (
 | `--glass` | `rgba(16,14,11,.72)` |
 
 **Additional spot colors:** rating star `#F5A623`; destructive action (Log out) `#E23755`. QR/barcode drawn in `#111`.
+
+### Two design artifacts, one authority
+
+There are two Claude Design artifacts: the **mobile app** (820×1020, 12 screens
+— the one this document was transcribed from) and a newer **web landing**
+(1280×860). They agree on the whole palette except:
+
+| Token | Mobile | Web |
+|---|---|---|
+| `--shadow` light | `rgba(60,40,15,.12)` | `rgba(60,40,15,.1)` |
+| `--shadow` dark | `rgba(0,0,0,.55)` | `rgba(0,0,0,.5)` |
+| `--glass` light | `rgba(246,245,242,.78)` | `rgba(246,245,242,.8)` |
+| `--glass` dark | `rgba(16,14,11,.72)` | `rgba(16,14,11,.75)` |
+
+**The mobile artifact is authoritative** — it is the fuller design and the one
+every app already matches.
+
+`--stage` is deliberately **not** a code token: it is the backdrop around the
+phone in the mockup, i.e. the design tool's own chrome, not a surface any
+product screen renders.
 
 > **Development rule:** never hardcode hex in components — always use theme tokens. In React Native, extract them into `theme.light` / `theme.dark`.
 

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { api } from '@/lib/api';
 import { parseLanguage, t } from '@/lib/language';
@@ -40,9 +41,9 @@ export default async function SearchPage({ params, searchParams }: Props) {
         <ul className="chips">
           {popular.tags.map((tag) => (
             <li key={tag}>
-              <a className="chip" href={searchPath(language, tag)}>
+              <Link className="chip" href={searchPath(language, tag)}>
                 {tag}
-              </a>
+              </Link>
             </li>
           ))}
         </ul>
@@ -76,13 +77,13 @@ export default async function SearchPage({ params, searchParams }: Props) {
           {results.dishes.map((dish) => (
             // Links to the restaurant, not the dish: a dish has no page of its
             // own, and landing on the menu is what a searcher wants next.
-            <a key={dish.id} className="dish" href={restaurantPath(language, dish.restaurantSlug)}>
+            <Link key={dish.id} className="dish" href={restaurantPath(language, dish.restaurantSlug)}>
               <div>
                 <div className="name">{dish.name}</div>
                 <div className="desc">{dish.restaurantName}</div>
               </div>
               <div className="price">{formatAmd(dish.priceAmd)}</div>
-            </a>
+            </Link>
           ))}
         </>
       )}

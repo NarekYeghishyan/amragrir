@@ -131,6 +131,8 @@ export default async function RestaurantPage({ params }: Props) {
           {restaurant.branch.phone && (
             <>
               {' · '}
+              {/* A plain anchor, not `Link`: `tel:` leaves the app entirely,
+                  and the router has nothing to navigate to. */}
               <a href={`tel:${restaurant.branch.phone}`}>{restaurant.branch.phone}</a>
             </>
           )}

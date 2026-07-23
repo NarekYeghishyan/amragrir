@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { Language } from '@amragrir/shared';
 import { t } from '@/lib/language';
 import { formatDistance, formatPriceLevel, formatRating } from '@/lib/format';
@@ -30,7 +31,7 @@ export function RestaurantCard({ restaurant, language }: Props) {
   ].filter(Boolean);
 
   return (
-    <a className="card" href={restaurantPath(language, restaurant.slug)}>
+    <Link className="card" href={restaurantPath(language, restaurant.slug)}>
       <div className="name">{restaurant.name}</div>
       <div className="meta">
         ★ {formatRating(restaurant.rating)}{' '}
@@ -44,6 +45,6 @@ export function RestaurantCard({ restaurant, language }: Props) {
           {restaurant.isOpen ? label('open') : label('closed')}
         </span>
       </div>
-    </a>
+    </Link>
   );
 }

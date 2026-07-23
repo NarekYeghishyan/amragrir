@@ -1,33 +1,11 @@
-/* Tokens from docs/DESIGN_SYSTEM.md. Same palette as the app and the back
-   office; wider measure, because this is read on a desktop. */
-:root {
-  --bg: #f6f5f2;
-  --card: #ffffff;
-  --ink: #1a1712;
-  --ink2: rgba(26, 23, 18, 0.56);
-  --ink3: rgba(26, 23, 18, 0.32);
-  --line: rgba(26, 23, 18, 0.09);
-  --accent: #ea5b12;
-  --accent-soft: #fff0e6;
-  --chip: #f1efea;
-  --good: #12a150;
-  --radius: 16px;
-  color-scheme: light dark;
-}
+/* Palette and scale come from @amragrir/ui — one source for all three apps.
+   Regenerate with: pnpm --filter @amragrir/ui build:css */
+@import './tokens.css';
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #100e0b;
-    --card: #1b1815;
-    --ink: #f6f3ee;
-    --ink2: rgba(246, 243, 238, 0.6);
-    --ink3: rgba(246, 243, 238, 0.34);
-    --line: rgba(246, 243, 238, 0.1);
-    --accent: #ff6a1f;
-    --accent-soft: rgba(255, 106, 31, 0.15);
-    --chip: #26221d;
-    --good: #2ec76f;
-  }
+/* Web-only: a wider corner radius, because this is read on a desktop rather
+   than on a phone. */
+:root {
+  --radius: 16px;
 }
 
 * {
@@ -95,6 +73,20 @@ header.site .brand {
   background: var(--chip);
   color: var(--ink);
   font-weight: 600;
+}
+
+.theme-toggle {
+  min-height: 40px;
+  min-width: 40px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.theme-toggle:hover {
+  border-color: var(--accent);
 }
 .searchbar input {
   font: inherit;
@@ -226,6 +218,118 @@ p.lede {
 .cta span {
   color: var(--ink2);
   font-size: 15px;
+}
+
+/* ── Hero (from the web design artifact) ─────────────────────────────────── */
+
+.hero {
+  padding: 48px 0 40px;
+  max-width: 640px;
+}
+.promo-tag {
+  display: inline-block;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+}
+.hero h1 {
+  font-size: 44px;
+  line-height: 1.1;
+  letter-spacing: -1px;
+  margin: 18px 0 0;
+}
+.hero-sub {
+  color: var(--ink2);
+  font-size: 17px;
+  margin: 14px 0 0;
+  text-wrap: pretty;
+}
+.cta-primary {
+  display: inline-block;
+  margin-top: 26px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 15.5px;
+  padding: 0 26px;
+  line-height: 54px;
+  border-radius: 18px;
+  box-shadow: 0 12px 26px var(--shadow);
+}
+.cta-primary:hover {
+  opacity: 0.92;
+}
+
+@media (max-width: 640px) {
+  .hero h1 {
+    font-size: 32px;
+  }
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+
+.site-footer {
+  border-top: 1px solid var(--line);
+  background: var(--card);
+  margin-top: 48px;
+}
+.foot-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 44px 20px 28px;
+  display: grid;
+  gap: 32px;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+}
+.foot-brand .brand {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 18px;
+  margin-bottom: 10px;
+}
+.foot-brand p {
+  margin: 0;
+  font-size: 14.5px;
+  max-width: 34ch;
+}
+.foot-head {
+  font-size: 12.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink3);
+  margin-bottom: 12px;
+}
+.foot-col ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+}
+.foot-col li {
+  font-size: 14.5px;
+  color: var(--ink2);
+}
+.foot-bottom {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 18px 20px 28px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 760px) {
+  .foot-inner {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 .muted {

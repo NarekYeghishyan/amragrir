@@ -730,6 +730,132 @@ the self-change refusal fires first when an admin targets themselves.
   into the database, which changes how every order is priced rather than adding
   a screen. It stays an open question with the numbers it affects.
 
+### Design tokens moved into `packages/ui`
+
+The palette was hand-copied into three files — `apps/mobile/src/theme/tokens.ts`,
+`apps/admin/src/styles.css` and `apps/web/src/app/globals.css`. Changing the
+accent colour meant three edits, and nothing caught a missed one: the phone and
+the website could disagree about the brand colour with every test still green.
+`packages/ui` had existed since the first commit for exactly this and was empty.
+
+- **One source:** `packages/ui/src/tokens.ts`. Mobile imports the objects
+  (React Native needs numbers, not CSS strings); web and admin `@import` a
+  `tokens.css` **generated** from it.
+- **The generated files are checked in, and a test compares them against the
+  generator.** Editing the source and forgetting to regenerate fails the test
+  rather than shipping a mismatch. Verified by deliberately corrupting a
+  generated file and watching the test go red, then restoring it — a drift test
+  nobody has seen fail is not evidence of anything.
+- App-specific values that are *not* design-system tokens stay in that app's own
+  stylesheet, layered on top: web keeps its wider corner radius, the back office
+  its tighter one. Admin's `--bad` and `--hit` now alias the generated
+  `--destructive` and `--hit-target` instead of restating the values.
+- The generator emits both themes plus `[data-theme]` overrides, so an explicit
+  theme choice beats the system preference — the apps offer a switch.
+- 10 tests, including "both themes define the same keys" and "these four values
+  match what DESIGN_SYSTEM.md quotes", so a silent edit makes the documentation
+  wrong rather than merely stale.
+
+Also fixed while looking at the web app: **every internal link was a plain
+`<a href>`, so each click reloaded the page.** The comment justifying it claimed
+crawlers need real anchors — true, but `next/link` renders exactly the same
+`<a href>` into the HTML while also giving client-side navigation. The
+justification was simply wrong, and the site gave up navigation for nothing.
+All internal links now use `next/link`; `tel:` stays a plain anchor because it
+leaves the app. The search form became the site's only client component,
+progressively enhanced: `action`/`method` still work with JavaScript off, and
+`router.push` upgrades the same submit to a client navigation. Re-verified that
+the HTML still carries real `href`s, that content survives with every `<script>`
+stripped, and that canonical, `hreflang` and JSON-LD are untouched.
+
+### Reconciled with the Claude Design artifacts
+
+Unpacked both artifacts and diffed them against the code. Findings, in order of
+how much they matter:
+
+- **There are two artifacts, not one.** The mobile app (820×1020, 12 screens) is
+  the one `DESIGN_SYSTEM.md` and `SCREENS.md` were transcribed from. A **web
+  landing** (1280×860) is new and had never been looked at.
+- **Business numbers are unchanged** — service fee `0.9`, the `n×400/10×10`
+  money formula, `2%`, `25%`, `480s`. Nothing implemented needs revisiting.
+- **The palette matches exactly**, all 26 values, except four opacities where
+  the two artifacts disagree with *each other* (`shadow`, `glass`). Recorded in
+  DESIGN_SYSTEM.md with the mobile artifact named as authoritative, since it is
+  the fuller design and what every app already matches.
+- **Two tokens were missing** and are now in `packages/ui`: `glass` (translucent
+  surface over photos) and `placeholder2` (the skeleton shimmer needs both
+  stops — with one, the gradient has nowhere to travel). `--stage` was
+  deliberately **not** added: it is the backdrop around the phone in the
+  mockup, design-tool chrome rather than a product surface.
+- **The web design contradicts a Phase 9 decision.** It contains a cart,
+  ready-time pills, payment methods and an order-confirmed modal — ordering on
+  the web, which Phase 9 explicitly deferred on the grounds that it would be a
+  second implementation of the riskiest code. Surfaced rather than quietly
+  resolved either way; hero and footer were built first by agreement, and
+  ordering stays open.
+
+Built from the web design:
+
+- **Hero** — the promo badge, headline, subheading and CTA, in all three
+  languages with the artifact's own copy. The CTA is an in-page anchor to the
+  restaurant list, so it works with JavaScript off.
+- **Footer** — three columns, blurb, copyright and "Made in Armenia". The
+  column items render as **plain text, not links**: every destination the design
+  lists (About us, Careers, Gift cards, Terms) is a page that does not exist,
+  and a footer of dead links on the one app built for crawlers is worse than a
+  footer of labels. They become links when the pages do.
+- `packages/i18n` gained 13 keys × 3 languages, taken verbatim from the
+  artifact rather than translated afresh.
+
+Verified live in all three languages, and that the hero and footer text still
+survive with every `<script>` stripped.
+
+- **A light/dark toggle** on the web, matching the design's per-screen switch.
+  It cost almost nothing because the tokens already carry it: the CSS generator
+  emits `:root[data-theme='…']` blocks that beat `prefers-color-scheme`, so the
+  toggle sets one attribute on `<html>` and stores the choice. A pre-paint inline
+  script in the layout applies the stored theme before the first frame, so there
+  is no flash of the wrong theme; `<html suppressHydrationWarning>` plus a
+  neutral SSR glyph keep React from flagging the attribute the script writes.
+  Still outstanding from the web design: the quick-filter chips, and the
+  ordering flow (the open product question above).
+
+- **Pre-merge review caught a bug that broke the mobile app while every test,
+  typecheck and web build stayed green.** `packages/ui/src/index.ts` re-exported
+  `./tokens.js` and `./css.js` with the `.js` extension (added earlier so Node
+  could run the *compiled* CSS generator from `dist`). But `apps/mobile` imports
+  `@amragrir/ui` **from source** — its `main` is `src/index.ts` — and Metro does
+  not map a `./tokens.js` specifier to `tokens.ts` ("Unable to resolve module
+  ./tokens.js"), so the app failed to bundle. Nothing caught it: the TS compiler
+  and Vitest both resolve the extension, the web/admin builds never touch this
+  barrel, and the mobile tests do not import the theme chain. Fix: the barrel now
+  re-exports `./tokens` with **no** extension and no longer re-exports the CSS
+  generator at all — it is web/build-only (its compiled form is imported directly
+  by `scripts/build-css.mjs` and the drift test), and re-exporting it also dragged
+  css.ts's own `./tokens.js` import into the mobile graph. Added two guard tests
+  (no `.js` extensions in the barrel; the generator is not re-exported) and
+  confirmed the fix by bundling for Android end-to-end: **1244 modules, exported
+  cleanly** — the same command that had failed.
+
+- **The live smoke caught a second bug the earlier "verification" had missed:
+  the pre-paint theme script was broken on every page.** `THEME_KEY` was exported
+  from `ThemeToggle.tsx`, a `'use client'` module, and the Server-Component layout
+  imported it to inline into the `<head>` script. A Server Component importing a
+  value from a client module gets a **client-reference proxy**, not the string —
+  and interpolating it (`getItem('${THEME_KEY}')`) stringified the proxy, so the
+  rendered script read `getItem('function () { throw new Error("Attempted to call
+  THEME_KEY() from the server …") }')`: malformed JavaScript that threw at parse
+  time and applied no theme. The flash-of-wrong-theme guard the whole toggle was
+  built around silently did nothing, and the stored choice never survived a
+  reload (the toggle wrote `amragrir.theme`; the script read garbage). The prior
+  check had confirmed the script's *position* but never its *content*. Fix:
+  `THEME_KEY` (and the `Theme` type) moved to a plain module `src/lib/theme.ts`
+  that both the server layout and the client toggle import, so the server gets
+  the literal. Added guard tests (the key module carries no `'use client'`
+  directive; the layout imports the key from `@/lib/theme`, not the component)
+  and re-verified live: the rendered script now reads
+  `getItem('amragrir.theme')`, with no proxy leak, before `<body>`.
+
 ## 2026-07-21 — Initial documentation set
 
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,

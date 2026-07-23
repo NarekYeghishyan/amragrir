@@ -1,8 +1,13 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { LANGUAGES, parseLanguage, t } from '@/lib/language';
 import { SITE_URL, homePath, searchPath } from '@/lib/site';
+import { SearchBar } from '@/components/SearchBar';
+import { Footer } from '@/components/Footer';
+import { ThemeToggle } from '@/components/ThemeToggle';
+import { THEME_KEY } from '@/lib/theme';
 import '../globals.css';
 
 export const metadata: Metadata = {
@@ -41,37 +46,46 @@ export default async function LangLayout({
   const label = t(language);
 
   return (
-    <html lang={language}>
+    // suppressHydrationWarning: the script below sets data-theme on <html>
+    // before React hydrates, which would otherwise be flagged as a mismatch.
+    <html lang={language} suppressHydrationWarning>
+      <head>
+        {/* Applies the stored theme before the first paint. Anything later —
+            an effect, a component — flashes the wrong theme for a frame. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem('${THEME_KEY}');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;}catch(e){}`,
+          }}
+        />
+      </head>
       <body>
         <header className="site">
           <div className="inner">
-            <a className="brand" href={homePath(language)}>
+            <Link className="brand" href={homePath(language)}>
               {label('brand')}
-            </a>
-            <form className="searchbar" action={searchPath(language)} method="get" role="search">
-              <input
-                type="search"
-                name="q"
-                placeholder={label('searchPlaceholder')}
-                aria-label={label('search')}
-              />
-              <button type="submit">{label('search')}</button>
-            </form>
+            </Link>
+            <SearchBar
+              action={searchPath(language)}
+              placeholder={label('searchPlaceholder')}
+              label={label('search')}
+            />
             <nav className="langs" aria-label="Language">
               {LANGUAGES.map((code) => (
-                <a
+                <Link
                   key={code}
                   className={code === language ? 'lang current' : 'lang'}
                   href={homePath(code)}
                   hrefLang={code}
                 >
                   {code.toUpperCase()}
-                </a>
+                </Link>
               ))}
             </nav>
+            <ThemeToggle label={label('theme')} />
           </div>
         </header>
         <main className="wrap">{children}</main>
+        <Footer language={language} />
       </body>
     </html>
   );

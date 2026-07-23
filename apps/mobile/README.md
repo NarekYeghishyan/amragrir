@@ -54,7 +54,8 @@ pre-order (time picker), orders list, favorites, profile, referral, settings.
 ## Conventions
 
 - **No raw colours in components** — read `useTheme()`; tokens live in
-  `src/theme/tokens.ts`.
+  `@amragrir/ui` (re-exported by `src/theme/tokens.ts`), which is also what
+  generates the web and back-office stylesheets.
 - **No hand-built URLs in screens** — add a typed call to `src/api/endpoints.ts`.
 - **Money is formatted, never computed** here; the server owns every total.
   The basket carries menu prices only so a single line can be shown before the

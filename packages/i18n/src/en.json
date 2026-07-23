@@ -1,11 +1,16 @@
 {
   "brand": "Amragrir",
   "tagline": "Order ahead, skip the queue",
+  "promoTag": "SKIP THE LINE",
+  "heroTitle": "Order ahead. Eat exactly when you arrive.",
+  "heroSub": "Pre-order from your favourite spots and we time the kitchen so it's fresh the moment you walk in.",
+  "orderAhead": "Order ahead",
   "nearbyRestaurants": "Restaurants in Yerevan",
   "browseByCuisine": "Browse by cuisine",
   "popularNearYou": "Popular near you",
   "search": "Search",
   "searchPlaceholder": "Restaurant or dish",
+  "theme": "Toggle theme",
   "restaurants": "Restaurants",
   "dishes": "Dishes",
   "noResults": "Nothing found",
@@ -21,5 +26,14 @@
   "soldOut": "Sold out",
   "notFound": "Page not found",
   "notFoundHint": "The restaurant may have been removed, or the address is wrong",
-  "backHome": "Home"
+  "backHome": "Home",
+  "footBlurb": "Order ahead from Yerevan's best kitchens and eat exactly when you arrive — no lines, no waiting.",
+  "footCopyright": "© 2026 Amragrir LLC. All rights reserved.",
+  "footMadeIn": "Made in Armenia",
+  "footCompany": "Company",
+  "footCompanyItems": "About us, Careers, Press, Blog",
+  "footForYou": "For you",
+  "footForYouItems": "Order ahead, Reserve a table, Gift cards, Refer & earn",
+  "footSupport": "Support",
+  "footSupportItems": "Help center, Contact, Terms, Privacy"
 }
