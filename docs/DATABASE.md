@@ -37,7 +37,7 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | notif_push | boolean DEFAULT true | |
 | notif_promo | boolean DEFAULT false | |
 | reward_points | integer DEFAULT 0 | |
-| role | enum(`customer`,`owner`,`staff`,`admin`) DEFAULT 'customer' | see ROLES |
+| role | enum(`customer`,`owner`,`staff`,`admin`) DEFAULT 'customer' | **only `customer` is used.** Staff are a separate table (`staff_users`, §16) — a customer record can no longer be promoted. `owner`/`staff`/`admin` remain in the enum type because dropping a value out from under existing rows is not a migration; nothing reads them. |
 | referred_by | uuid FK→users.id NULL | who invited |
 | is_guest | boolean DEFAULT false | guest account |
 | created_at / updated_at | timestamptz | |
@@ -55,7 +55,7 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | price_level | smallint | 1..4 ($..$$$$) |
 | rating_avg | numeric(2,1) DEFAULT 0 | cached average |
 | reviews_count | integer DEFAULT 0 | |
-| owner_id | uuid FK→users.id | owner |
+| owner_id | uuid FK→users.id **NULL** `ON DELETE SET NULL` | **historical.** Who administers a restaurant is a `restaurant_admin` row in `staff_assignments` (§17) — a set, not a single id, which is what makes two administrators or a handover expressible. Kept as the only record of the original owner for restaurants whose owner had no email and so could not be migrated into `staff_users`. Deleting that user empties the column rather than refusing: the restaurant does not depend on them any more, and a record of who it once was is not worth blocking a deletion for. |
 | reservations_enabled | boolean DEFAULT false | enable/disable booking |
 | services | text[] | {pickup, dinein, reserve} |
 | cover_url | text NULL | |
@@ -119,10 +119,58 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | price_amd | integer NOT NULL | price in dram |
 | calories_kcal | integer NULL | |
 | prep_min | smallint | prep time |
-| photo_url | text NULL | |
+| photo_url | text NULL | absolute URL of the dish's picture; required by the API on create |
 | dietary_tags | text[] | {vegetarian,vegan,halal,gluten_free} |
-| is_available | boolean DEFAULT true | |
+| is_available | boolean DEFAULT true | sold out tonight — reversible by a shift |
+| deleted_at | timestamptz NULL | off the menu for good; set means gone from every read |
 | created_at / updated_at | timestamptz | |
+
+> **Soft-deleted, because `order_items` references it.** An order that can no
+> longer say what was bought is not an order, so taking a dish off the menu sets
+> `deleted_at` and leaves the row.
+>
+> This replaced a refusal: deleting a dish that had ever been ordered used to
+> return 409 ("mark it unavailable instead") because the foreign key made a real
+> delete impossible. Keeping the row removes that objection — the reference stays
+> valid, past orders still resolve — so **any dish can now be removed, ordered or
+> not**.
+>
+> **Not the same state as `is_available`.** That one is "sold out tonight", a
+> shift may set it on `menu:availability`, and it comes back. `deleted_at` needs
+> `menu:write` and nothing in the panel undoes it (the row supports an undelete
+> if one is ever wanted; no endpoint offers it).
+>
+> **Every read filters it**, via `LIVE_MENU_ITEM` in `apps/api/src/common/menu-visibility.ts`
+> — one exported constant rather than `deleted_at IS NULL` written out six times,
+> so a new read path is a grep away from the list that needs it. Two of the six
+> are not cosmetic: the public menu would show customers a withdrawn dish, and
+> the lookup order placement validates against would let them buy one. The branch
+> `menuItemCount` filters it too, or "12 dishes" would never move down again.
+>
+> No index on `deleted_at`. A partial index on `deleted_at IS NULL` would suit
+> the reads exactly and Prisma cannot express one, so it would be dropped by the
+> next generated migration and show as drift; `menu_items(branch_id, menu_tab)`
+> already narrows to a single branch's menu.
+>
+> **`photo_url` is required to add a dish but nullable in the column.** The rule
+> is enforced at the write — `CreateMenuItemDto` refuses a creation without one,
+> and no PATCH can blank it. The column stays nullable because a `NOT NULL`
+> migration would have to invent a value for every row that predates the rule,
+> from inside SQL that cannot know the deployment's `API_PUBLIC_URL` — the
+> address a stored photo is absolute against. The seed fills those rows in
+> instead (`refreshSeedPhotos`, also runnable on its own as
+> `pnpm --filter @amragrir/api db:photos`), and prints `menuItemsWithoutPhoto` on
+> every run so the claim that every dish has one is re-checked rather than
+> assumed. That script rewrites a row with no photograph or one the seed put
+> there, and never one a restaurant uploaded.
+>
+> **The value is an absolute URL, not a path.** Uploaded photos live under
+> `UPLOAD_DIR` and are served at `API_PUBLIC_URL/uploads/menu/<uuid>.<ext>`;
+> demo dishes point at photographs hosted elsewhere (`prisma/menu-photos.ts`),
+> or at `API_PUBLIC_URL/static/menu/<category>.svg` under `MENU_PHOTOS=local`.
+> Every client — site, app, panel — therefore renders a dish's picture without
+> knowing where the API keeps files, and a row's host is not something the schema
+> assumes.
 
 ---
 
@@ -161,6 +209,57 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 
 ---
 
+## 8a. order_events
+
+Everything that ever happened to an order, in the order it happened. `orders.status`
+says **where** an order is; this says **how it got there and who moved it** — two
+different questions, and the second only has an answer if it is written down as it
+happens, because a status column overwrites its own history on every UPDATE.
+
+| Field | Type | Description |
+|---|---|---|
+| id | uuid PK | |
+| order_id | uuid FK→orders.id ON DELETE CASCADE | the order owns its history |
+| type | enum(`created`,`status_changed`,`payment`) | `payment` is an attempt that moved no status — a decline |
+| from_status / to_status | enum(OrderStatus) NULL | both null on `payment`; `from_status` null on `created` |
+| actor_type | enum(`customer`,`staff`,`system`) | which identity acted |
+| actor_user_id | uuid FK→users.id NULL ON DELETE SET NULL | set when `actor_type = customer` |
+| actor_staff_id | uuid FK→staff_users.id NULL ON DELETE SET NULL | set when `actor_type = staff` |
+| acting_staff_id | uuid FK→staff_users.id NULL ON DELETE SET NULL | the real human behind an impersonated session; null in the ordinary case |
+| detail | jsonb NULL | per-type extras: dish count and total on a placement, method/status/amount on anything touching money |
+| created_at | timestamptz | |
+
+**Not `audit_log`.** That table's actor is a `staff_users` row, and most of what
+happens to an order is done by the customer who placed it or by the payment
+provider — every one of those rows would carry a NULL actor, which is precisely
+the question this table exists to answer. Three actor columns rather than one
+nullable id for the same reason: a customer and a staff member are different
+tables, not two flavours of "user".
+
+**Written in the same transaction as the change it records.** The `created` entry
+is nested inside the order's own INSERT; a status change is written inside the
+transaction that performs it, so the optimistic status match aborts both together
+and no entry can claim a move that lost a race. Nothing logs after the fact.
+
+`acting_staff_id` is what keeps the trail honest under impersonation: the staff
+token's `sub` is the account *being acted as*, so recording only that would put
+the change against somebody who was not at the keyboard.
+
+Orders that predate the table were backfilled with a single `created` entry from
+`orders.created_at`, marked `detail.backfilled = true`. Their creation time is
+real; the rest of their history was never recorded, and the panel says so rather
+than implying otherwise.
+
+**`detail.reconstructed = true`** marks an entry inferred from the order row
+rather than witnessed: the dev seed writes one for any order whose history does
+not reach its current status, using `orders.status` and `orders.updated_at` and
+attributing it to `system`. The status and the time come from the database; the
+actor is genuinely unknown, and naming a plausible one would turn an audit trail
+into fiction. Everything the API itself has moved is skipped, because its history
+already accounts for where it is.
+
+---
+
 ## 9. reservations
 
 | Field | Type | Description |
@@ -194,10 +293,10 @@ that survives if that isolation level is ever relaxed.
 | id | uuid PK | |
 | order_id | uuid FK→orders.id UNIQUE NULL | set for a food payment |
 | reservation_id | uuid FK→reservations.id UNIQUE NULL | set for a table deposit |
-| method | enum(`apple_pay`,`google_pay`,`card`,`cash`) | |
+| method | enum(`apple_pay`,`google_pay`,`card`) | online only; `cash` was dropped from the type by `20260803090000_online_payments_only` |
 | amount_amd | integer | |
-| status | enum(`pending`,`authorized`,`captured`,`refunded`,`failed`,`cancelled`) | |
-| provider_ref | varchar(120) NULL | provider transaction id |
+| status | enum(`pending`,`authorized`,`captured`,`refunded`,`failed`,`cancelled`) | an *order* payment now only ever reaches `captured`, `failed` or `cancelled` — `pending` was the cash state and `authorized`/`refunded` belong to deposits |
+| provider_ref | varchar(120) NULL | provider transaction id — or `legacy_cash`, which is how a payment that predates the enum change is still recognisable after its method was rewritten to `card` |
 | created_at / updated_at | timestamptz | |
 
 A payment settles **exactly one** of the two, enforced by
@@ -282,11 +381,172 @@ deposit never happens.
 
 ---
 
+# Staff side
+
+Separate from `users` on purpose: a person who manages a restaurant should not
+carry reward points, favourites and an order history on the same row, and no
+customer record should be one `UPDATE` away from staff powers. Someone who both
+manages a restaurant and eats at one has two accounts.
+
+## 16. staff_users
+
+| Field | Type | Description |
+|---|---|---|
+| id | uuid PK | |
+| email | varchar(160) UNIQUE NOT NULL | the login. Always lowercased — a CHECK constraint (`email = lower(email)`) keeps it true, since the unique index is case-sensitive |
+| email_verified_at | timestamptz NULL | set when an invitation is accepted |
+| password_hash | text NULL | **null until the invite is accepted**: the account can be listed and given a role, but cannot be signed into. scrypt, parameters stored in the hash |
+| name | varchar(120) NOT NULL | |
+| phone | varchar(20) NULL | contact only — never a login |
+| is_active | boolean DEFAULT true | deactivation rather than deletion, because `audit_log` still has to name them |
+| last_login_at | timestamptz NULL | |
+| created_at / updated_at | timestamptz | |
+
+## 17. staff_assignments
+
+One role, over one scope. A manager of two branches holds two rows — which is
+what makes "manage these two, not the third" expressible, and is why this is a
+table rather than a column.
+
+| Field | Type | Description |
+|---|---|---|
+| id | uuid PK | |
+| staff_user_id | uuid FK→staff_users.id ON DELETE CASCADE | |
+| role | enum(`super_admin`,`platform_admin`,`restaurant_admin`,`restaurant_manager`,`branch_staff`) | |
+| restaurant_id | uuid FK→restaurants.id NULL | set for `restaurant_admin` |
+| branch_id | uuid FK→restaurant_branches.id NULL | set for `restaurant_manager` and `branch_staff`. The restaurant is reached by joining the branch, so the two columns can never disagree |
+| created_by | uuid FK→staff_users.id NULL ON DELETE SET NULL | a grant outlives whoever granted it |
+| created_at | timestamptz | |
+
+Two constraints Prisma cannot express, both in the migration:
+
+- **`staff_assignments_scope_check`** — platform roles carry neither id,
+  `restaurant_admin` a restaurant, branch roles a branch. Without it a malformed
+  row is a privilege bug rather than a validation error. Mirrored by `ROLE_SCOPE`
+  in `packages/shared`, which fails first with a readable message.
+- **Three partial unique indexes** (`…_platform_key`, `…_restaurant_key`,
+  `…_branch_key`) giving one assignment per person per scope. A plain
+  `@@unique` would not do: Postgres treats NULLs as distinct, so the same super
+  admin could be stored five times.
+
+## 18. staff_invites
+
+How a staff account comes into existence. There is no sign-up.
+
+| Field | Type | Description |
+|---|---|---|
+| id | uuid PK | |
+| email | varchar(160) NOT NULL | lowercase, same CHECK as above |
+| role | enum(StaffRole) | |
+| restaurant_id / branch_id | uuid NULL | same scope shape, same CHECK constraint |
+| token_hash | text UNIQUE NOT NULL | **only the digest.** The raw token lives in the email and nowhere else, so a leaked database yields no usable invitations |
+| expires_at | timestamptz NOT NULL | 7 days by default (`STAFF_INVITE_TTL`) |
+| accepted_at | timestamptz NULL | |
+| invited_by | uuid FK→staff_users.id | |
+| created_at | timestamptz | |
+
+A partial unique index on `email WHERE accepted_at IS NULL` allows one open
+invitation per address — re-inviting replaces the link rather than leaving two
+live.
+
+## 19. audit_log
+
+Who did what. Once two people share a restaurant, "who marked this sold out" and
+"who let this account in" stop being answerable without it.
+
+| Field | Type | Description |
+|---|---|---|
+| id | uuid PK | |
+| actor_staff_id | uuid FK→staff_users.id NULL ON DELETE SET NULL | null for system actions |
+| acting_staff_id | uuid FK→staff_users.id NULL ON DELETE SET NULL | the super admin behind an impersonated session; null in the ordinary case |
+| action | varchar(80) | `menu_item.create/update/availability/delete`, `branch.create/update/status`, `staff.invite/invite_revoke/assignment_revoke/impersonate`, `customer.phone_view`, `reservation.status` |
+| entity / entity_id | varchar(40) / uuid NULL | **not** a foreign key: it points at whichever table `entity` names, and that row may legitimately be gone |
+| restaurant_id | uuid FK→restaurants.id NULL ON DELETE SET NULL | where it happened, for the reach filter |
+| branch_id | uuid FK→restaurant_branches.id NULL ON DELETE SET NULL | ditto; both written whenever both are known |
+| before / after | jsonb NULL | only the fields that changed |
+| ip | varchar(45) | |
+| created_at | timestamptz | |
+
+**The vocabulary lives in `packages/shared/src/activity.ts`** (`AuditAction`,
+`AuditEntity`, `AUDIT_ACTION_ENTITY`), not as string literals at the call sites:
+the API writes these values and the back office renders a sentence per value in
+three languages, so a typo on either side would be an unreadable row rather than
+a compile error. `entity` is derived from `action` through that map, so a caller
+cannot pair a menu action with a staff entity.
+
+**One action records a read.** `customer.phone_view` is written when somebody
+asks `GET /admin/users/{id}/phone` for one diner's number in full — the customer
+list masks every number, and a mask that lifts without a trace is decoration. It
+is the only row here whose `entity` is `customer` (a `users` row, the *other*
+identity), it carries no scope on either column, and `after` holds the **masked**
+number: enough to say which number was read, not a second permanent readable
+copy of it. There is no `before`, because nothing changed.
+
+**The table is read two ways.** By **person** — `GET /staff/{id}/activity`,
+scanning `(actor_staff_id, created_at)` backwards and merging `order_events`
+in — and by **thing**, over `(entity, entity_id)`: `GET
+/restaurant/menu-items/{id}/history` is every row about one dish, oldest first,
+which is what finally makes "who put this on the menu, and who moved the price"
+answerable on the screen the price is on. The second read needs no scope filter
+of its own, because the entity it is about is checked against the caller's reach
+first and a menu item cannot change branch. See ROLES_AND_PERMISSIONS.md, "Who
+can read it".
+
+> **Scope columns are what make the table readable by person.** Every list in
+> the back office is filtered to the caller's reach, and a person's activity has
+> to be too — a restaurant admin who can see that somebody works for them must
+> not thereby see what that person did for a different restaurant. `entity_id`
+> alone cannot express that: it is polymorphic, so scoping through it would mean
+> a join per `entity` value at read time.
+>
+> Both columns are written wherever both are known — a menu item names its
+> branch, and that branch names its restaurant — so a branch-level action is
+> reachable by the branch's manager *and* the restaurant's admin without a join
+> either way. **Both null means platform scope:** an action over no restaurant,
+> readable only by an account whose reach is unscoped. `staff.impersonate` is
+> exactly that.
+>
+> Unlike `entity_id` these are real foreign keys, because they decide who may
+> *read* the row and an access-control column holding an id that matches nothing
+> hides or reveals history by accident. `ON DELETE SET NULL` rather than
+> `CASCADE`, for the reason the actor columns already use: an entry outlives the
+> thing it happened to. A deleted branch narrows its rows to the restaurant they
+> still name; a deleted restaurant narrows them to platform readers. Both are a
+> loss of precision, neither is a loss of the fact.
+
+> **`before` is what makes a deletion readable.** For the entities that are hard
+> deleted — a revoked `staff_assignments` row, a withdrawn `staff_invites` row —
+> it is the only remaining record of what the thing was. A revoked role is
+> deliberately not soft-deleted: it has to be *gone* from the permission path
+> rather than filtered out of it, because the one query that forgot the filter
+> would leave somebody holding a role that was taken away.
+
+> **Orders are the exception, and deliberately not through this table:** they
+> have their own `order_events` (§8a), because their actor is usually a customer
+> or the payment provider rather than a staff member — every one of those rows
+> would carry a NULL `actor_staff_id`, which is what this table exists to avoid.
+> `GET /staff/{id}/activity` merges the two at read time rather than writing
+> status changes to both, so there is one record of each fact.
+
+---
+
 ## Indexes (recommended)
 
 - `restaurant_branches(lat, lng)` — geo search (or PostGIS `geography`).
 - `menu_items(branch_id, menu_tab)`, `menu_items(category_id)`.
 - `orders(user_id, status)`, `orders(branch_id, status)`, `orders(code)`.
+- `order_events(order_id, created_at)` — the timeline is always read for one
+  order, oldest first.
 - `reservations(branch_id, reserved_for)`, `reservations(user_id)`.
 - `favorites(user_id)`, `notifications(user_id, is_read)`.
-- OTP/session uniqueness — in Redis, not in PG.
+- `staff_assignments(staff_user_id)`, `(restaurant_id)`, `(branch_id)` — every
+  scope filter reads one of the three.
+- `audit_log(actor_staff_id, created_at)` — also what the activity feed reads,
+  scanned backwards for one person newest-first. The scope columns are a filter
+  on the handful of rows that returns rather than something to index.
+- `audit_log(entity, entity_id)` — what a per-entity history reads, one row set
+  per thing: `GET /restaurant/menu-items/{id}/history` is this index. Both
+  columns, because `entity_id` is not a foreign key and two tables can hand out
+  the same uuid.
+- OTP/session uniqueness — in Redis, not in PG. Staff refresh tokens and
+  password-reset tokens live there too (`staff_refresh:*`, `staff_reset:*`).

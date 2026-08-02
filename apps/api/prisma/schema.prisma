@@ -14,11 +14,26 @@ datasource db {
 // ── Enums (mirror packages/shared/src/enums.ts) ──────────────────────────────
 // `guest` is not a DB role — it is the `users.isGuest` flag (see ROLES_AND_PERMISSIONS.md).
 
+/// What a *customer* account is. `owner`/`staff`/`admin` are retired: staff are
+/// separate accounts in `staff_users` with roles in `staff_assignments`. The
+/// values stay until the `/owner` and `/admin` endpoints move onto staff tokens,
+/// because dropping an enum value out from under live rows is not a migration.
 enum Role {
   customer
   owner
   staff
   admin
+}
+
+/// A back-office role. What each may do is ROLE_PERMISSIONS in
+/// packages/shared/src/staff-roles.ts — deliberately not a table, since a
+/// permission is only real next to an endpoint that checks it.
+enum StaffRole {
+  super_admin
+  platform_admin
+  restaurant_admin
+  restaurant_manager
+  branch_staff
 }
 
 enum ServiceMode {
@@ -37,6 +52,23 @@ enum OrderStatus {
   cancelled
 }
 
+/// What an `order_events` row records. `payment` is for the attempts that leave
+/// the order where it is — a decline is not a status change.
+enum OrderEventType {
+  created
+  status_changed
+  payment
+}
+
+/// Who is behind an `order_events` row. Three tables, not one nullable user id:
+/// a customer is `users`, a staff member is `staff_users`, and `system` is
+/// neither.
+enum OrderActorType {
+  customer
+  staff
+  system
+}
+
 enum ReservationStatus {
   pending
   confirmed
@@ -46,11 +78,12 @@ enum ReservationStatus {
   no_show
 }
 
+/// Every method is online. `cash` was removed once an order stopped being
+/// placeable without paying for it — see BUSINESS_LOGIC.md §5.
 enum PaymentMethod {
   apple_pay
   google_pay
   card
-  cash
 }
 
 enum PaymentStatus {
@@ -86,7 +119,7 @@ enum CouponSource {
 // ── Models ───────────────────────────────────────────────────────────────────
 
 model User {
-  id String @id @default(uuid()) @db.Uuid
+  id            String   @id @default(uuid()) @db.Uuid
   // Nullable because guest accounts exist before any phone is known; it is
   // filled in when the user verifies an OTP (guest -> customer upgrade).
   phone         String?  @unique @db.VarChar(20)
@@ -115,29 +148,38 @@ model User {
   notifications    Notification[]
   referral         Referral?
   coupons          Coupon[]
+  orderEvents      OrderEvent[]   @relation("OrderEventActor")
 
   @@map("users")
 }
 
 model Restaurant {
-  id                   String   @id @default(uuid()) @db.Uuid
-  slug                 String   @unique @db.VarChar(80)
-  name                 String   @db.VarChar(160)
-  cuisine              String?  @db.VarChar(120)
-  priceLevel           Int?     @map("price_level") @db.SmallInt
-  ratingAvg            Decimal  @default(0) @map("rating_avg") @db.Decimal(2, 1)
-  reviewsCount         Int      @default(0) @map("reviews_count")
-  ownerId              String   @map("owner_id") @db.Uuid
-  reservationsEnabled  Boolean  @default(false) @map("reservations_enabled")
-  services             String[]
-  coverUrl             String?  @map("cover_url")
-  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                  String   @id @default(uuid()) @db.Uuid
+  slug                String   @unique @db.VarChar(80)
+  name                String   @db.VarChar(160)
+  cuisine             String?  @db.VarChar(120)
+  priceLevel          Int?     @map("price_level") @db.SmallInt
+  ratingAvg           Decimal  @default(0) @map("rating_avg") @db.Decimal(2, 1)
+  reviewsCount        Int      @default(0) @map("reviews_count")
+  /// Historical. Who administers a restaurant is a `restaurant_admin` row in
+  /// `staff_assignments` — a set, not a single id, which is what makes two
+  /// administrators or a handover expressible. Kept nullable so restaurants
+  /// whose original owner had no email (and so could not be migrated into
+  /// `staff_users`) still record who to invite.
+  ownerId             String?  @map("owner_id") @db.Uuid
+  reservationsEnabled Boolean  @default(false) @map("reservations_enabled")
+  services            String[]
+  coverUrl            String?  @map("cover_url")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  owner     User               @relation("OwnedRestaurants", fields: [ownerId], references: [id])
-  branches  RestaurantBranch[]
-  reviews   Review[]
-  favorites Favorite[]
+  owner        User?              @relation("OwnedRestaurants", fields: [ownerId], references: [id])
+  branches     RestaurantBranch[]
+  reviews      Review[]
+  favorites    Favorite[]
+  assignments  StaffAssignment[]
+  invites      StaffInvite[]
+  auditEntries AuditLog[]
 
   @@index([ownerId])
   @@map("restaurants")
@@ -158,11 +200,14 @@ model RestaurantBranch {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  restaurant   Restaurant    @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurant   Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   tables       Table[]
   menuItems    MenuItem[]
   orders       Order[]
   reservations Reservation[]
+  assignments  StaffAssignment[]
+  invites      StaffInvite[]
+  auditEntries AuditLog[]
 
   @@index([restaurantId])
   @@index([lat, lng])
@@ -185,11 +230,11 @@ model Table {
 }
 
 model Category {
-  id        String @id @default(uuid()) @db.Uuid
-  key       String @unique @db.VarChar(40)
+  id        String  @id @default(uuid()) @db.Uuid
+  key       String  @unique @db.VarChar(40)
   icon      String? @db.VarChar(8)
   sortOrder Int?    @map("sort_order") @db.SmallInt
-  nameI18n  Json   @map("name_i18n")
+  nameI18n  Json    @map("name_i18n")
 
   menuItems MenuItem[]
 
@@ -209,6 +254,15 @@ model MenuItem {
   photoUrl     String?  @map("photo_url")
   dietaryTags  String[] @map("dietary_tags")
   isAvailable  Boolean  @default(true) @map("is_available")
+  /// Off the menu, without leaving the database — `order_items` points here, and
+  /// an order that can no longer say what was bought is not an order. Set means
+  /// gone: every read path filters it out, including the public menu and the
+  /// lookup order placement validates against.
+  ///
+  /// Not the same state as `is_available`. That one is "sold out tonight", a
+  /// shift may set it, and it comes back. This one needs `menu:write` and
+  /// nothing in the panel undoes it.
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -243,17 +297,65 @@ model Order {
   createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  user        User         @relation(fields: [userId], references: [id])
+  user        User             @relation(fields: [userId], references: [id])
   branch      RestaurantBranch @relation(fields: [branchId], references: [id])
-  reservation Reservation? @relation(fields: [reservationId], references: [id])
-  coupon      Coupon?      @relation(fields: [couponId], references: [id])
+  reservation Reservation?     @relation(fields: [reservationId], references: [id])
+  coupon      Coupon?          @relation(fields: [couponId], references: [id])
   items       OrderItem[]
   payment     Payment?
+  events      OrderEvent[]
 
   @@index([userId, status])
   @@index([branchId, status])
   @@index([code])
   @@map("orders")
+}
+
+/// Everything that ever happened to an order, in the order it happened.
+///
+/// `orders.status` says where an order is; this says how it got there and who
+/// moved it. The two are not the same question, and the second one only has an
+/// answer if it is written down as it happens — a status column overwrites its
+/// own history on every update.
+///
+/// Not `audit_log`: that table names a `staff_users` actor, and most of what
+/// happens to an order is done by the customer who placed it or by the payment
+/// provider. Folding those into a table whose actor column is a staff id would
+/// mean a NULL actor for the majority of rows, which is precisely the question
+/// this exists to answer.
+model OrderEvent {
+  id            String         @id @default(uuid()) @db.Uuid
+  orderId       String         @map("order_id") @db.Uuid
+  type          OrderEventType
+  /// Null for `created` (there was no previous status) and for `payment`
+  /// entries, which record an attempt that moved nothing.
+  fromStatus    OrderStatus?   @map("from_status")
+  toStatus      OrderStatus?   @map("to_status")
+  actorType     OrderActorType @map("actor_type")
+  /// Set when `actor_type = customer`.
+  actorUserId   String?        @map("actor_user_id") @db.Uuid
+  /// Set when `actor_type = staff`.
+  actorStaffId  String?        @map("actor_staff_id") @db.Uuid
+  /// The real human behind an impersonated session, when the staff member above
+  /// was being acted as rather than acting. Null in the ordinary case. Without
+  /// it the timeline would name the person who did not do it — the exact
+  /// failure `ImpersonationService` writes `audit_log` to avoid.
+  actingStaffId String?        @map("acting_staff_id") @db.Uuid
+  /// Whatever the entry needs beyond the statuses: the payment method and what
+  /// happened to the money, the reason a cancellation was allowed. Shaped per
+  /// `type` and read only for display, so a new kind of detail is not a
+  /// migration.
+  detail        Json?
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order       Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actorUser   User?      @relation("OrderEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorStaff  StaffUser? @relation("OrderEventStaffActor", fields: [actorStaffId], references: [id], onDelete: SetNull)
+  actingStaff StaffUser? @relation("OrderEventActingStaff", fields: [actingStaffId], references: [id], onDelete: SetNull)
+
+  /// The timeline is always read for one order, oldest first.
+  @@index([orderId, createdAt])
+  @@map("order_events")
 }
 
 model OrderItem {
@@ -410,4 +512,149 @@ model Coupon {
   @@unique([userId, code])
   @@index([userId])
   @@map("coupons")
+}
+
+// ── Staff side ───────────────────────────────────────────────────────────────
+// Separate from `users` on purpose: a person who manages a restaurant should not
+// also be carrying reward points, favourites and an order history on the same
+// row, and no customer record should be one UPDATE away from staff powers.
+// Someone who both manages a restaurant and eats at one has two accounts.
+
+model StaffUser {
+  id              String    @id @default(uuid()) @db.Uuid
+  /// Always stored lowercased — the API normalises before writing, so this
+  /// unique index is the real one rather than a case-sensitive near-miss.
+  email           String    @unique @db.VarChar(160)
+  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(6)
+  /// Null until an invite is accepted: the account exists so it can be assigned
+  /// a role and shown in a list, but it cannot be signed into yet.
+  passwordHash    String?   @map("password_hash")
+  name            String    @db.VarChar(120)
+  /// Contact only — never a login. Staff sign in with email.
+  phone           String?   @db.VarChar(20)
+  /// Deactivation rather than deletion: `audit_log` has to keep naming them.
+  isActive        Boolean   @default(true) @map("is_active")
+  lastLoginAt     DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assignments   StaffAssignment[] @relation("AssignmentHolder")
+  grantedRoles  StaffAssignment[] @relation("AssignmentGrantedBy")
+  invitesSent   StaffInvite[]     @relation("InviteSentBy")
+  auditEntries  AuditLog[]
+  /// Entries written while acting as somebody else — see `AuditLog.actingStaffId`.
+  auditEntriesAs AuditLog[]       @relation("AuditLogActingStaff")
+  orderEvents   OrderEvent[]      @relation("OrderEventStaffActor")
+  /// Orders moved while acting as somebody else — see `OrderEvent.actingStaffId`.
+  orderEventsAs OrderEvent[]      @relation("OrderEventActingStaff")
+
+  @@map("staff_users")
+}
+
+/// One role, over one scope. A manager of two branches holds two rows — which
+/// is what makes "manage these two, not the third" expressible at all, and is
+/// why this is a table rather than a column on `staff_users`.
+model StaffAssignment {
+  id           String    @id @default(uuid()) @db.Uuid
+  staffUserId  String    @map("staff_user_id") @db.Uuid
+  role         StaffRole
+  /// Set for `restaurant_admin`; null otherwise.
+  restaurantId String?   @map("restaurant_id") @db.Uuid
+  /// Set for `restaurant_manager` and `branch_staff`; null otherwise. The
+  /// restaurant is reached by joining the branch, so the two columns can never
+  /// disagree about which restaurant this is.
+  branchId     String?   @map("branch_id") @db.Uuid
+  /// Who granted it. Null once that account is deleted — the grant outlives the
+  /// granter, and losing the name is better than losing the row.
+  createdById  String?   @map("created_by") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  staffUser  StaffUser         @relation("AssignmentHolder", fields: [staffUserId], references: [id], onDelete: Cascade)
+  createdBy  StaffUser?        @relation("AssignmentGrantedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  restaurant Restaurant?       @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  branch     RestaurantBranch? @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  // The role/scope shape (platform roles carry neither id, restaurant roles a
+  // restaurant, branch roles a branch) is a CHECK constraint in the migration —
+  // Prisma cannot express it, and without it a malformed row is a privilege bug
+  // rather than a validation error. The "one assignment per person per scope"
+  // rule is a set of partial unique indexes there too, because Postgres treats
+  // NULLs as distinct and a plain @@unique would allow duplicates.
+  @@index([staffUserId])
+  @@index([restaurantId])
+  @@index([branchId])
+  @@map("staff_assignments")
+}
+
+/// How a staff account comes into existence. There is no sign-up: an account is
+/// created by someone who already has the right to create it, which is what
+/// makes "no customer can become staff" true rather than merely enforced.
+model StaffInvite {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @db.VarChar(160)
+  role         StaffRole
+  restaurantId String?   @map("restaurant_id") @db.Uuid
+  branchId     String?   @map("branch_id") @db.Uuid
+  /// Only the hash is stored. The raw token exists in the email and nowhere
+  /// else, so a leaked database does not hand over usable invitations.
+  tokenHash    String    @unique @map("token_hash")
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  acceptedAt   DateTime? @map("accepted_at") @db.Timestamptz(6)
+  invitedById  String    @map("invited_by") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invitedBy  StaffUser         @relation("InviteSentBy", fields: [invitedById], references: [id], onDelete: Cascade)
+  restaurant Restaurant?       @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  branch     RestaurantBranch? @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@map("staff_invites")
+}
+
+/// Who did what. Once two people share a restaurant, "who marked this sold out"
+/// and "who let this account in" stop being answerable without it.
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// Null for actions the system took on nobody's behalf, and for staff who
+  /// have since been deleted.
+  actorStaffId String?  @map("actor_staff_id") @db.Uuid
+  /// The real human behind an impersonated session, when the account above was
+  /// being acted as rather than acting. Null in the ordinary case. Without it an
+  /// impersonated change is filed against the innocent party — the same failure
+  /// `order_events.acting_staff_id` exists to prevent.
+  actingStaffId String? @map("acting_staff_id") @db.Uuid
+  /// `menu_item.update`, `staff.invite`, `order.status` — resource and verb.
+  action       String   @db.VarChar(80)
+  entity       String   @db.VarChar(40)
+  /// Not a foreign key: it points at whichever table `entity` names, and the
+  /// row it refers to may legitimately be gone.
+  entityId     String?  @map("entity_id") @db.Uuid
+  /// Where it happened, so a person's activity can be filtered to the reader's
+  /// reach without a join per `entity` value. Both are written wherever both are
+  /// known — a menu item names its branch, and that branch names its restaurant.
+  ///
+  /// Both null means platform scope: an action over no restaurant, readable only
+  /// by an account whose reach is unscoped. Unlike `entity_id` these are real
+  /// references, because they decide who may read the row and an access-control
+  /// column holding an id that matches nothing hides or reveals history by
+  /// accident.
+  restaurantId String?  @map("restaurant_id") @db.Uuid
+  branchId     String?  @map("branch_id") @db.Uuid
+  /// Only the fields that changed, not the whole row. `before` is what makes a
+  /// deletion readable — it is the only remaining record of what the thing was
+  /// called, for the entities that are not soft-deleted.
+  before       Json?
+  after        Json?
+  ip           String?  @db.VarChar(45)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor       StaffUser?        @relation(fields: [actorStaffId], references: [id], onDelete: SetNull)
+  actingStaff StaffUser?        @relation("AuditLogActingStaff", fields: [actingStaffId], references: [id], onDelete: SetNull)
+  restaurant  Restaurant?       @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
+  branch      RestaurantBranch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  /// One person, newest first — scanned backwards for the activity feed.
+  @@index([actorStaffId, createdAt])
+  @@index([entity, entityId])
+  @@map("audit_log")
 }

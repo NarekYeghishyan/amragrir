@@ -32,6 +32,31 @@ describe('canTransitionOrder', () => {
     expect(canTransitionOrder(OrderStatus.Paid, OrderStatus.Preparing)).toBe(false);
   });
 
+  it('lets a kitchen plate straight to ready', () => {
+    // The one step in the machine that may be missed out. `almost_ready` warns
+    // the counter that something is about to need handing over; a dish plated
+    // in one motion never spends a moment there, and making the kitchen press
+    // twice would only record a stage the food was never in.
+    expect(canTransitionOrder(OrderStatus.Preparing, OrderStatus.Ready)).toBe(true);
+    expect(ORDER_STATUS_FLOW[OrderStatus.Preparing]).toEqual([
+      // The ordinary step first: the panel fills the first button and offers
+      // the rest, so this order is what a kitchen's thumb lands on.
+      OrderStatus.AlmostReady,
+      OrderStatus.Ready,
+    ]);
+  });
+
+  it('skips nothing else, and nothing before the food is cooking', () => {
+    // Accepting an order, starting to cook it and handing it over are separate
+    // moments with separate people behind them. Only the warning stage is
+    // optional, and a second shortcut appearing anywhere fails here.
+    const forks = Object.values(OrderStatus).filter(
+      (status) =>
+        ORDER_STATUS_FLOW[status].filter((next) => next !== OrderStatus.Cancelled).length > 1,
+    );
+    expect(forks).toEqual([OrderStatus.Preparing]);
+  });
+
   it('refuses to move backwards', () => {
     expect(canTransitionOrder(OrderStatus.Ready, OrderStatus.Preparing)).toBe(false);
     expect(canTransitionOrder(OrderStatus.Paid, OrderStatus.Created)).toBe(false);
@@ -42,16 +67,27 @@ describe('canTransitionOrder', () => {
       expect(ORDER_STATUS_FLOW[status]).toEqual([]);
     });
   });
+
+  it('offers no way out of a paid order but forward', () => {
+    // The rule this file exists to pin: once the money is taken the order runs
+    // to completion. Nobody — customer or kitchen — can take it out of the
+    // queue, so a change that quietly restores the edge fails here.
+    expect(canTransitionOrder(OrderStatus.Paid, OrderStatus.Cancelled)).toBe(false);
+    expect(canTransitionOrder(OrderStatus.Confirmed, OrderStatus.Cancelled)).toBe(false);
+    expect(ORDER_STATUS_FLOW[OrderStatus.Paid]).toEqual([OrderStatus.Confirmed]);
+  });
 });
 
 describe('isOrderCancellable', () => {
-  it('allows cancelling until the kitchen starts', () => {
+  it('allows cancelling only before the order has been paid for', () => {
     expect(isOrderCancellable(OrderStatus.Created)).toBe(true);
-    expect(isOrderCancellable(OrderStatus.Paid)).toBe(true);
-    expect(isOrderCancellable(OrderStatus.Confirmed)).toBe(true);
   });
 
-  it('refuses once cooking has begun — the food is already spent', () => {
+  it('refuses once the money has been taken', () => {
+    // An unpaid order is a basket somebody walked away from. A paid one has a
+    // charge behind it, and this repo has no path that reverses one.
+    expect(isOrderCancellable(OrderStatus.Paid)).toBe(false);
+    expect(isOrderCancellable(OrderStatus.Confirmed)).toBe(false);
     expect(isOrderCancellable(OrderStatus.Preparing)).toBe(false);
     expect(isOrderCancellable(OrderStatus.AlmostReady)).toBe(false);
     expect(isOrderCancellable(OrderStatus.Ready)).toBe(false);

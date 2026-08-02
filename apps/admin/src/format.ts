@@ -1,4 +1,5 @@
 import { Language } from '@amragrir/shared';
+import type { Translate } from './language';
 
 /**
  * Money arrives as an integer in dram and is only ever formatted here.
@@ -16,10 +17,6 @@ export function formatAmd(amount: number): string {
   return `${rounded < 0 ? '-' : ''}${digits} ֏`;
 }
 
-export function formatStatus(status: string): string {
-  return status.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
-}
-
 /** `mm:ss`, or null when there is nothing left to count. */
 export function formatCountdown(seconds: number | null): string | null {
   if (seconds === null) {
@@ -30,9 +27,31 @@ export function formatCountdown(seconds: number | null): string | null {
 }
 
 /** How long an order has been waiting — the number a kitchen actually needs. */
-export function formatWaiting(createdAt: string): string {
+export function formatWaiting(t: Translate, createdAt: string): string {
   const minutes = Math.max(0, Math.round((Date.now() - new Date(createdAt).getTime()) / 60_000));
-  return minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ${minutes % 60} min ago`;
+  return minutes < 60
+    ? t('waitingMinutes', { minutes })
+    : t('waitingHours', { hours: Math.floor(minutes / 60), minutes: minutes % 60 });
+}
+
+/**
+ * A timestamp, to the minute, in the panel's language.
+ *
+ * Through `toLocaleString` rather than assembled by hand — the opposite choice
+ * from `formatAmd` above, and for the opposite reason: the runtime's ICU data
+ * is exactly what should decide whether Armenian writes the day or the month
+ * first, whereas a dram amount is grouped the same way in all three languages.
+ *
+ * Seconds are omitted deliberately. This reads as "when did this happen", and a
+ * trailing `:07` invites a precision the clock behind it does not have.
+ */
+export function formatDateTime(iso: string, language: Language = Language.Hy): string {
+  return new Date(iso).toLocaleString(language, {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 /**

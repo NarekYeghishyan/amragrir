@@ -1,6 +1,12 @@
 import { ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { OrderStatus, PaymentMethod, PaymentStatus } from '@amragrir/shared';
+import {
+  OrderActorType,
+  OrderEventType,
+  OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
+} from '@amragrir/shared';
 import { PaymentsService } from './payments.service';
 import { PaymentDeclinedError, type PaymentProvider } from './payment.provider';
 import type { OrderEventsService } from '../orders/order-events.service';
@@ -14,6 +20,7 @@ function orderRow(over: Record<string, unknown> = {}) {
   return {
     id: ORDER_ID,
     code: 'AMR-12344821',
+    userId: 'user-1',
     status: OrderStatus.Created,
     totalAmd: 6160,
     payment: null,
@@ -32,6 +39,7 @@ function build(options: { order?: unknown; charge?: jest.Mock } = {}) {
     .mockImplementation(({ data }: { data: Record<string, unknown> }) =>
       Promise.resolve({ id: 'pay-1', ...data }),
     );
+  const orderEventCreate = jest.fn().mockResolvedValue({ id: 'event-1' });
 
   const prisma = {
     order: {
@@ -39,6 +47,7 @@ function build(options: { order?: unknown; charge?: jest.Mock } = {}) {
       update: jest.fn().mockResolvedValue(orderRow({ status: OrderStatus.Paid })),
     },
     payment: { create: paymentCreate, update: paymentUpdate },
+    orderEvent: { create: orderEventCreate },
     // The real client runs the array in one transaction; here the promises are
     // already resolved, so awaiting them all is equivalent.
     $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
@@ -70,6 +79,7 @@ function build(options: { order?: unknown; charge?: jest.Mock } = {}) {
     referrals,
     paymentCreate,
     paymentUpdate,
+    orderEventCreate,
   };
 }
 
@@ -101,17 +111,25 @@ describe('pay', () => {
     );
   });
 
-  it('commits a cash order without taking money', async () => {
-    // BUSINESS_LOGIC.md §5 — cash is settled at the counter, but the kitchen
-    // still has to receive the order.
-    const { service, provider, prisma } = build();
-    const result = await service.pay('user-1', dto({ method: PaymentMethod.Cash }));
+  it('charges every method — no order reaches the kitchen unpaid', async () => {
+    // BUSINESS_LOGIC.md §5. There used to be a `cash` path that recorded a
+    // `pending` payment and moved the order to `paid` anyway, which meant an
+    // order could be in the queue with nothing taken and nothing in this
+    // database that would ever settle it. A method that skips the provider is
+    // the shape of that bug returning.
+    for (const method of Object.values(PaymentMethod)) {
+      // A service per method rather than one with its mocks cleared: what is
+      // being asserted is a whole payment, and a cleared mock hides which
+      // iteration set it.
+      const { service, provider, prisma } = build();
+      const result = await service.pay('user-1', dto({ method }));
 
-    expect(provider.charge).not.toHaveBeenCalled();
-    expect(result.status).toBe(PaymentStatus.Pending);
-    expect(prisma.order.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: OrderStatus.Paid } }),
-    );
+      expect(provider.charge).toHaveBeenCalledWith(expect.objectContaining({ method }));
+      expect(result.status).toBe(PaymentStatus.Captured);
+      expect(prisma.order.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: OrderStatus.Paid } }),
+      );
+    }
   });
 
   it('records a decline and leaves the order unpaid', async () => {
@@ -124,6 +142,45 @@ describe('pay', () => {
       expect.objectContaining({ data: expect.objectContaining({ status: PaymentStatus.Failed }) }),
     );
     expect(prisma.order.update).not.toHaveBeenCalled();
+  });
+
+  it('gives a decline a history entry of its own', async () => {
+    // It moves no status, so without one the order's timeline would show it
+    // sitting in `created` with nothing to say why.
+    const charge = jest.fn().mockRejectedValue(new PaymentDeclinedError());
+    const { service, orderEventCreate } = build({ charge });
+
+    await expect(service.pay('user-1', dto())).rejects.toThrow(UnprocessableEntityException);
+
+    expect(orderEventCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: ORDER_ID,
+        type: OrderEventType.Payment,
+        toStatus: null,
+        actorType: OrderActorType.Customer,
+        detail: expect.objectContaining({ paymentStatus: PaymentStatus.Failed }),
+      }),
+    });
+  });
+
+  it('records the move to paid in the same transaction as the money', async () => {
+    const { service, orderEventCreate, prisma } = build();
+    await service.pay('user-1', dto());
+
+    expect(orderEventCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: OrderEventType.StatusChanged,
+        fromStatus: OrderStatus.Created,
+        toStatus: OrderStatus.Paid,
+        detail: expect.objectContaining({
+          paymentMethod: PaymentMethod.Card,
+          paymentStatus: PaymentStatus.Captured,
+        }),
+      }),
+    });
+    // One transaction, not three calls: a captured charge whose history entry
+    // failed to write would be money with no trail.
+    expect((prisma.$transaction as jest.Mock).mock.calls[0][0]).toHaveLength(3);
   });
 
   it('lets a failed payment be retried on the same row', async () => {
@@ -207,11 +264,13 @@ describe('reverse', () => {
     expect(status).toBe(PaymentStatus.Refunded);
   });
 
-  it('just cancels a pending cash payment — nothing was taken', async () => {
+  it('just cancels an attempt that took nothing', async () => {
+    // What actually reaches `reverse` now that an order can only be cancelled
+    // before it is paid: a refused card on an order the customer then dropped.
     const { service, provider } = build();
     const status = await service.reverse({
       id: 'pay-1',
-      status: PaymentStatus.Pending,
+      status: PaymentStatus.Failed,
       amountAmd: 6160,
       providerRef: null,
     } as never);
@@ -223,9 +282,10 @@ describe('reverse', () => {
 
 describe('methods', () => {
   it('offers every method with apple pay preselected', () => {
+    // Online only — `cash` was removed with the counter-settlement path.
     const { service } = build();
     expect(service.methods()).toEqual({
-      methods: ['apple_pay', 'google_pay', 'card', 'cash'],
+      methods: ['apple_pay', 'google_pay', 'card'],
       default: 'apple_pay',
     });
   });

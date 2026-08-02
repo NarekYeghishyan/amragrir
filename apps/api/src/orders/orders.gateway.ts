@@ -9,6 +9,7 @@ import {
 } from '@nestjs/websockets';
 import type { WebSocket } from 'ws';
 import { TokenService } from '../auth/token.service';
+import { StaffTokenService } from '../staff/staff-token.service';
 import { OrdersService } from './orders.service';
 import { OrderEventsService, type OrderStatusEvent } from './order-events.service';
 
@@ -46,6 +47,7 @@ export class OrdersGateway
 
   constructor(
     private readonly tokens: TokenService,
+    private readonly staffTokens: StaffTokenService,
     private readonly orders: OrdersService,
     private readonly events: OrderEventsService,
   ) {}
@@ -95,14 +97,20 @@ export class OrdersGateway
       return error('token and orderId are required');
     }
 
+    // Either identity may watch an order: the customer who placed it, or the
+    // kitchen working it. They carry different tokens, so both are tried —
+    // whichever verifies decides which visibility rule applies.
     const user = await this.tokens.tryReadAccess(data.token);
-    if (!user) {
+    const staff = user ? null : await this.staffTokens.tryReadAccess(data.token);
+    if (!user && !staff) {
       return error('Invalid or expired token');
     }
 
     let snapshot;
     try {
-      snapshot = await this.orders.findVisibleTo(user, data.orderId);
+      snapshot = user
+        ? await this.orders.findVisibleTo(user, data.orderId)
+        : await this.orders.findVisibleToStaff(staff!, data.orderId);
     } catch {
       // Deliberately the same answer for "no such order" and "not yours" —
       // a distinguishable error would confirm the id exists.

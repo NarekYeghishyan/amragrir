@@ -2,113 +2,2227 @@
    Regenerate with: pnpm --filter @amragrir/ui build:css */
 @import './tokens.css';
 
-/* Back-office-only: a tool, not a storefront, so a tighter radius. `--bad` and
-   `--hit` alias generated tokens rather than restating their values. */
+/* ─────────────────────────────────────────────────────────────────────────────
+   Back-office layer.
+
+   Everything below resolves to a token from tokens.css — there is no hex in
+   this file, so the panel follows the palette wherever it goes and light/dark
+   costs nothing to maintain.
+
+   Two deliberate departures from DESIGN_SYSTEM.md, which describes a phone:
+   controls are 40px rather than the 56px mobile CTA, and radii are tighter.
+   A tool somebody works in all day wants more on screen than a storefront
+   does. The kitchen board keeps full 44px touch targets, because that is the
+   one screen that gets used on a tablet with wet hands.
+   ──────────────────────────────────────────────────────────────────────────── */
+
 :root {
-  --radius: 14px;
-  --bad: var(--destructive);
-  --hit: var(--hit-target);
+  --sidebar-w: 248px;
+  --radius: var(--radius-md);
+  --radius-inner: var(--radius-sm);
+  --control-h: 40px;
+  --control-h-sm: 32px;
+  --touch-h: var(--hit-target);
+  --danger: var(--destructive);
+  --warn: var(--star);
+  --font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', 'Noto Sans Armenian', sans-serif;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font: var(--font);
+  -webkit-font-smoothing: antialiased;
 }
 
-button {
-  font: inherit;
-  min-height: var(--hit);
-  padding: 0 16px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── shell ─────────────────────────────────────────────────────────────────── */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  min-height: 100%;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-xl) var(--space-md) var(--space-md);
   background: var(--card);
-  color: var(--ink);
-  cursor: pointer;
-}
-button:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-weight: 600;
-}
-button.small {
-  min-height: 34px;
-  padding: 0 10px;
+  border-right: 1px solid var(--line);
 }
 
-input,
-select {
-  font: inherit;
-  min-height: var(--hit);
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--card);
-  color: var(--ink);
-}
-
-.app {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 24px 20px 64px;
-}
-
-.topbar {
+.brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 24px;
+  gap: 10px;
+  padding: 0 var(--space-sm);
 }
-.topbar h1 {
-  font-size: 20px;
-  margin: 0 auto 0 0;
+.brand__mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-inner);
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  font-weight: 800;
+  font-size: 17px;
+  flex: none;
+}
+.brand__name {
+  display: block;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  line-height: 1.2;
+}
+.brand__role {
+  display: block;
+  color: var(--ink3);
+  font-size: 12px;
+  line-height: 1.2;
 }
 
-.tabs {
+.nav {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
-.tab {
+.nav__heading {
+  padding: var(--space-md) var(--space-sm) var(--space-xs);
+  color: var(--ink3);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+/* An anchor, not a button — every destination in the sidebar is an address. The
+   button reset stays: these were buttons until the panel had URLs, and the rule
+   costs nothing on an element that has no border or background of its own. */
+.nav__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--control-h);
+  padding: 0 var(--space-md);
+  border: 0;
+  border-radius: var(--radius-inner);
+  background: transparent;
+  color: var(--ink2);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.nav__item:hover {
   background: var(--chip);
-  border-color: transparent;
+  color: var(--ink);
 }
-.tab[aria-selected='true'] {
+.nav__item[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.nav__item svg {
+  flex: none;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: var(--space-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.account:hover {
+  background: var(--chip);
+}
+.account__avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--chip);
+  color: var(--ink2);
+  font-size: 12px;
+  font-weight: 700;
+}
+.account__text {
+  min-width: 0;
+  flex: 1;
+}
+.account svg {
+  flex: none;
+  color: var(--ink3);
+}
+.account__name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account__email {
+  display: block;
+  color: var(--ink3);
+  font-size: 12px;
+}
+
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.main__content {
+  width: 100%;
+  padding: var(--space-xl) var(--space-xxl) 64px;
+}
+
+/* ── page header ───────────────────────────────────────────────────────────── */
+
+.page-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  flex-wrap: wrap;
+  margin: calc(var(--space-xl) * -1) calc(var(--space-xxl) * -1) var(--space-xl);
+  padding: var(--space-xl) var(--space-xxl) var(--space-lg);
+  /* Solid, so the blur that made the glass version work is now doing nothing —
+     content scrolling under an opaque bar is already hidden. The shadow does
+     the job the bottom hairline used to: on a saturated bar a 9%-ink rule is
+     invisible, while a lift reads against any colour the page scrolls past. */
   background: var(--accent);
-  border-color: var(--accent);
   color: #fff;
+  box-shadow: 0 2px 12px var(--shadow);
+}
+.page-header__title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+.page-header__desc {
+  margin-top: 2px;
+  /* Held at 88% rather than the --ink2 equivalent of ~56%. This is 13px text on
+     a saturated ground, where the usual amount of stepping back stops being a
+     hierarchy and starts being unreadable. */
+  color: inherit;
+  opacity: 0.88;
+  font-size: 13px;
+}
+.page-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* Controls on the accent bar.
+   Accent is the bar now, so it can no longer be the thing that marks the
+   primary action — an accent button on an accent ground is an outline of
+   itself. Every variant below is the same button as everywhere else with the
+   two colours it is built from swapped: white where it was accent, the bar's
+   own white where it was a card. Nothing changes about its size, weight or
+   behaviour, so a button does not become a different control by being in a
+   header. */
+.page-header .btn--primary {
+  background: #fff;
+  color: var(--accent);
+  box-shadow: 0 2px 8px var(--scrim);
+}
+.page-header .btn--primary:hover:not(:disabled) {
+  background: #fff;
+  /* Not --accent2: a lighter orange on an orange bar is a button dissolving
+     into it. Dimming is the one hover that reads on any ground. */
+  opacity: 0.88;
+}
+.page-header .btn--secondary,
+.page-header .btn--ghost {
+  background: transparent;
+  border-color: color-mix(in srgb, #fff 45%, transparent);
+  color: #fff;
+}
+.page-header .btn--secondary:hover:not(:disabled),
+.page-header .btn--ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, #fff 18%, transparent);
+  border-color: #fff;
+  color: #fff;
+}
+
+/* A badge on the bar keeps its tone and swaps only its ground — the order
+   board's "live" dot is green because green is the message, and a green dot on
+   orange is not a message anybody reads across a kitchen. Setting the surface
+   alone leaves every tone's own colour to the rules above. */
+.page-header .badge {
+  background: #fff;
+}
+
+/* ── buttons ───────────────────────────────────────────────────────────────── */
+
+/* Worn by `<button>` and, where the action is going somewhere, by `<a>` — the
+   back-to-the-list link on a restaurant. Hence `text-decoration`, which a
+   button never had to say. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: var(--control-h);
+  padding: 0 var(--space-lg);
+  border: 1px solid transparent;
+  border-radius: var(--radius-inner);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, opacity 0.12s, transform 0.12s;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px var(--shadow);
+}
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent2);
+}
+
+.btn--secondary {
+  background: var(--card);
+  border-color: var(--line);
+  color: var(--ink);
+}
+.btn--secondary:hover:not(:disabled) {
+  border-color: var(--ink3);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--ink2);
+}
+.btn--ghost:hover:not(:disabled) {
+  background: var(--chip);
+  color: var(--ink);
+}
+
+.btn--danger {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--danger);
+}
+.btn--danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.btn--sm {
+  min-height: var(--control-h-sm);
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.btn--icon {
+  min-height: var(--control-h-sm);
+  width: var(--control-h-sm);
+  padding: 0;
+  flex: none;
+}
+
+.btn--block {
+  width: 100%;
+}
+
+/* The kitchen board is the one screen used on a tablet — full touch target. */
+.btn--touch {
+  min-height: var(--touch-h);
+  flex: 1;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── forms ─────────────────────────────────────────────────────────────────── */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.field__label {
+  color: var(--ink2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.field__required {
+  margin-left: 3px;
+  color: var(--accent);
+}
+.field__hint {
+  color: var(--ink3);
+  font-size: 12px;
+}
+.field__error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.input {
+  width: 100%;
+  min-height: var(--control-h);
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+.input::placeholder {
+  color: var(--ink3);
+}
+.input:hover:not(:disabled) {
+  border-color: var(--ink3);
+}
+.input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+.input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.input--num {
+  width: 110px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Choosing a photo. The native file input rather than a button driving a
+   hidden one: it is already labelled, already keyboard-reachable, and already
+   says which file is chosen — three things the hidden-input pattern has to
+   rebuild by hand and usually rebuilds worse. Only its button is restyled. */
+.upload {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+.upload__input {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink2);
+  font: inherit;
+  font-size: 13px;
+}
+.upload__input::file-selector-button {
+  margin-right: var(--space-md);
+  min-height: var(--control-h);
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.upload__input:hover:not(:disabled)::file-selector-button {
+  border-color: var(--ink3);
+}
+.upload__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-inner);
+}
+.upload__input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/* Wide enough to tell one dish from another, small enough that the form is
+   still a form. Cropped rather than letterboxed: uploads arrive in every
+   aspect ratio, and a row of differently-shaped boxes reads as broken. */
+.upload__preview {
+  width: 96px;
+  height: 72px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  background: var(--placeholder);
+}
+
+.search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  min-width: 180px;
+}
+.search__icon {
+  position: absolute;
+  left: 11px;
+  color: var(--ink3);
+  pointer-events: none;
+}
+.input--search {
+  padding-left: 34px;
+}
+.input--search::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+/* Radix Select — a listbox that matches the panel instead of the OS. */
+.select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-height: var(--control-h);
+  min-width: 160px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.select:hover:not(:disabled) {
+  border-color: var(--ink3);
+}
+.select[data-placeholder] {
+  color: var(--ink3);
+}
+.select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.select__chevron {
+  color: var(--ink3);
+  display: inline-flex;
+}
+.select__content {
+  max-height: 320px;
+  min-width: var(--radix-select-trigger-width);
+  overflow: hidden;
+}
+.select__viewport {
+  padding: var(--space-xs);
+}
+.select__scroll {
+  display: flex;
+  justify-content: center;
+  padding: 2px;
+  color: var(--ink3);
+}
+.select__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  min-height: 34px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+.select__item[data-highlighted] {
+  background: var(--chip);
+}
+.select__item[data-state='checked'] {
+  color: var(--accent);
+  font-weight: 600;
+}
+.select__item-text {
+  display: flex;
+  flex-direction: column;
+}
+.select__item-hint {
+  color: var(--ink3);
+  font-size: 12px;
+  font-weight: 400;
+}
+.select__check {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+/* Radix Switch */
+.switch {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--chip);
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.switch[data-state='checked'] {
+  background: var(--good);
+  box-shadow: none;
+}
+.switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.switch__thumb {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: 0 1px 3px var(--shadow);
+  transform: translateX(3px);
+  transition: transform 0.15s;
+  will-change: transform;
+}
+.switch__thumb[data-state='checked'] {
+  transform: translateX(19px);
+}
+
+/* ── surfaces ──────────────────────────────────────────────────────────────── */
+
+.card {
+  padding: var(--space-lg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.card--flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+.separator {
+  height: 1px;
+  margin: var(--space-md) 0;
+  background: var(--line);
+  border: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-lg);
+}
+
+.section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin: var(--space-xxl) 0 var(--space-md);
+}
+.section-title h3 {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--chip);
+  color: var(--ink2);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.badge--accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.badge--good {
+  background: color-mix(in srgb, var(--good) 14%, transparent);
+  color: var(--good);
+}
+.badge--warn {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+}
+.badge--danger {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-lg);
+  border: 1px solid;
+  border-radius: var(--radius-inner);
+  font-size: 13.5px;
+}
+.banner__icon {
+  flex: none;
+  margin-top: 2px;
+}
+.banner__text {
+  flex: 1;
+}
+.banner--danger {
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+}
+.banner--good {
+  border-color: color-mix(in srgb, var(--good) 35%, transparent);
+  background: color-mix(in srgb, var(--good) 8%, transparent);
+  color: var(--good);
+}
+.banner--warn {
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+}
+.banner--neutral,
+.banner--accent {
+  border-color: var(--line);
+  background: var(--card);
+  color: var(--ink2);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 56px var(--space-xl);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  text-align: center;
+}
+.empty__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  background: var(--chip);
+  color: var(--ink3);
+}
+.empty__title {
+  font-weight: 600;
+}
+.empty__desc {
+  max-width: 46ch;
+  color: var(--ink2);
+  font-size: 13px;
+}
+.empty__action {
+  margin-top: var(--space-md);
+}
+
+.skeletons {
+  display: grid;
+  gap: var(--space-md);
+}
+.skeleton {
+  border-radius: var(--radius);
+  background: linear-gradient(90deg, var(--placeholder), var(--placeholder2), var(--placeholder));
+  background-size: 200% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ── segmented tabs ────────────────────────────────────────────────────────── */
+
+.segmented-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-lg);
+}
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-inner);
+  background: var(--chip);
+  /* Six stages with counts are wider than a phone. The strip scrolls inside
+     itself rather than pushing the page sideways — the tabs at the far end are
+     the finished ones, which is the right thing to have to reach for. */
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.segmented__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* Never squeezed: a tab is read, and half a word is not a stage. */
+  flex: none;
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink2);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.segmented__item:hover {
+  color: var(--ink);
+}
+.segmented__item[data-state='active'] {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 1px 3px var(--shadow);
+}
+.segmented__count {
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  color: var(--ink2);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.segmented__item[data-state='active'] .segmented__count {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* The filter nested inside a stage — Paid's "Paid / Unpaid".
+   Smaller, outlined instead of filled, and indented under the strip above it.
+   Two identical rows of segments would read as one control that wrapped, and
+   the top strip has to stay the one that says where you are on the board. */
+.subfilter .segmented-row {
+  margin-bottom: var(--space-lg);
+  padding-inline-start: var(--space-md);
+}
+.subfilter .segmented {
+  padding: 2px;
+  background: transparent;
+  border: 1px solid var(--line);
+}
+.subfilter .segmented__item {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.subfilter .segmented__item[data-state='active'] {
+  background: var(--chip);
+  box-shadow: none;
+}
+.subfilter .segmented__count {
+  background: var(--card);
+}
+
+/* ── overlays ──────────────────────────────────────────────────────────────── */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--scrim);
+  backdrop-filter: blur(2px);
+  animation: fade-in 0.16s ease-out;
+}
+.overlay[data-state='closed'] {
+  animation: fade-out 0.12s ease-in;
+}
+
+.dialog {
+  position: fixed;
+  z-index: 41;
+  top: 50%;
+  left: 50%;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: 0 24px 60px var(--shadow);
+  animation: dialog-in 0.18s ease-out;
+}
+.dialog[data-state='closed'] {
+  animation: fade-out 0.12s ease-in;
+}
+.dialog--wide {
+  width: min(760px, calc(100vw - 32px));
+}
+.dialog--confirm {
+  width: min(440px, calc(100vw - 32px));
+  padding: var(--space-xl);
+  gap: var(--space-sm);
+}
+/* The form between the dialog and its body has to pass the height limit
+   through. `.dialog` is a flex column capped at the viewport and `.dialog__body`
+   is what scrolls — but a flex item defaults to `min-height: auto`, so without
+   this the form refuses to shrink below its content and a long one (the dish
+   form, at six fields) pushes its own Save button off the bottom of the screen
+   with nothing to scroll. */
+.dialog > form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-lg) var(--space-lg) var(--space-md);
+  border-bottom: 1px solid var(--line);
+}
+.dialog__title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.dialog__desc {
+  margin-top: 3px;
+  color: var(--ink2);
+  font-size: 13px;
+}
+.dialog__body {
+  display: grid;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
+  /* Same reason as above: `auto` would be the content's own height, and a body
+     that cannot shrink is a body that never scrolls. */
+  min-height: 0;
+  overflow-y: auto;
+}
+.dialog__foot {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  border-top: 1px solid var(--line);
+}
+.dialog--confirm .dialog__foot {
+  padding: var(--space-md) 0 0;
+  border-top: 0;
+}
+
+/* Shared by the Radix Select and DropdownMenu surfaces. */
+.popover {
+  z-index: 45;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  background: var(--card);
+  box-shadow: 0 12px 32px var(--shadow);
+  animation: pop-in 0.13s ease-out;
+}
+.menu {
+  min-width: 200px;
+  padding: var(--space-xs);
+}
+.menu__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+.menu__item[data-highlighted] {
+  background: var(--chip);
+}
+.menu__item--danger {
+  color: var(--danger);
+}
+.menu__item--danger[data-highlighted] {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.menu__label {
+  padding: 6px 10px;
+  color: var(--ink3);
+  font-size: 12px;
+}
+/* Reserves the tick's width on every radio item so the labels line up whether
+   or not one is selected — otherwise choosing a language shifts the other two. */
+.menu__check {
+  display: inline-flex;
+  justify-content: center;
+  width: 15px;
+  color: var(--accent);
+}
+.menu__sep {
+  height: 1px;
+  margin: var(--space-xs) 0;
+  background: var(--line);
+}
+
+.tooltip {
+  z-index: 50;
+  max-width: 260px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 12.5px;
+  line-height: 1.4;
+  box-shadow: 0 6px 18px var(--shadow);
+  animation: pop-in 0.12s ease-out;
+}
+.tooltip__arrow {
+  fill: var(--ink);
+}
+
+.toast-viewport {
+  position: fixed;
+  z-index: 60;
+  bottom: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(400px, 100vw);
+  padding: var(--space-xl);
+  margin: 0;
+  list-style: none;
+  outline: none;
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: var(--space-md) var(--space-md) var(--space-md) var(--space-lg);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ink3);
+  border-radius: var(--radius-inner);
+  background: var(--card);
+  box-shadow: 0 12px 32px var(--shadow);
+  animation: toast-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.toast[data-state='closed'] {
+  animation: toast-out 0.12s ease-in;
+}
+.toast[data-swipe='move'] {
+  transform: translateX(var(--radix-toast-swipe-move-x));
+}
+.toast[data-swipe='end'] {
+  animation: toast-out 0.12s ease-out;
+}
+.toast__icon {
+  flex: none;
+  margin-top: 1px;
+}
+.toast__title {
+  flex: 1;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.toast--good {
+  border-left-color: var(--good);
+}
+.toast--good .toast__icon {
+  color: var(--good);
+}
+.toast--danger {
+  border-left-color: var(--danger);
+}
+.toast--danger .toast__icon {
+  color: var(--danger);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -46%) scale(0.97);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+/* ── lists and tables ──────────────────────────────────────────────────────── */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.table th {
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink3);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+}
+.table td {
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.table tbody tr:hover {
+  background: color-mix(in srgb, var(--chip) 55%, transparent);
+}
+.table__num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+/* A short count — an order tally, a points balance — centred over its column,
+   header and values together.
+
+   Ranging these right is what money wants: a column of amounts is read by
+   comparing digits, so the units have to line up. A count of 11 against 4 is
+   not read that way, and two digits pinned to the right edge of a column headed
+   by a six-letter word look like a value that has drifted off its label.
+
+   Both selectors carry the element, and deliberately: `.table th` sets
+   `text-align: left` at (0,1,1), so a bare class here would lose to it and
+   centre the values while leaving the header where it was — which is the exact
+   split this replaces. `.table__num` has been losing that fight all along. */
+.table th.table__count,
+.table td.table__count {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+.table__actions {
+  width: 1%;
+  white-space: nowrap;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+/* A dish nobody can order should read as switched off, not as an equal row. */
+.table tr[data-unavailable] td:first-child {
+  opacity: 0.55;
+}
+
+/* A dish's row: its photograph, then its name and details. The thumbnail is
+   small on purpose — this is a table somebody scans for a price, and the
+   picture is here to confirm which dish the row is, not to sell it. */
+.dish {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  min-width: 0;
+}
+.dish__photo {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: var(--radius-inner);
+  background: var(--placeholder);
+}
+/* A dish from before photos were required. Left as an empty frame rather than
+   given a stand-in: the gap is the point, and something plausible in its place
+   would hide the row that still needs a photograph. */
+.dish__photo--none {
+  display: block;
+  border: 1px dashed var(--line);
+  background: transparent;
+}
+
+/* The row a link arrived at — the dish a line of an order on the board names.
+   The same **arrived at** state as `.role--found`, written for a table row:
+   a `<tr>` cannot take that one's bled margin or its inset shadow, because a
+   cell's box is laid out by the table rather than by itself. So the tint goes
+   on the cells, which are the row as far as painting is concerned, and the
+   accent edge is an inset shadow on the first of them — still not a border,
+   which would be layout and would shift every cell in the row sideways.
+
+   It settles rather than fading out, for the reason the other one does:
+   somebody who looks away and back should still be able to tell which row they
+   were sent to, and an effect that has finished playing cannot tell them. */
+.table tr.row--found td {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  animation: role-found 2s ease-out;
+}
+.table tr.row--found td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+/* For the nudge that brings it into view: the sticky page header it has to
+   clear, the same one `.role--found` clears. */
+.table tr.row--found {
+  scroll-margin-top: 108px;
+}
+
+/* ── pagination ─────────────────────────────────────────────────────────────
+   Under the list it pages. The count sits opposite the controls so the two
+   things somebody wants — "how many are there" and "show me more" — are at
+   the same height without competing for the same corner. */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  margin-top: var(--space-lg);
+}
+.pager__range {
+  color: var(--ink3);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.pager__pages {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+/* `font: inherit` and the cleared border/background are not optional: there is
+   no global button reset in this file — `.btn` and `.link-btn` each declare
+   their own — so without them these render as system buttons. */
+.pager__page {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink2);
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.pager__page:hover {
+  background: var(--chip);
+  color: var(--ink);
+}
+/* The page you are on is a state, not a destination — it stays put and is not
+   worth a hover. */
+.pager__page[aria-current='page'] {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: default;
+}
+.pager__gap {
+  padding: 0 2px;
+  color: var(--ink3);
+  font-size: 13px;
+  user-select: none;
+}
+
+/* A row of things inside a card: name on the left, controls on the right. */
+.list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--line);
+}
+.list-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.list-row:first-child {
+  padding-top: 0;
+}
+
+/* Branches sit under their restaurant, indented enough to read as belonging
+   to it rather than as siblings of the card's own header. */
+.branches {
+  margin-top: var(--space-lg);
+  padding-left: var(--space-md);
+  border-left: 2px solid var(--accent-soft);
+}
+.branches__none {
+  margin-top: var(--space-md);
+}
+
+/* Where a jump from the People screen scrolls to, so it has to clear the sticky
+   page header — otherwise a branch high enough in a chain for the page to reach
+   `start` exactly lands underneath it, which is how "Tashir Pizza · Cascade"
+   arrived invisible. The header measures 92px on every screen; the rest is air,
+   so the branch name is not flush against its bottom edge. Measured rather than
+   derived: the header's height is its padding plus a title and a description,
+   and none of those is a token on its own. Inert everywhere else — nothing
+   scrolls to a branch on the restaurants list. */
+.branch {
+  scroll-margin-top: 108px;
+}
+
+/* A branch is a row plus the team it can open, so the row is no longer a direct
+   child of the list — which is what the generic first/last rules above key off.
+   Without these every row would match both of them and the list would flatten
+   into one undivided block.
+
+   Direct children only: the disclosed team is made of `.list-row`s too, and
+   these rules reaching into it would put a divider under the last person of
+   every group, where the generic rule deliberately takes one away. */
+.branch > .list-row {
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--line);
+}
+.branch:first-child > .list-row {
+  padding-top: 0;
+}
+.branch:last-child > .list-row {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+/* The branch whose team is open. A neutral tint rather than an accent one: the
+   role a jump came for is marked in accent inside this very block, and accent
+   on accent would leave the two arguing over which is the answer.
+
+   Bled outwards the way `.role--found` is, by a margin the padding gives back,
+   so the tint reads as a band down the branch instead of a box around its text
+   — and nothing moves sideways when it opens. Horizontal only: vertical padding
+   here would push every branch below it down at the moment of the click, on top
+   of the team already unfolding. */
+.branch--open {
+  margin-inline: calc(var(--space-sm) * -1);
+  padding-inline: var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: var(--chip);
+  transition: background-color 120ms ease;
+}
+
+/* Who works at the branch, disclosed under it. Indented the same way branches
+   are indented under their restaurant, because it is the same relationship one
+   level down. */
+.team {
+  margin-top: var(--space-md);
+  padding-left: var(--space-md);
+  border-left: 2px solid var(--accent-soft);
+}
+.branch__team {
+  margin-bottom: var(--space-md);
+}
+.team__group + .team__group {
+  margin-top: var(--space-lg);
+}
+
+/* The role a jump from the People screen came for.
+
+   Opening the right branch is not the same as answering the question: a team
+   can be a dozen rows, and without this the arrival lands one step short and
+   leaves somebody reading names again — the hunting the jump exists to remove,
+   moved down one level.
+
+   The flash settles into a tint that stays, rather than fading to nothing.
+   Somebody who looks away and back should still be able to tell which row they
+   came for, and an effect that has already played cannot tell them. Under
+   `prefers-reduced-motion` the animation collapses (see the bottom of this
+   file) and the row simply arrives marked, which is the half that matters.
+
+   Bled outwards by a margin the padding gives straight back, so the tint reads
+   as a band across the row rather than a box around the text — and the text
+   does not shift by a pixel. The accent edge is an inset shadow for that same
+   reason: a real border is layout, and would push the row's contents sideways
+   against every other row in the group. */
+.role--found {
+  margin-inline: calc(var(--space-sm) * -1);
+  padding-inline: var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+  animation: role-found 2s ease-out;
+  /* For the nudge that brings it into view: the same sticky page header the
+     branch above it has to clear. */
+  scroll-margin-top: 108px;
+}
+@keyframes role-found {
+  from {
+    background-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  }
+}
+
+/* The restaurant's name on the list, which opens it, and a branch's name, which
+   discloses its team. The first is a link — it goes to the restaurant's own
+   address — and the second is a button, because a disclosure is not somewhere
+   you can be sent. One class for both: they are the same thing to read, and the
+   resets each element needs (a button's border and background, an anchor's
+   underline) cost nothing on the other. */
+.link-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.link-title:hover {
+  color: var(--accent);
+}
+.link-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+/* The chevron follows the hand rather than sitting still, which is the whole
+   difference between a title and a title you can open. */
+.link-title svg {
+  color: var(--ink3);
+  transition: transform 120ms ease;
+}
+.link-title:hover svg {
+  color: var(--accent);
+  transform: translateX(2px);
+}
+/* Opening a branch's team is a disclosure, not a way out of the page: the
+   chevron already flips up and down to say so, and sliding it sideways as well
+   would promise a link that is not there. */
+.link-title--disclosure:hover svg {
+  transform: none;
+}
+
+/* Where a role is held, on the People screen — the same faint line it has
+   always been, and now the way to the restaurant it names. Sized and coloured
+   as `.faint` rather than as a title: it sits beside a role badge and is
+   context, not the heading of anything. The dotted underline is what says it
+   can be clicked without it shouting over the person's name above. */
+.link-where {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink3);
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  /* In `currentColor` rather than `--line`: a 9%-alpha rule under 32%-alpha
+     text is not visible at this size, and an affordance nobody can see is not
+     one. Dotted, so it stays quieter than the person's name above it. */
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 3px;
+}
+.link-where:hover {
+  color: var(--accent);
+  text-decoration-style: solid;
+}
+.link-where:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* A masked phone number on the Customers screen, as something to click.
+   Deliberately quiet: it looks like the text it replaces until the cursor is
+   over it, because the affordance being loud would read as an invitation, and
+   the API writes an audit row for every use. Dotted like `.link-where` and for
+   the same reason — a dashed rule under a row of asterisks is the only thing
+   distinguishing them from a value nobody may have. */
+.link-reveal {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 3px;
+}
+.link-reveal:hover {
+  color: var(--accent);
+  text-decoration-style: solid;
+}
+.link-reveal:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.link-reveal:disabled {
+  cursor: progress;
+}
+
+/* The orders count in the Customers table, as the control that opens them.
+   Right-aligned and tabular like the plain number it replaces, so a column of
+   these still reads as a column of counts — the underline is the whole
+   difference, and it should not cost the column its alignment. */
+.link-count {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.link-count:hover {
+  text-decoration-thickness: 2px;
+}
+.link-count:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Labelled values on a restaurant's own page. Two columns while there is room
+   for them, one below — a label above its value never reads as a table, but a
+   label beside a value in 200px does not read at all. */
+.facts {
+  display: grid;
+  gap: var(--space-sm) var(--space-lg);
+  /* 300px, not 240: the values here are phrases — three service names, a
+     rating and its review count — and at four columns they wrapped onto two
+     lines while three columns of empty space sat beside them. */
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  margin: 0;
+}
+.facts__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--line);
+}
+.facts__row dd {
+  margin: 0;
+  text-align: right;
+}
+
+/* ── order board ───────────────────────────────────────────────────────────── */
+
+/* No `align-items: start` here: cards left at their content height give a row
+   of ragged bottoms, and a two-item order beside a six-item one reads as the
+   less important of the two. The default `stretch` levels every card in a row
+   to the tallest of them. */
+.board {
+  display: grid;
+  gap: var(--space-md);
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+.order {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  transition: border-color 0.15s;
+}
+/* An order past its promised time has to be findable across a room. */
+.order--late {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.order__code {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.order__meta {
+  color: var(--ink2);
+  font-size: 12.5px;
+}
+.order__items {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-md);
+  border-radius: var(--radius-inner);
+  background: var(--bg);
+  font-size: 13.5px;
+}
+/* Quantity, dish, price — the dish takes the slack so the price is always on
+   the right edge of the block and the prices of an order line up as a column,
+   which is the only way a ticket can be checked against a receipt at a glance. */
+.order__item {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: baseline;
+}
+.order__dish {
+  flex: 1;
+  min-width: 0;
+}
+/* The dish opens its row on the branch's menu. Underlined on hover only: every
+   line of every card would otherwise be underlined, which on a board of twenty
+   orders reads as a page of links rather than a list of dishes. The colour
+   stays the surrounding ink for the same reason — what is being read here is
+   the order, and the link is a way out of it. */
+.order__dish--link {
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+.order__dish--link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.order__dish--link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.order__line-total {
+  color: var(--ink2);
+  white-space: nowrap;
+}
+.order__qty {
+  min-width: 22px;
+  color: var(--accent);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.order__late {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+.order__note {
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-inner);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--ink);
+  font-size: 13px;
+}
+/* The slack a stretched card carries belongs above the buttons, not below
+   them: `margin-top: auto` takes it, which both keeps the actions on the
+   card's bottom edge and lines them up across the row. */
+.order__actions {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+/* Reading the trail and handing the code to a scanner are not moves the order
+   makes, so they sit apart from the ones that are: this pushes the status
+   buttons to the right edge, where the thumb working the board already is.
+   The two travel together — a row narrow enough to wrap wraps between the
+   groups rather than through them. */
+.order__aside {
+  display: flex;
+  gap: var(--space-sm);
+  margin-inline-end: auto;
+}
+
+/* The QR itself: a light plate under a dark code, in both themes. `--qr-ink`
+   and `--qr-paper` are theme-independent for a reason a stylesheet cannot see
+   — an inverted code is one a counter's handheld may refuse to read, and the
+   panel's theme is not the scanner's choice. */
+.order-qr {
+  justify-items: center;
+  text-align: center;
+  gap: var(--space-md);
+}
+.order-qr__plate {
+  padding: var(--space-md);
+  border-radius: var(--radius-inner);
+  background: var(--qr-paper);
+  /* The path fills with `currentColor`, so the ink is set here and the SVG
+     carries no colour of its own. */
+  color: var(--qr-ink);
+  line-height: 0;
+}
+/* Big enough to scan from arm's length across a counter, and capped so the
+   dialog never has to scroll to show a picture. */
+.order-qr__svg {
+  display: block;
+  width: min(280px, 56vh);
+  height: auto;
+}
+.order-qr__code {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+.order-qr__hint {
+  color: var(--ink2);
+  font-size: 13px;
+  max-width: 34ch;
+}
+
+/* ── one customer's orders ─────────────────────────────────────────────────── */
+
+/* A filter strip inside a dialog rather than on a page. `.dialog__body` is a
+   grid with its own gap, so the toolbar's page margin would land on top of it —
+   two 16px gaps between the search box and the segments under it, which reads
+   as a break in the dialog rather than as spacing. The strip inside
+   `SegmentedTabs` keeps its margin: that one separates the segments from their
+   own panel, and the grid never sees it. */
+.dialog__body > .toolbar {
+  margin-bottom: 0;
+}
+
+/* The list inside the dialog behind a customer's order count. Rows rather than
+   the board's cards: this is a record being scanned for one order, and cards
+   would make ten of them a page of scrolling. Each row opens in place, so the
+   list is a disclosure list and not a table — a table cannot hold a panel
+   under one of its rows without a colspan pretending to be a layout. */
+.order-list {
+  display: grid;
+  gap: var(--space-sm);
+  list-style: none;
+}
+.order-list__entry {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  background: var(--card);
+  overflow: hidden;
+}
+/* The whole row is the control. A chevron at one end would put the target in a
+   corner of something that is already the size of a button. */
+.order-list__row {
+  display: grid;
+  /* Code, place, when, how many, total, status — the place taking the slack,
+     because it is the only one of the six that is a phrase. */
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: var(--space-md);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.order-list__row:hover {
+  background: color-mix(in srgb, var(--chip) 55%, transparent);
+}
+.order-list__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.order-list__code {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  font-variant-numeric: tabular-nums;
+}
+.order-list__at,
+.order-list__count {
+  color: var(--ink2);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.order-list__total {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The opened half sits on the chip rather than on the card, so the row above it
+   still reads as the thing that was clicked. */
+.order-list__detail {
+  display: grid;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--chip) 40%, transparent);
+}
+/* Label above value, wrapping to as many columns as fit. These are five short
+   facts, not a bill — the bill below has its own alignment. */
+.order-facts {
+  display: grid;
+  gap: var(--space-sm) var(--space-lg);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0;
+}
+.order-facts dt {
+  color: var(--ink3);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.order-facts dd {
+  margin: 0;
+  font-size: 13.5px;
+}
+/* The money. Right-aligned in a column narrow enough that the labels stay next
+   to their amounts — a bill stretched across a wide dialog is two lists. */
+.bill {
+  margin: 0 0 0 auto;
+  width: min(280px, 100%);
+  font-size: 13.5px;
+}
+.bill__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: 3px 0;
+}
+.bill__row dd {
+  margin: 0;
+}
+/* The total, marked off by a rule rather than by size: it is the same number as
+   the one on the row above, and shouting it here would make the row look like
+   a summary of this instead of the other way round. */
+.bill__row.strong {
+  margin-top: var(--space-xs);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--line);
+}
+/* The lines of an order, inside a row that is already inset twice. The page's
+   table padding would push the numbers off the right edge of the dialog. */
+.table--tight th,
+.table--tight td {
+  padding: var(--space-xs) var(--space-sm);
+}
+.table--tight th:first-child,
+.table--tight td:first-child {
+  padding-inline-start: 0;
+}
+.table--tight th:last-child,
+.table--tight td:last-child {
+  padding-inline-end: 0;
+}
+.table--tight tbody tr:hover {
+  background: none;
+}
+
+/* ── timeline ──────────────────────────────────────────────────────────────── */
+
+/* An order's history, in the dialog behind the card's History button. A list
+   with a rule down its left edge rather than a table: the entries have
+   different shapes (a placement carries a dish count, a refund carries an
+   amount) and columns would leave most cells empty. */
+.timeline {
+  display: grid;
+  gap: var(--space-md);
+  list-style: none;
+}
+.timeline__entry {
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  gap: var(--space-md);
+  align-items: start;
+}
+/* The rule and the bead in one element: the line is a border on the mark,
+   grown past its own box, so no pseudo-element has to be positioned against a
+   row height nobody knows in advance. */
+.timeline__mark {
+  position: relative;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.timeline__entry:not(:last-child) .timeline__mark::after {
+  content: '';
+  position: absolute;
+  top: 13px;
+  left: 4px;
+  width: 1px;
+  height: calc(100% + var(--space-md) + 4px);
+  background: var(--line);
+}
+.timeline__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.timeline__what {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.timeline__at {
+  color: var(--ink2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.timeline__who {
+  color: var(--ink2);
+  font-size: 12.5px;
+}
+/* Only the name is a link, and it carries the whole colour change: the words
+   around it describe the entry rather than the person, and underlining them
+   would offer to navigate from half a sentence. Underlined on hover rather
+   than always, so a timeline of eight entries is not eight blue rules. */
+.timeline__who-link {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+.timeline__who-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.timeline__detail {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline__note {
+  color: var(--ink2);
+  font-size: 12px;
+  font-style: italic;
+}
+.timeline__acting {
+  font-style: italic;
+}
+
+/* A person's activity is a dialog off their row, so it needs no layout of its
+   own — it reuses `.dialog` and the `.timeline` above. The only thing it adds is
+   the acting-as line. */
+
+/* What one entry changed, under the sentence that says it changed something.
+   A dish's history is read to compare two values, so the pair is the content —
+   a definition list rather than a table, because the fields differ per entry
+   and columns would leave most cells empty (the same argument as `.timeline`).
+
+   The label column is sized to its longest label and no wider, so every arrow
+   in a timeline lines up and the eye can run down the "to" side. It collapses
+   to stacked rows on a narrow viewport, where a fixed label column would leave
+   the values with nothing to sit in. */
+.diff {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+.diff__row {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: baseline;
+}
+.diff__field {
+  color: var(--ink3);
+  white-space: nowrap;
+}
+.diff__values {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+/* The old value reads as superseded without being unreadable — struck through
+   would be too loud on a row where nothing was removed, only replaced. */
+.diff__from {
+  color: var(--ink2);
+}
+.diff__arrow {
+  color: var(--ink3);
+}
+.diff__to {
+  font-weight: 600;
+}
+@media (max-width: 560px) {
+  .diff__row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+/* ── metrics ───────────────────────────────────────────────────────────────── */
+
+.stats {
+  display: grid;
+  gap: var(--space-md);
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.stat__label {
+  color: var(--ink3);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.stat__value {
+  margin: 6px 0 2px;
+  font-size: 25px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  font-variant-numeric: tabular-nums;
+}
+.stat__note {
+  color: var(--ink2);
+  font-size: 12.5px;
+}
+
+/* Share-of-total bar behind a name — a ranking that can be read at a glance. */
+.bar-row {
+  display: grid;
+  gap: 6px;
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--line);
+}
+.bar-row:last-child {
+  border-bottom: 0;
+}
+.bar-row:first-child {
+  padding-top: 0;
+}
+.bar {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--chip);
+  overflow: hidden;
+}
+.bar__fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+}
+
+/* ── form cards ────────────────────────────────────────────────────────────── */
+
+.form-card__title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.form-card__note {
+  margin: 4px 0 var(--space-xl);
+  max-width: 68ch;
+  color: var(--ink2);
+  font-size: 13px;
+}
+.form-card__foot {
+  margin-top: var(--space-xl);
+}
+
+/* ── sign in ───────────────────────────────────────────────────────────────── */
+
+.signin {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: var(--space-xl);
+}
+.signin__card {
+  width: min(400px, 100%);
+  padding: var(--space-xxl);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: 0 16px 48px var(--shadow);
+}
+.signin__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: var(--space-xl);
+}
+.signin__title {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.signin__desc {
+  margin: 4px 0 var(--space-xl);
+  color: var(--ink2);
+  font-size: 13.5px;
+}
+.signin__form {
+  display: grid;
+  gap: var(--space-lg);
+}
+/* The grid gap already spaces these — the banner's own margin would double it. */
+.signin__form .banner {
+  margin-bottom: 0;
+}
+.signin__foot {
+  margin-top: var(--space-lg);
+  text-align: center;
+}
+/* Below the fold of the card and quiet: needed once, by the person whose
+   language the panel guessed wrong, and never again after that. */
+.signin__langs {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-xl);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--line);
+}
+.signin__lang {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink3);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.signin__lang:hover {
+  background: var(--chip);
+  color: var(--ink2);
+}
+.signin__lang--on {
+  background: var(--chip);
+  color: var(--ink);
   font-weight: 600;
 }
 
-.card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 16px;
-  margin-bottom: 12px;
-}
+/* ── utilities ─────────────────────────────────────────────────────────────── */
 
 .row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-md);
   flex-wrap: wrap;
+}
+.row--tight {
+  gap: var(--space-sm);
+}
+.row--end {
+  justify-content: flex-end;
 }
 .spread {
   justify-content: space-between;
+}
+.stack {
+  display: grid;
+  gap: var(--space-md);
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.grid-2 {
+  display: grid;
+  gap: var(--space-lg);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+.strong {
+  font-weight: 600;
 }
 .muted {
   color: var(--ink2);
@@ -116,45 +2230,69 @@ select {
 }
 .faint {
   color: var(--ink3);
-  font-size: 13px;
+  font-size: 12.5px;
 }
-.strong {
-  font-weight: 700;
+.num {
+  font-variant-numeric: tabular-nums;
 }
-.pickup {
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: 3px;
-}
-.error {
-  color: var(--bad);
-}
-.badge {
-  background: var(--accent-soft);
+.link-btn {
+  border: 0;
+  background: none;
+  padding: 0;
   color: var(--accent);
-  border-radius: 999px;
-  padding: 3px 10px;
+  font: inherit;
   font-size: 13px;
   font-weight: 600;
+  cursor: pointer;
 }
-.live {
-  color: var(--good);
-  font-size: 13px;
-}
-.offline {
-  color: var(--ink3);
-  font-size: 13px;
+.link-btn:hover {
+  text-decoration: underline;
 }
 
-.grid {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+/* ── responsive ────────────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sidebar {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand__text,
+  .nav__heading,
+  .account__text {
+    display: none;
+  }
+  .nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .nav__item {
+    padding: 0 var(--space-md);
+  }
+  .main__content {
+    padding: var(--space-lg) var(--space-lg) 48px;
+  }
+  .page-header {
+    position: static;
+    margin: calc(var(--space-lg) * -1) calc(var(--space-lg) * -1) var(--space-lg);
+    padding: var(--space-lg);
+  }
 }
 
-.signin {
-  max-width: 360px;
-  margin: 15vh auto;
-  display: grid;
-  gap: 12px;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

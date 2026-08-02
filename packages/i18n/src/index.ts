@@ -4,6 +4,13 @@ import en from './en.json';
 import { Language } from '@amragrir/shared';
 
 /**
+ * The customer-facing dictionaries.
+ *
+ * The back office has its own, behind `@amragrir/i18n/admin`, and is
+ * deliberately not re-exported here — see that module for why.
+ */
+
+/**
  * `hy` is the reference dictionary — it is the product default and the
  * fallback every other language resolves to (docs/AI_CONTEXT.md).
  */

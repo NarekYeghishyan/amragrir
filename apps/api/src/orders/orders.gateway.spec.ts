@@ -4,6 +4,7 @@ import { OrdersGateway } from './orders.gateway';
 import { OrderEventsService } from './order-events.service';
 import type { OrdersService } from './orders.service';
 import type { TokenService } from '../auth/token.service';
+import type { StaffTokenService } from '../staff/staff-token.service';
 
 const ORDER_ID = 'order-1';
 
@@ -32,20 +33,28 @@ function fakeSocket() {
   };
 }
 
-function build(options: { user?: unknown; findVisible?: jest.Mock } = {}) {
+function build(
+  options: { user?: unknown; staff?: unknown; findVisible?: jest.Mock; findStaff?: jest.Mock } = {},
+) {
   const events = new OrderEventsService();
   const tokens = {
     tryReadAccess: jest
       .fn()
       .mockResolvedValue(options.user === undefined ? { sub: 'user-1' } : options.user),
   } as unknown as TokenService;
+  // The kitchen watches the same orders with a different token, so the
+  // handshake tries both identities.
+  const staffTokens = {
+    tryReadAccess: jest.fn().mockResolvedValue(options.staff ?? null),
+  } as unknown as StaffTokenService;
   const orders = {
     findVisibleTo: options.findVisible ?? jest.fn().mockResolvedValue(snapshot()),
+    findVisibleToStaff: options.findStaff ?? jest.fn().mockResolvedValue(snapshot()),
   } as unknown as OrdersService;
 
-  const gateway = new OrdersGateway(tokens, orders, events);
+  const gateway = new OrdersGateway(tokens, staffTokens, orders, events);
   gateway.onModuleInit();
-  return { gateway, events, tokens, orders };
+  return { gateway, events, tokens, staffTokens, orders };
 }
 
 describe('subscribe', () => {

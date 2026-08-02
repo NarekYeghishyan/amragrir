@@ -45,6 +45,12 @@ export interface ThemeColors {
   /** Translucent surface for elements floating over a photo — the status
    *  badge on a restaurant card. Pairs with a backdrop blur. */
   glass: string;
+  /** The dimmed backdrop behind a modal or bottom sheet.
+   *
+   *  Distinct from `glass`, which is a *surface* that floats over content and
+   *  stays legible; this is the layer that pushes content back. Both themes
+   *  darken, so it cannot be derived from `ink` — that inverts. */
+  scrim: string;
   /** Success, "open", deposit credited. */
   good: string;
   shadow: string;
@@ -67,6 +73,7 @@ export const palette: Record<ThemeName, ThemeColors> = {
     placeholder: '#EFE7DD',
     placeholder2: '#E6DACB',
     glass: 'rgba(246,245,242,0.78)',
+    scrim: 'rgba(26,23,18,0.42)',
     good: '#12A150',
     shadow: 'rgba(60,40,15,0.12)',
   },
@@ -84,6 +91,7 @@ export const palette: Record<ThemeName, ThemeColors> = {
     placeholder: '#241F19',
     placeholder2: '#2F2820',
     glass: 'rgba(16,14,11,0.72)',
+    scrim: 'rgba(0,0,0,0.62)',
     good: '#2EC76F',
     shadow: 'rgba(0,0,0,0.55)',
   },
@@ -106,6 +114,17 @@ export const palette: Record<ThemeName, ThemeColors> = {
 export const spot = {
   star: '#F5A623',
   destructive: '#E23755',
+  /**
+   * A QR/barcode and the plate it is drawn on.
+   *
+   * Theme-independent because a scanner is not: dark modules on a light field
+   * is what the format assumes, and a code that inverted itself in dark mode
+   * would be one a handheld at the counter may simply refuse to read. So the
+   * plate stays white under a dark panel — the ink is the `#111` the design
+   * names, not `ink`, which flips.
+   */
+  qrInk: '#111',
+  qrPaper: '#FFFFFF',
 } as const;
 
 /** Multiples of 4, per the design's spacing grid. */

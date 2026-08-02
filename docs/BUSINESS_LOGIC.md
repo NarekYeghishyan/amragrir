@@ -125,15 +125,21 @@ See the deposit table in §3.
   carries the unique constraint; the pickup code is additionally checked
   against active orders at the same branch, because with only 10,000 possible
   values a busy branch would otherwise repeat one surprisingly often.
-- **Cancellation** is allowed while `created`, `paid` or `confirmed`. A captured
-  payment is refunded before the order is cancelled — if the provider refuses,
-  the customer keeps an order rather than having neither order nor refund.
+- **Cancellation is allowed only while the order is unpaid** (`created`).
+  Paying commits the order: from `paid` onwards there is no way out of the
+  queue for either side — not the customer, and not the restaurant. An unpaid
+  order is a basket somebody walked away from, and dropping it costs nobody
+  anything; a paid one has a charge behind it, and this platform performs no
+  refunds for orders.
+  *Consequence to be aware of:* a branch that cannot fulfil a paid order has no
+  in-product way to call it off or return the money — that is a support
+  conversation, not a button.
 
 ### Order statuses
 
 ```
 created    — order created (before payment)
-paid       — paid (or confirmed for cash/on-site payment)
+paid       — paid for online; the only way an order reaches the kitchen
 confirmed  — accepted by restaurant
 preparing  — being prepared
 almost_ready (almost) — almost ready
@@ -144,7 +150,18 @@ cancelled  — cancelled
 
 Tracking steps in UI: **Confirmed → Preparing → Almost ready → Ready**. **[from design]**
 
-Transitions: `created → paid → confirmed → preparing → almost_ready → ready → completed`; cancellation possible before `preparing` (policy TBD).
+Transitions: `created → paid → confirmed → preparing → almost_ready → ready →
+completed`; `cancelled` is reachable from `created` alone. Every status after
+the payment has one move available, which is the next one — with one exception.
+
+**`preparing → ready` is allowed, skipping `almost_ready`.** That stage is a
+warning to whoever works the counter rather than a step in cooking, and plenty
+of dishes are plated in one motion and never wait at the pass. The board offers
+both moves on a preparing order: *Almost ready* as the ordinary step, *Ready*
+beside it. It is one transition, not two applied in sequence — the order never
+sat in `almost_ready`, so `order_events` records `preparing → ready` and records
+it once. The consequence worth knowing is that the *Almost ready* stage counts
+only the orders somebody deliberately flagged, not everything on its way out.
 
 The transition table lives in `packages/shared/src/order-status.ts`
 (`ORDER_STATUS_FLOW`, `canTransitionOrder`, `isOrderCancellable`) rather than
@@ -153,14 +170,27 @@ table — two copies would drift. Status changes match on the **current** status
 in the `WHERE` clause, so a cancel racing a payment loses instead of
 overwriting it.
 
+**Every order keeps its history.** The status column above says where an order
+is now and overwrites its own past on each update, so each move is also written
+to `order_events` (DATABASE.md §8a) — in the same transaction as the move
+itself, naming who made it: the customer, a staff member, or the system. The
+placement and every payment attempt, including a decline that moves no status,
+are recorded the same way. That is what makes "when did this come in, and who
+confirmed it" answerable at the counter rather than a matter of memory.
+
 ---
 
 ## 5. Payment
 
-- Methods: **Apple Pay, Google Pay, Credit Card, Cash**. **[from design]**
-- Cash (`cash`) → "Place order" without online payment (pay on site); others → "Pay now". **[from design]**
-  A cash payment is recorded as `pending` and captures nothing, but the order
-  still moves to `paid` — otherwise the kitchen never receives it.
+- Methods: **Apple Pay, Google Pay, Credit Card** — all of them online.
+- **Cash was removed.** The design had it as "Place order" without online
+  payment: the charge was skipped, the payment recorded `pending`, and the
+  order moved to `paid` anyway so the kitchen would receive it. Two things were
+  wrong with that. Nothing in the platform ever settled those rows — there was
+  no path that turned a pending cash payment into a captured one — so `paid`
+  meant "in the queue" for some orders and "actually paid for" for others. And
+  an order the kitchen cooks before any money is taken is one the platform
+  cannot make good on. Every order is now paid for before it reaches a kitchen.
 - Default method: `apple`. **[from design]**
 - The **amount is always read from the order**, never from the request. The
   client chooses which order and which method; the server decides how much.
@@ -174,7 +204,16 @@ overwriting it.
 pending → authorized → captured → refunded / failed / cancelled
 ```
 
-For the deposit: `authorized` at booking, `captured`/`credited` at completion, `refunded` if cancelled within the window.
+**For an order:** a charge either `captured` or `failed`. `pending` is no longer
+reachable — it was the cash state — and `refunded` is not either, since a paid
+order cannot be cancelled. A `failed` attempt on an order the customer then
+drops is closed off as `cancelled`. Rows written before cash was removed still
+carry `pending`; they are recognisable by `provider_ref = 'legacy_cash'`.
+
+**For the deposit:** `authorized` at booking, `captured`/`credited` at
+completion, `refunded` if cancelled within the window. This is the one place a
+hold and a reversal still happen — a reservation may be cancelled, an order may
+not.
 
 ---
 
@@ -195,6 +234,80 @@ For the deposit: `authorized` at booking, `captured`/`credited` at completion, `
   matches **any language**, so typing "Burger" on a Russian phone still finds
   «Бургер».
 - **Quick filters on Home [from design]:** Near Me, Ready in 15 min, Open Now, Reserve Table, Pickup, Dine In, Special Offers, Highest Rated.
+
+### A dish joining the menu
+
+**A dish needs a photograph before it can be added.** A menu is a list somebody
+reads with their eyes: an entry with no picture sits under the ones that have
+one and does not get ordered, and the restaurant that added it rarely comes back
+to fix it. So the picture is asked for at the one moment somebody is definitely
+thinking about the dish — `POST /restaurant/menu-items` refuses a creation
+without `photoUrl`, and the panel's "Add a dish" form will not submit without it.
+
+**It is uploaded, not linked.** Whoever adds a dish has a photograph of it on
+the machine in front of them, not a URL — asking for an address would be asking
+them to go and host it first. The panel uploads the file
+(`POST /uploads/menu-photo`, max 5 MB, JPEG/PNG/WebP) and stores the URL that
+comes back. An edit may swap the picture for a better one but cannot remove it.
+
+**Every dish in the demo data has one, and it is a photograph of that dish.**
+The seed points each one at a real picture hosted elsewhere — recipe photos from
+TheMealDB/TheCocktailDB, freely-licensed photographs from Wikimedia Commons —
+falling back to a photograph of its category where no picture of the dish itself
+could be found. Hotlinked rather than downloaded: no images in the repository
+and no licences to carry, at the cost of depending on somebody else's servers,
+which `MENU_PHOTOS=local` trades back for the committed placeholders.
+
+`pnpm --filter @amragrir/api db:photos` applies the same table to a database
+that is already running. It rewrites a dish with no photograph or one the seed
+put there, and **never** one a restaurant uploaded — that is the only picture in
+the table anybody actually chose.
+
+### A dish changing
+
+**Everything about a dish is editable except which branch it belongs to.**
+Moving a dish between branches would change who owns it — that is a different
+operation, not an edit, and `PATCH /restaurant/menu-items/{id}` has no
+`branchId`. Everything else — the photograph, the names, the price, the tab, the
+prep estimate — can be corrected from the panel's row, so a wrong picture or a
+missing translation does not mean deleting the dish and adding it again.
+
+**A price change does not reach orders already placed.** Every order item stores
+the price it was bought at (§4), so a menu edit never rewrites what somebody was
+charged.
+
+**Two blanks that mean opposite things.** Emptying the prep time (`prepMin:
+null`) takes the estimate off the dish and the branch's average stands in —
+an estimate can turn out to be wrong. Emptying the photograph is refused: a dish
+is required to have one, so an edit may swap the picture but never remove it.
+
+### A dish leaving the menu
+
+Two different states, and conflating them loses a real distinction:
+
+| | `is_available = false` | `deleted_at` set |
+|---|---|---|
+| Means | sold out tonight | off the menu |
+| Who | a shift (`menu:availability`) | `menu:write` |
+| Comes back | yes, in a tap | no route offers it |
+| Shown to customers | yes, marked sold out | no |
+
+**Deleting is soft.** `order_items` references `menu_items`, and an order that
+can no longer say what was bought is not an order — so the row stays and every
+read filters it out. Past orders are unaffected either way: each order item
+stores the name and unit price it was bought at, so history is never rewritten
+by a menu change.
+
+**Any dish can be removed, ordered or not.** Deleting one that had ever appeared
+in an order used to be refused outright, because the foreign key made it
+impossible. Keeping the row removes that objection, so a restaurant can retire a
+dish that sold — previously only possible by hiding it forever behind the
+sold-out flag.
+
+**A withdrawn dish cannot be ordered.** It is absent from the public menu, from
+search filters, from the branch's dish count, and from the lookup that prices an
+order — where it comes back as `not_on_menu`. A soft delete that still let a
+customer buy the dish would not be a delete.
 
 ---
 

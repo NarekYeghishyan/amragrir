@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { Language, ORDER_STATUS_FLOW, OrderStatus } from '@amragrir/shared';
-import { formatAmd, formatCountdown, formatStatus, formatWaiting, pickLabel } from './format';
+import { Language } from '@amragrir/shared';
+import { formatAmd, formatCountdown, formatDateTime, formatWaiting, pickLabel } from './format';
+import { createTranslator } from './language';
+
+const en = createTranslator(Language.En);
 
 describe('formatAmd', () => {
   it('groups thousands with a space, like the design', () => {
@@ -21,20 +24,44 @@ describe('formatCountdown', () => {
   });
 });
 
+describe('formatDateTime', () => {
+  it('reads as a moment, to the minute', () => {
+    // Not asserting the exact arrangement: that is the runtime's ICU data, and
+    // pinning it here would make this test a statement about the machine. What
+    // must hold is that the date and the time are both there, and that no
+    // seconds are.
+    const formatted = formatDateTime('2026-08-01T09:30:07.000Z', Language.En);
+
+    expect(formatted).toMatch(/\d/);
+    expect(formatted).not.toContain(':07');
+  });
+
+  it('formats in the language the panel is set to', () => {
+    const at = '2026-08-01T09:30:00.000Z';
+    expect(formatDateTime(at, Language.Ru)).not.toBe(formatDateTime(at, Language.En));
+  });
+});
+
 describe('formatWaiting', () => {
   it('is what a kitchen actually reads off the card', () => {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
-    expect(formatWaiting(tenMinutesAgo)).toBe('10 min ago');
+    expect(formatWaiting(en, tenMinutesAgo)).toBe('10 min ago');
   });
 
   it('switches to hours past sixty minutes', () => {
     const longAgo = new Date(Date.now() - 95 * 60_000).toISOString();
-    expect(formatWaiting(longAgo)).toBe('1 h 35 min ago');
+    expect(formatWaiting(en, longAgo)).toBe('1 h 35 min ago');
   });
 
   it('never shows a negative wait for a clock slightly ahead', () => {
     const future = new Date(Date.now() + 30_000).toISOString();
-    expect(formatWaiting(future)).toBe('0 min ago');
+    expect(formatWaiting(en, future)).toBe('0 min ago');
+  });
+
+  it('reads in whatever the panel is set to', () => {
+    const hy = createTranslator(Language.Hy);
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    expect(formatWaiting(hy, tenMinutesAgo)).toBe('10 րոպե առաջ');
   });
 });
 
@@ -46,35 +73,5 @@ describe('pickLabel', () => {
     expect(pickLabel({ hy: 'Բուրգեր' }, Language.Ru)).toBe('Բուրգեր');
     expect(pickLabel({ en: 'Burger' }, Language.Ru)).toBe('Burger');
     expect(pickLabel(null)).toBe('');
-  });
-});
-
-describe('status buttons', () => {
-  // The board derives its buttons from the shared flow table, so it can never
-  // offer a move the API would reject with a 422.
-  const buttons = (status: OrderStatus) =>
-    ORDER_STATUS_FLOW[status].filter((next) => next !== OrderStatus.Paid);
-
-  it('offers preparing and cancel from confirmed', () => {
-    expect(buttons(OrderStatus.Confirmed)).toEqual([OrderStatus.Preparing, OrderStatus.Cancelled]);
-  });
-
-  it('drops cancel once the kitchen has started', () => {
-    expect(buttons(OrderStatus.Preparing)).toEqual([OrderStatus.AlmostReady]);
-  });
-
-  it('never offers paid — only a payment makes an order paid', () => {
-    expect(buttons(OrderStatus.Created)).not.toContain(OrderStatus.Paid);
-  });
-
-  it('offers nothing on a finished order', () => {
-    expect(buttons(OrderStatus.Completed)).toEqual([]);
-    expect(buttons(OrderStatus.Cancelled)).toEqual([]);
-  });
-});
-
-describe('formatStatus', () => {
-  it('turns a status value into a label', () => {
-    expect(formatStatus('almost_ready')).toBe('Almost ready');
   });
 });

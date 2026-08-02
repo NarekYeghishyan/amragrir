@@ -12,21 +12,26 @@ import {
   ACTIVE_RESERVATION_STATUSES,
   Language,
   ORDER_MAX_LEAD_DAYS,
+  OrderEventType,
   OrderStatus,
+  type PaymentMethod,
   PaymentStatus,
+  Permission,
   ReservationStatus,
-  Role,
   ServiceMode,
   TERMINAL_ORDER_STATUSES,
   isOrderCancellable,
 } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { localize, type I18nField } from '../common/i18n';
+import { LIVE_MENU_ITEM } from '../common/menu-visibility';
 import { PaymentsService } from '../payments/payments.service';
-import { orderScopeFor } from '../owner/branch-access';
+import { orderScope } from '../staff/scope';
 import { CouponsService } from '../referrals/coupons.service';
 import type { JwtPayload } from '../auth/token.service';
+import type { StaffJwtPayload } from '../staff/staff-token.service';
 import { OrderEventsService, countdown, toStatusEvent } from './order-events.service';
+import { customerActor, orderEventData, type OrderActor } from './order-history';
 import { generateOrderCode, pickupCodeFrom } from './order-code';
 import { estimatePrepMinutes, priceLine, priceOrder, type PricedLine } from './pricing';
 import { BasketDto, CreateOrderDto, ListOrdersDto, OrderListFilter } from './dto';
@@ -257,6 +262,23 @@ export class OrdersService {
             lineTotalAmd: line.lineTotalAmd,
           })),
         },
+        // The first entry in the order's history, written by the same INSERT
+        // that creates the order. Nested rather than a second call so there is
+        // no window — and no failure mode — in which an order exists with no
+        // record of having been placed.
+        events: {
+          create: orderEventData({
+            type: OrderEventType.Created,
+            actor: customerActor(userId),
+            toStatus: OrderStatus.Created,
+            detail: {
+              serviceMode: dto.serviceMode,
+              itemsCount: lines.reduce((sum, line) => sum + line.qty, 0),
+              totalAmd: totals.totalAmd,
+              readyAt: readyAt.toISOString(),
+            },
+          }),
+        },
       }));
     } catch (err) {
       // The coupon was claimed a moment ago; an order that never existed must
@@ -324,8 +346,9 @@ export class OrdersService {
   }
 
   /**
-   * Customer-side cancellation. Allowed until the kitchen starts cooking
-   * (BUSINESS_LOGIC.md §4) — after that the food is already spent.
+   * Customer-side cancellation. Allowed only while the order is unpaid
+   * (BUSINESS_LOGIC.md §4) — paying commits it, and there is no way back out
+   * from either side afterwards.
    */
   async cancel(userId: string, orderId: string): Promise<OrderDetail> {
     const order = await this.loadOwnOrder(userId, orderId);
@@ -336,7 +359,7 @@ export class OrdersService {
       );
     }
 
-    return this.transition(order, OrderStatus.Cancelled);
+    return this.transition(order, OrderStatus.Cancelled, customerActor(userId));
   }
 
   /**
@@ -346,8 +369,12 @@ export class OrdersService {
    * Shared by the customer's cancel and the owner panel's status changes, so
    * the refund rule and the event cannot be implemented twice and drift. The
    * caller decides *whether* the move is allowed — this method performs it.
+   *
+   * `actor` is required rather than optional: an optional one would default to
+   * "system" at exactly the call sites that have a person to name, and an audit
+   * trail that quietly says nobody did it is worse than none.
    */
-  async transition(order: OrderRow, next: OrderStatus): Promise<OrderDetail> {
+  async transition(order: OrderRow, next: OrderStatus, actor: OrderActor): Promise<OrderDetail> {
     // Reverse the money *before* touching the order: if the provider refuses,
     // the customer still has an order rather than neither an order nor a refund.
     const paymentStatus =
@@ -368,13 +395,42 @@ export class OrdersService {
             data: { status: paymentStatus },
           });
         }
-        return tx.order.update({
+        const moved = await tx.order.update({
           // Matching on the status this decision was made against, so a change
           // that landed in between loses instead of being overwritten.
           where: { id: order.id, status: order.status },
           data: { status: next },
           include: ORDER_DETAIL_INCLUDE,
         });
+
+        // After the update and inside the same transaction, which is what makes
+        // the entry honest in both directions: a `where` that matched nothing
+        // throws before this line, and anything failing after it rolls the
+        // entry back along with the change it describes.
+        await tx.orderEvent.create({
+          data: {
+            orderId: order.id,
+            ...orderEventData({
+              type: OrderEventType.StatusChanged,
+              actor,
+              fromStatus: order.status as OrderStatus,
+              toStatus: next,
+              // What became of the money, on the one transition that touches
+              // it. "Cancelled" and "cancelled, and the card was refunded" are
+              // different answers to the question this timeline gets opened for.
+              detail:
+                paymentStatus === null
+                  ? undefined
+                  : {
+                      paymentStatus,
+                      paymentMethod: order.payment?.method as PaymentMethod | undefined,
+                      amountAmd: order.payment?.amountAmd,
+                    },
+            }),
+          },
+        });
+
+        return moved;
       })
       .catch((err: unknown) => {
         if (paymentStatus === PaymentStatus.Refunded) {
@@ -396,16 +452,31 @@ export class OrdersService {
   }
 
   /**
-   * Loads an order for a live subscriber: the customer who placed it, or a
-   * staff-side user whose scope covers its branch. Same filter-in-the-query
-   * rule as everywhere else, so an unauthorised watcher gets 404, not a stream.
+   * Loads an order for a live subscriber who placed it.
+   *
+   * Same filter-in-the-query rule as everywhere else, so an unauthorised
+   * watcher gets 404 rather than a stream.
    */
   async findVisibleTo(user: JwtPayload, orderId: string): Promise<OrderDetail> {
-    const where: Prisma.OrderWhereInput =
-      user.role === Role.Owner || user.role === Role.Admin
-        ? { id: orderId, OR: [{ userId: user.sub }, orderScopeFor(user)] }
-        : { id: orderId, userId: user.sub };
+    return this.loadVisible({ id: orderId, userId: user.sub });
+  }
 
+  /**
+   * The same, for the kitchen side.
+   *
+   * A separate method rather than a branch inside the one above: the two
+   * identities carry different tokens and are scoped by different rules, and
+   * the old single method decided between them by reading a role off the
+   * customer token — which is exactly the coupling the staff split removed.
+   */
+  async findVisibleToStaff(staff: StaffJwtPayload, orderId: string): Promise<OrderDetail> {
+    return this.loadVisible({
+      id: orderId,
+      ...orderScope(staff.scopes, Permission.OrdersRead),
+    });
+  }
+
+  private async loadVisible(where: Prisma.OrderWhereInput): Promise<OrderDetail> {
     const order = await this.prisma.order.findFirst({ where, include: ORDER_DETAIL_INCLUDE });
     if (!order) {
       throw new NotFoundException('Order not found');
@@ -441,7 +512,12 @@ export class OrdersService {
     const menuItems = await this.prisma.menuItem.findMany({
       // Scoped to the branch, so ordering another restaurant's dish (at its
       // price) is not possible — a basket belongs to one restaurant.
-      where: { id: { in: ids }, branchId: branch.id },
+      //
+      // And to the live menu. A withdrawn dish simply is not found here, so it
+      // falls through to `not_on_menu` below with every other id that does not
+      // resolve — which is exactly what it is. A soft delete that still let a
+      // customer buy the dish would not be a delete at all.
+      where: { id: { in: ids }, branchId: branch.id, ...LIVE_MENU_ITEM },
     });
     const byId = new Map(menuItems.map((item) => [item.id, item]));
 

@@ -37,3 +37,7 @@ coverage/
 # Expo
 .expo/
 expo-env.d.ts
+
+# Runtime uploads — user-supplied images written by the API (UPLOAD_DIR).
+# The repo ships its own artwork in apps/api/public, which is committed.
+apps/api/uploads/

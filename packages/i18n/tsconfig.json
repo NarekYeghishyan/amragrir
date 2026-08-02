@@ -4,5 +4,9 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  // The `.json` glob is not redundant: a bare directory in `include` expands to
+  // TypeScript's own extensions only, so the dictionaries — which are the whole
+  // package — were outside the project and `tsc` refused to compile the module
+  // importing them. `resolveJsonModule` is what types them once they are in.
+  "include": ["src", "src/**/*.json"]
 }

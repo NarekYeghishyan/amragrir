@@ -1,14 +1,39 @@
 // Statuses and roles — see docs/BUSINESS_LOGIC.md and docs/ROLES_AND_PERMISSIONS.md.
 // Do not duplicate these as inline string literals in api/mobile/web/admin.
 
+/**
+ * What a person using the *customer* apps is.
+ *
+ * `guest` is not a database value — it is the `users.is_guest` flag, and it
+ * stays in this enum because the apps reason about it as a role.
+ *
+ * Staff, owners and administrators are **not** here: they are separate accounts
+ * with their own table and their own roles (see `StaffRole`). A customer record
+ * can no longer be promoted into one.
+ */
 export const Role = {
   Guest: 'guest',
   Customer: 'customer',
-  Staff: 'staff',
-  Owner: 'owner',
-  Admin: 'admin',
 } as const;
 export type Role = (typeof Role)[keyof typeof Role];
+
+/**
+ * What a person using the *back office* is — see ROLE_PERMISSIONS in
+ * `staff-roles.ts` for what each may do, and docs/ROLES_AND_PERMISSIONS.md for
+ * why the two identities are separate.
+ *
+ * Ordered widest to narrowest. The scope a role is assigned over lives in
+ * `staff_assignments`, not here: `restaurant_manager` means nothing until it
+ * names a branch.
+ */
+export const StaffRole = {
+  SuperAdmin: 'super_admin',
+  PlatformAdmin: 'platform_admin',
+  RestaurantAdmin: 'restaurant_admin',
+  RestaurantManager: 'restaurant_manager',
+  BranchStaff: 'branch_staff',
+} as const;
+export type StaffRole = (typeof StaffRole)[keyof typeof StaffRole];
 
 /** Mode of a single order — the value stored in `orders.service_mode`. */
 export const ServiceMode = {
@@ -47,6 +72,34 @@ export const OrderStatus = {
 } as const;
 export type OrderStatus = (typeof OrderStatus)[keyof typeof OrderStatus];
 
+/**
+ * What kind of thing an entry in an order's history records.
+ *
+ * `payment` is for the attempts that leave the order where it is — a declined
+ * card is not a status change, and without a type of its own it would be
+ * invisible in the timeline that is supposed to explain why an order sat unpaid.
+ */
+export const OrderEventType = {
+  Created: 'created',
+  StatusChanged: 'status_changed',
+  Payment: 'payment',
+} as const;
+export type OrderEventType = (typeof OrderEventType)[keyof typeof OrderEventType];
+
+/**
+ * Which identity is behind a history entry.
+ *
+ * The three are genuinely different tables and not a single "user id": a
+ * customer is a `users` row, a staff member a `staff_users` row, and `system` is
+ * neither — a timeout or a job that acted on nobody's behalf.
+ */
+export const OrderActorType = {
+  Customer: 'customer',
+  Staff: 'staff',
+  System: 'system',
+} as const;
+export type OrderActorType = (typeof OrderActorType)[keyof typeof OrderActorType];
+
 // Transitions: pending -> confirmed -> seated -> completed
 // cancelled possible from pending/confirmed; confirmed -> no_show.
 export const ReservationStatus = {
@@ -59,15 +112,29 @@ export const ReservationStatus = {
 } as const;
 export type ReservationStatus = (typeof ReservationStatus)[keyof typeof ReservationStatus];
 
+/**
+ * Every way an order can be paid for — all of them online.
+ *
+ * `cash` was here and is deliberately gone: an order is paid before the kitchen
+ * ever sees it, so there is no longer a way to place one that owes money at the
+ * counter. See BUSINESS_LOGIC.md §5.
+ */
 export const PaymentMethod = {
   ApplePay: 'apple_pay',
   GooglePay: 'google_pay',
   Card: 'card',
-  Cash: 'cash',
 } as const;
 export type PaymentMethod = (typeof PaymentMethod)[keyof typeof PaymentMethod];
 
 export const PaymentStatus = {
+  /**
+   * Recorded but not yet taken.
+   *
+   * No order payment ends up here now that cash is gone — every method either
+   * captures or fails. Kept because it is a state a real acquirer produces (a
+   * transfer awaiting settlement, a 3-D Secure challenge in flight), and
+   * because rows written before cash was removed still carry it.
+   */
   Pending: 'pending',
   Authorized: 'authorized',
   Captured: 'captured',

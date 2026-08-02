@@ -48,11 +48,23 @@ Additionally, per task topic:
 
 ## Key facts (quick reference)
 
-- **Roles:** guest, customer, staff, owner, admin.
+- **Two identities.** Customers (`users`, phone + OTP) and staff (`staff_users`,
+  email + password, invitation only). Separate tables, separate tokens; neither
+  token works on the other's endpoints, and a customer cannot be promoted.
+- **Customer roles:** guest, customer.
+- **Staff roles:** super_admin, platform_admin, restaurant_admin,
+  restaurant_manager, branch_staff — each held *over a scope*
+  (`staff_assignments`), not as a bare column.
+- **Permissions live in code** (`ROLE_PERMISSIONS`, `packages/shared`); only the
+  assignment is in the database. Endpoints name a permission, services scope
+  their queries by that same permission.
 - **Order modes:** `pickup`, `dine_in`.
 - **Order statuses:** created → paid → confirmed → preparing → almost_ready → ready → completed / cancelled.
 - **Reservation statuses:** pending → confirmed → seated → completed / cancelled / no_show.
-- **Payment:** apple_pay, google_pay, card, cash.
+- **Payment:** apple_pay, google_pay, card — online only. There is no cash /
+  pay-at-the-counter path: an order is paid for before the kitchen sees it.
+- **Cancellation:** only while an order is `created` (unpaid). Paying commits
+  it, for the customer *and* the restaurant; nothing refunds an order.
 - **Money:** AMD integer; service fee ≈360֏; deposit ≈2000֏/guest (credited to bill); referral 2%, stacks to 25%.
 - **Languages:** hy (default), ru, en. **Themes:** light / dark.
 - **Screens:** auth, home, search, restaurant, basket, preorder, checkout, tracking, orders, favorites, profile, referral, settings, filters-sheet.

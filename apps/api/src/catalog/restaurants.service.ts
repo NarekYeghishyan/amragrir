@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { Language } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { localize, type I18nField } from '../common/i18n';
+import { LIVE_MENU_ITEM } from '../common/menu-visibility';
 import { boundingBox, distanceKm, roundKm } from './geo';
 import { SearchService } from './search.service';
 import { ListRestaurantsDto, MenuQueryDto, RestaurantSort } from './dto';
@@ -220,6 +221,8 @@ export class RestaurantsService {
     const items = await this.prisma.menuItem.findMany({
       where: {
         branchId: branch.id,
+        // A dish taken off the menu is off it for customers first of all.
+        ...LIVE_MENU_ITEM,
         ...(query.menuTab ? { menuTab: query.menuTab } : {}),
         ...(query.category ? { category: { key: query.category } } : {}),
       },
@@ -331,7 +334,9 @@ export class RestaurantsService {
       menuItem.dietaryTags = { hasSome: query.dietary };
     }
     if (Object.keys(menuItem).length > 0) {
-      where.menuItems = { some: menuItem };
+      // A withdrawn dish must not be why a branch turns up under "vegan": the
+      // search would promise something the menu no longer offers.
+      where.menuItems = { some: { ...menuItem, ...LIVE_MENU_ITEM } };
     }
 
     // Narrow a distance query in SQL so the app never scans the whole table

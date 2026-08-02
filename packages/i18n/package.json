@@ -2,10 +2,14 @@
   "name": "@amragrir/i18n",
   "private": true,
   "version": "0.0.0",
-  "description": "Shared hy/ru/en dictionaries. hy is the default language (see docs/AI_CONTEXT.md). Populate dictionaries as real screens are built — no speculative keys.",
+  "description": "Shared hy/ru/en dictionaries. hy is the default language (see docs/AI_CONTEXT.md). Populate dictionaries as real screens are built — no speculative keys. Two entry points: the root is customer-facing, `/admin` is the back office.",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./admin": "./src/admin/index.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },

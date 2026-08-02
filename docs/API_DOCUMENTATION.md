@@ -6,10 +6,11 @@ Common error response:
 ```json
 { "error": { "code": "VALIDATION_ERROR", "message": "…", "details": {} } }
 ```
-Status codes: 200/201 ok, 400 validation, 401 unauthorized, 403 forbidden, 404 not found, 409 conflict (e.g. slot taken), 422 business rule, 429 rate limited.
+Status codes: 200/201 ok, 400 validation, 401 unauthorized, 403 forbidden, 404 not found, 409 conflict (e.g. slot taken), 413 payload too large (uploads), 415 unsupported media type (uploads), 422 business rule, 429 rate limited.
 
 `code` values: `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`,
-`CONFLICT`, `BUSINESS_RULE`, `RATE_LIMITED`, `INTERNAL_ERROR`. `details` carries
+`CONFLICT`, `PAYLOAD_TOO_LARGE`, `UNSUPPORTED_MEDIA_TYPE`, `BUSINESS_RULE`,
+`RATE_LIMITED`, `INTERNAL_ERROR`. `details` carries
 field errors as `{ "fields": [...] }` on validation failures, and any extra
 context the endpoint documents (e.g. `{ "retryAfter": 60 }` on a 429).
 
@@ -299,6 +300,8 @@ Create a pre-order.
   so the two can never disagree.
 - Item names are **snapshots** taken in the caller's language at purchase
   time; an order records what was bought at the price it was bought.
+- **The first `order_events` row is written by this same INSERT** (nested, not a
+  second call), so no order can exist without a record of having been placed.
 
 ### GET /orders
 - **Query:** `status=active|past, page, limit` (limit capped at 50)
@@ -311,13 +314,24 @@ Create a pre-order.
   once the order is `ready`, `completed` or `cancelled`.
 
 ### POST /orders/{id}/cancel
-Allowed while `created`, `paid` or `confirmed` — once the kitchen starts, the
-food is spent.
+**Allowed only while the order is `created`** — that is, before it has been
+paid for. Paying commits the order (BUSINESS_LOGIC.md §4).
 - **Response 200:** the full order with `status: "cancelled"`.
-- A captured payment is **refunded first**: if the provider refuses, the
-  customer keeps an order rather than having neither order nor refund.
-- **422** if the order has moved past `confirmed`. **409** if it changed
-  underneath the request.
+- **422 as soon as the order is `paid`**, and for every status after it. This
+  endpoint never refunds anything, because there is never anything captured
+  behind an order it can act on.
+- **409** if the order changed underneath the request.
+- A payment row may still exist — a card that was **declined** on an order the
+  customer then walked away from. It is closed off as `cancelled` alongside the
+  order, so nothing is left looking like a live attempt.
+- **Writes `order_events`** naming the customer, with what became of that
+  attempt — "cancelled" and "cancelled, and the refused card was released" are
+  different answers to what the timeline is opened for.
+
+> **No endpoint cancels a paid order**, for a customer or for staff — the
+> restaurant's `PATCH /restaurant/orders/{id}/status` is bound by the same state
+> machine and will 422. A branch that cannot fulfil a paid order is a support
+> conversation today.
 
 ### POST /orders/{id}/reorder — **not implemented**
 Lands with the orders-history screen.
@@ -421,20 +435,28 @@ A dine-in order is food brought to a table, so it needs a booking:
 > `useClass` change.
 
 ### GET /payment-methods · *public*
-- **Response 200:** `{ "methods":["apple_pay","google_pay","card","cash"], "default":"apple_pay" }`
+- **Response 200:** `{ "methods":["apple_pay","google_pay","card"], "default":"apple_pay" }`
+- **Online only.** `cash` was removed: it captured nothing, moved the order to
+  `paid` anyway, and nothing in the platform ever settled it (BUSINESS_LOGIC.md
+  §5). A client that still sends it gets **400** from the DTO.
 
 ### POST /payments · **requires `Idempotency-Key`**
 Requires a verified phone.
-- **Body:** `{ "orderId","method":"apple_pay|google_pay|card|cash","token":"…" }`
+- **Body:** `{ "orderId","method":"apple_pay|google_pay|card","token":"…" }`
 - **There is no amount field.** The server charges the order's `totalAmd`; the
   client says *which* order and *how*, never *how much*.
 - `token` is an opaque wallet/card token from the client SDK — raw card data
-  must never reach this server. `cash` needs none.
+  must never reach this server.
 - **Response 201:** `{ "id","status","amountAmd","method","orderStatus" }`
-- **`cash`** captures nothing (`status: "pending"`, settled at the counter) but
-  still moves the order to `paid`, otherwise the kitchen never sees it.
+- **Every method goes through the provider**, so a successful call means the
+  money was taken (`status: "captured"`) and the order is `paid`. There is no
+  method that places an order without paying for it.
 - **Declined** → **422**, the attempt is recorded as `failed`, and the order
   stays `created` so the customer can retry on the same row.
+- **Writes `order_events`** in the payment's own transaction: a `status_changed`
+  entry for the move to `paid`, or a `payment` entry for a decline — which moves
+  no status and would otherwise leave the order's timeline with an unexplained
+  twenty-minute gap.
 - **409** if the order is already paid, or if it is in a status that cannot
   become `paid` (cancelled, preparing…). The order state machine decides, not
   an ad-hoc check.
@@ -530,144 +552,724 @@ keeps across retries).
 
 ---
 
-## Owner / Admin (restaurant panel)
+## Staff authentication
 
-> For roles `owner`/`admin` (see ROLES_AND_PERMISSIONS). **`staff` is refused**
-> — the schema has no user-to-branch link, so there is nothing to scope them
-> by, and lending them the owner's reach in the meantime would be worse than
-> making them wait.
+> The back office. Staff are **separate accounts** from customers
+> (ROLES_AND_PERMISSIONS.md): their own table, email and password rather than a
+> phone OTP, and no sign-up — an account exists only because someone who
+> already had one invited it.
+>
+> Staff tokens carry `kind: "staff"`. A customer token is refused here, and a
+> staff token is refused on every customer endpoint; both are signed with the
+> same secret, so this check is what keeps the two identities apart.
 
-### GET /owner/orders · *implemented*
+### POST /auth/staff/login · *public, implemented*
+- **Body:** `{ "email", "password" }`
+- **Response 200:** `{ "accessToken", "refreshToken", "staff": { "id","email","name","scopes":[…],"permissions":[…] } }`
+- `permissions` is flattened from the roles held, so the panel renders its
+  screens from the same map the API enforces.
+- **Every failure answers identically (401)** — wrong password, unknown address,
+  deactivated account, invitation never accepted. A login endpoint that
+  distinguishes them is a way to find out who works here; an unknown address
+  still burns the same time a real verification would.
+- **403 when the credentials are right and the account holds no roles.** A real
+  dead end, said plainly — a token here would produce a panel where everything
+  403s.
+- Rate limited to 10/min per IP, tighter than the global 120.
+
+### POST /auth/staff/refresh · *public, implemented*
+- **Body:** `{ "refreshToken" }` → the same shape as login.
+- Re-reads assignments, so a role granted or revoked since the last refresh
+  takes effect now rather than at the next sign-in.
+
+### POST /auth/staff/logout · *public, implemented* → **204**
+
+### POST /auth/staff/accept-invite · *public, implemented*
+- **Body:** `{ "token", "password", "name"? }` → signs in, same shape as login.
+- Password minimum **12 characters**, no composition rules — a length floor is
+  worth more than a symbol requirement, and this is a panel where one account
+  can change every price in a restaurant.
+- Creating the account, setting the password and granting the role are one
+  transaction: a half-accepted invite would leave an account nobody can sign
+  into and a token already spent.
+- **401** if the invitation expired or was already used.
+
+### POST /auth/staff/forgot-password · *public, implemented* → **202**
+- **Body:** `{ "email" }`
+- **Always 202**, whether or not the address belongs to anyone.
+- The link lives 30 minutes (`STAFF_RESET_TTL`).
+
+### POST /auth/staff/reset-password · *public, implemented* → **204**
+- **Body:** `{ "token", "password" }`
+- **Ends every session the account holds.** Whoever reset it may have done so
+  because someone else knows the old password.
+
+### GET /auth/staff/me · *implemented*
+Read from the database, not the token — a role granted a minute ago is not in
+the current access token, and this is what decides which tabs render.
+
+---
+
+## Restaurant panel
+
+> Was `/owner/*`. Each route names the **permission** it needs rather than a
+> list of roles, and the service applies a scope filter for that same
+> permission. A branch or dish outside the caller's reach is **404**, not 403.
+
+### GET /restaurant/orders · *implemented* — `orders:read`
 The kitchen queue.
-- **Query:** `status=active|past, branchId, page, limit` (capped at 50)
-- Scoped to the branches the caller owns; `admin` sees everything. `branchId`
-  **narrows** that scope and never widens it, so passing someone else's branch
-  id returns nothing rather than their orders.
+- **Query:** `status, q, restaurantId, branchId, page, limit` (default 20, capped at 50)
+- **`status` is the stage:** `active` (default — everything the kitchen still
+  has to do) · `paid` · `unpaid` · `confirmed` · `preparing` · `almost_ready` ·
+  `ready` · `past` (completed or cancelled). The set of order statuses behind
+  each is `QUEUE_FILTER_STATUSES` in `packages/shared` — the same table the
+  panel labels its tabs from, so the two cannot disagree.
+- **One stage per status now, in the order an order moves through them.** They
+  used to be coarser: a single `new` spanning `created`, `paid` and `confirmed`,
+  and a `preparing` that swallowed `almost_ready`. Accepting an order, starting
+  to cook it and plating it are three different people's moments, and a stage
+  that mixed them could not say how many of each were waiting. Every count is
+  now a number somebody can act on.
+- **`active` is the exception and remains the default** for a caller that names
+  no stage. It spans the whole live queue, so the counts do **not** sum to
+  `total` — a paid order is counted under both `active` and `paid`.
+- **`unpaid` is the exception to that, and is exactly the `created` status** —
+  an order placed and never paid for, an abandoned basket or a declined card.
+  Named for what it means rather than the status behind it, because that is the
+  question somebody asks. It is not a step in the flow, so it has no place on
+  the strip: the panel hangs it off **Paid** as an inner filter, the one stage
+  it is the opposite of. Worth reaching at all because **nothing expires those
+  rows** — the API has no scheduled job of any kind, so they accumulate.
+- **`q` matches the order code, the pickup code, or the customer name.** One
+  parameter rather than three: the pickup code is the last four digits of
+  `code`, so a substring match finds an order by either.
+- Scoped to the caller's reach; `q`, `restaurantId` and `branchId` **narrow** it
+  and never widen it, so passing someone else's branch id returns nothing. The
+  search is composed with `AND` for exactly this reason — the scope filter is
+  itself an `OR`, and overwriting it would make the search box a way to read
+  every restaurant's orders.
 - **Ordered oldest first** — a kitchen works a queue, not a stack.
-- **Response 200:** `{ "items":[ { "id","code","pickupCode","status","serviceMode","branch","customerName","itemsCount","totalAmd","paymentStatus","readyAt","secondsLeft","createdAt","items":[{"name","qty"}],"notes" } ], "total", "page" }`
+- **Response 200:** `{ "items":[ { "id","code","pickupCode","status","serviceMode","branch","customerName","itemsCount","totalAmd","paymentStatus","readyAt","secondsLeft","createdAt","items":[{"menuItemId","name","qty","lineTotalAmd"}],"notes" } ], "total", "page", "counts" }`
+- **Each line carries the dish it came from and what it cost.** `name` is the
+  snapshot taken when the order was placed — what the diner bought, whatever
+  the dish has been renamed to since — and `menuItemId` is the dish itself,
+  which is what lets the panel link a line to its row on the menu. Both are
+  needed: an id cannot say what was ordered, and a name cannot say what to
+  open. `lineTotalAmd` is the line rather than the unit price, so a client
+  showing it beside the quantity is not asking a kitchen to multiply.
+- **`counts`** is one number per stage — `{ active, paid, unpaid, confirmed,
+  preparing, almost_ready, ready, past }` — taken under every filter **except**
+  the stage itself. That is what lets a search say where an order is: type a pickup code
+  while looking at the live board and the counts read `active: 0, past: 1`, one
+  click away, instead of an empty board with no explanation. They do **not** sum
+  to `total`: `active` overlaps every working stage, so one paid order is
+  counted under both `active` and `paid`.
 
-### PATCH /owner/orders/{id}/status · *implemented*
+### GET /restaurant/orders/{id}/history · *implemented* — `orders:read`
+Everything that has happened to one order — what the card's **History** button opens.
+- **Response 200:** `{ "items":[ { "id","type","fromStatus","toStatus","actor":{"type","name","email","impersonatedBy","id","impersonatedById"},"detail","at" } ] }`
+- **`type`** is `created` · `status_changed` · `payment`. The last is an attempt
+  that moved no status — a decline — which would otherwise be invisible in a
+  timeline whose job is to explain why an order sat unpaid.
+- **`actor.type`** is `customer` · `staff` · `system`. `name` is null for
+  `system`, for a diner who never gave one, and for an account since deleted —
+  the entry outlives the actor (`ON DELETE SET NULL`). `email` is staff-only.
+- **`actor.impersonatedBy`** names the real person when the account above was
+  being acted as, and is null otherwise.
+- **`actor.id`** is which row that actor is — a `users` id for a customer, a
+  `staff_users` id for staff, following `actor.type` rather than "whichever
+  column is set". Null exactly where `name` is. `impersonatedById` pairs with
+  `impersonatedBy` the same way. They are what let the panel turn a name in the
+  timeline into a link to that person (`/customers?person=` and
+  `/people?person=`) instead of a string somebody has to go and search for.
+  An id and nothing else: the screens behind them need `platform:users` and
+  `staff:read`, neither of which `orders:read` implies, so whoever follows one
+  is answered by those endpoints on their own permissions — and a staff id
+  outside the caller's reach lists nobody.
+- **`detail`** carries the per-type extras: dish count and total on a placement,
+  payment method, status and amount on anything that touched money. It also
+  carries `backfilled: true` on the single `created` entry the migration wrote
+  for orders that predate the table, and `reconstructed: true` on an entry
+  inferred from the order row rather than recorded as it happened (dev seed
+  only — see DATABASE.md §8a). Both are rendered as a note under the entry, so a
+  reader can tell what was witnessed from what was worked out.
+- **Oldest first** — a story reads forwards.
+- `orders:read`, not `orders:advance`: reading the trail is part of watching the
+  queue, and the person at the counter is often not the one allowed to advance
+  anything. Scoped in the query, so an order outside reach is **404**.
+
+### PATCH /restaurant/orders/{id}/status · *implemented* — `orders:advance`
 - **Body:** `{ "status": "confirmed|preparing|almost_ready|ready|completed|cancelled" }`
-- **`paid` is not settable.** Only a payment makes an order paid; a panel that
-  could set it could mark an unpaid order as settled.
+- **`paid` is not settable.** Only a payment makes an order paid.
+- **`cancelled` is settable only from `created`** — the same rule the customer's
+  cancel obeys. A branch cannot call off an order that has been paid for; the
+  board stops offering the button, and the endpoint answers **422** if one is
+  sent anyway.
+- Scoped on `orders:advance`, not `orders:read` — a role allowed only to watch
+  the queue cannot move an order in it.
 - Legality comes from the shared state machine, so skipping a step is **422**.
-- Cancelling here refunds a captured payment, exactly as the customer's cancel does.
-- Every change is broadcast to anyone watching the order.
-- **Response 200:** the full order (same shape as `GET /orders/{id}`).
+- **`preparing → ready` is the one skip the machine allows**, and it is a single
+  transition rather than two run together: `almost_ready` warns the counter that
+  something is about to need handing over, and a dish plated in one motion never
+  spends a moment there. One `order_events` row, reading `preparing → ready`,
+  because that is what happened.
+- **Writes `order_events`** in the same transaction as the move, naming the staff
+  member — and, under impersonation, the super admin actually behind them.
 
-### GET /owner/branches · *implemented*
-The branches the caller may act on, with a dish count.
+### GET /restaurant/restaurants · *implemented* — `branch:read`
+The restaurants in reach, each with its branches nested.
+- **Query:** `q, restaurantId, branchId, page, limit` (default 10, capped at 50)
+- **`q` matches the restaurant's name or slug, or a branch's name, address or
+  city** — one parameter, because whoever is typing knows which of the two they
+  have and should not have to pick a field first.
+- **Which branches come back under a card depends on what matched.** A named
+  `branchId` shows alone — that is what naming it means. A search shows the
+  branches that matched it, *unless* the restaurant itself is what matched, in
+  which case the search was for the chain and hiding nine of its ten branches
+  would be a strange way to answer.
+- **`branchCount` is the restaurant's real total**, in the caller's reach,
+  regardless of what a filter left in `branches`. The two differ under a
+  search, and reporting the filtered length would tell somebody a five-branch
+  chain has one.
+- Scoping is applied first and never widened; `q` is composed with `AND` so it
+  cannot overwrite the scope filter's own `OR`.
+- **Response 200:** `{ "items":[ { "id","slug","name","cuisine","priceLevel","reservationsEnabled","services","branchCount","branches":[ …the branch shape below… ] } ], "total", "page" }`
+- **Restaurant and branches are scoped independently.** A `branch_staff` sees
+  the restaurant their branch belongs to, and only that branch under it — not
+  its siblings.
+- **This is the only endpoint that can show a restaurant with no branches**, and
+  that is the one that needs finding: a restaurant cannot have a menu or take an
+  order until it has a branch, so somebody has to be able to see it in order to
+  add the first one. Grouping the flat list below client-side would leave those
+  restaurants invisible.
+
+### GET /restaurant/restaurants/{id} · *implemented* — `branch:read`
+One restaurant, opened on its own.
+- **Response 200:** the list's shape plus `ratingAvg`, `reviewsCount`,
+  `coverUrl`, `createdAt`. `ratingAvg` is resolved to a **number** — a Prisma
+  `Decimal` serialises as an object and compares wrongly against one.
+- **Every branch in reach is returned**, unnarrowed: arriving here means having
+  chosen this restaurant, and the search that found it has no business deciding
+  which of its branches exist afterwards. `branchCount` therefore equals
+  `branches.length`; the field is kept so the detail and the list rows share a
+  type.
+- **404, not 403**, outside the caller's reach — the reach is part of the query,
+  so no path loads someone else's restaurant and then decides, and the answer
+  does not confirm the id names anything.
+
+### GET /restaurant/restaurants/{id}/people · *implemented* — `staff:read`
+Who holds a role over the restaurant **itself** — its admins.
+- **Query:** `page` (default 1), `limit` (default 50, **max 50**)
+- **Response 200:** `{ "items":[ { "id","role","branchId","branchName","person":{ "id","name","email","isActive","lastLoginAt" } } ], "total", "page" }`
+- **Not its branches' people.** An assignment names a restaurant or a branch and
+  never both, so this is exactly the roles that reach the whole restaurant;
+  `GET /restaurant/branches/{id}/people` answers for each branch. The two
+  together are the whole team, asked for **where each half is read** — the
+  admins beside the restaurant's own facts, a branch's staff under that branch.
+  A chain of forty branches would otherwise send every one of its teams to draw
+  the one somebody clicked, and page them at fifty so that a branch's staff could
+  land on page two, away from the branch.
+- **A row per assignment, not per person.** Somebody who manages two of the
+  branches is two answers to "who works here and as what"; one row would have to
+  pick a branch to name and there is no right pick. `id` is the **assignment's**.
+- `branchName` is `null` here by construction — the role is held over the
+  restaurant as a whole, which reaches every branch of it.
+- **Ordered by role first**, which sorts by the Postgres enum's declaration
+  order in `schema.prisma` — `super_admin → platform_admin → restaurant_admin →
+  restaurant_manager → branch_staff`, i.e. seniority. Then by branch, then by
+  name, then by id so a row cannot appear on two pages.
+- **Reach and restaurant are separate `AND` terms.** The restaurant narrows what
+  the caller may already see; it must never be able to stand in for the reach
+  filter, or naming any id would list its staff to anybody holding `staff:read`
+  anywhere.
+- **Platform roles never appear.** Their assignment names no restaurant, and a
+  super admin is not staff *of* a restaurant however much of it they can see.
+- **A separate permission from the restaurant itself**, deliberately: a
+  `branch_staff` account holds `branch:read` and not `staff:read`, so it opens
+  the restaurant and does not learn who else works there. The back office asks
+  for this only when the account holds it — one response with a section that is
+  sometimes missing would have to mix two permissions in one guard.
+- **An unreachable or unknown id returns an empty list, not 404** — the same
+  answer as "nobody works here", which is the one that distinguishes nothing.
+
+### GET /restaurant/branches · *implemented* — `branch:read`
+The same branches, flat — for screens that pick one (the menu editor, invites).
 - **Response 200:** `{ "items":[ { "id","restaurantId","restaurantName","name","address","city","phone","isOpen","avgPrepMin","menuItemCount" } ] }`
 
-### PATCH /owner/branches/{id} · *implemented*
-- **Body (any):** `{ "isOpen", "avgPrepMin", "address", "phone" }`
+### GET /restaurant/branches/{id}/people · *implemented* — `staff:read`
+Who works at one branch — its manager and its shifts.
+- **Query:** `page` (default 1), `limit` (default 50, **max 50**)
+- **Response 200:** the same row shape as the restaurant's people above.
+- **Hangs off the branch rather than taking a `branchId` on the restaurant's
+  list**, because the assignment is on the branch: the reach filter then guards
+  this the same way it guards everything else, with no second check that the
+  branch belongs to whichever restaurant somebody named.
+- **A branch out of reach or unknown returns an empty list, not 403 or 404.** It
+  is a collection, and an empty one says nothing about whether the branch exists.
+- Same `staff:read` as the restaurant's admins, and the same reason: a
+  `branch_staff` account works at the branch without being allowed to read who
+  else does.
+
+### POST /restaurant/branches · *implemented* — `branch:create`
+- **Body:** `{ "restaurantId","name"?,"address"?,"city"?,"lat"?,"lng"?,"phone"?,"avgPrepMin"? }`
+- **A new branch opens closed.** It has no menu yet, and one that starts taking
+  orders is a kitchen selling nothing.
+- **404** if the restaurant is not one the caller administers.
+- Until this existed, a restaurant created through the admin panel had nowhere
+  to put a menu — `POST /restaurant/menu-items` requires a `branchId`.
+
+### PATCH /restaurant/branches/{id}/status · *implemented* — `branch:hours`
+- **Body:** `{ "isOpen"?, "avgPrepMin"? }`
 - `isOpen: false` makes `POST /orders` return **422** for that branch — this is
   the switch a shift uses to stop the queue.
+- Separate from the PATCH below because a `branch_staff` account may stop the
+  queue without being able to edit the branch's address. One endpoint gated on
+  two permissions would have to decide that in the service, out of sight of the
+  guard.
+
+### PATCH /restaurant/branches/{id} · *implemented* — `branch:write`
+- **Body (any):** `{ "name", "address", "phone" }`
 - **`reservationsEnabled` is not accepted here.** It lives on the *restaurant*,
-  not the branch, so setting it from a branch endpoint would silently change
-  every other branch too. It lands with the reservations module.
-- **`openHours` is not editable yet** — the column exists but nothing reads it;
-  it arrives with opening-hours validation.
+  so setting it from a branch endpoint would silently change every other branch.
+- **`openHours` is not editable yet** — the column exists but nothing reads it.
 
 ### Menu management · *implemented*
 
 > These return the **raw `*_i18n` objects**, unlike the public menu endpoint
-> which resolves one language. The owner is editing all three; resolving would
+> which resolves one language. The caller is editing all three; resolving would
 > make the other two invisible and silently unsaveable.
 
-- `GET /owner/menu-items?branchId=&menuTab=` → `{ "items":[ … ] }`
-- `POST /owner/menu-items` — **Body:** `{ "branchId","menuTab","nameI18n":{"hy","ru"?,"en"?},"descI18n"?,"priceAmd","caloriesKcal"?,"prepMin"?,"photoUrl"?,"dietaryTags"?,"isAvailable"? }`
-- `PATCH /owner/menu-items/{id}` — any of the above except `branchId`; moving a
-  dish between branches would change who owns it, which is a different
-  operation, not an edit.
-- `DELETE /owner/menu-items/{id}` → **204**
+- `GET /restaurant/menu-items?branchId=&menuTab=` — `menu:read`
+- `POST /restaurant/menu-items` — `menu:write` — **Body:** `{ "branchId","menuTab","nameI18n":{"hy","ru"?,"en"?},"descI18n"?,"priceAmd","photoUrl","caloriesKcal"?,"prepMin"?,"dietaryTags"?,"isAvailable"? }`
+- `PATCH /restaurant/menu-items/{id}` — `menu:write` — any of the above except
+  `branchId`; moving a dish between branches would change who owns it.
+- `PATCH /restaurant/menu-items/{id}/availability` — **`menu:availability`** —
+  **Body:** `{ "isAvailable" }`. The one menu change a shift may make: it says
+  what is true right now and reverses in a tap, unlike a price, which outlives
+  the shift that set it.
+- `DELETE /restaurant/menu-items/{id}` — `menu:write` → **204**. A **soft
+  delete**: `deleted_at` is set and the row stays, because `order_items`
+  references it.
+- `GET /restaurant/menu-items/{id}/history` — `menu:read` — see below.
 
 Rules worth knowing:
 - **`nameI18n.hy` is required.** It is the fallback every other language
   resolves to, so a dish without it would render nameless for most visitors.
+- **`photoUrl` is required on create — 400 without it.** A menu is a list
+  somebody reads with their eyes, and a dish with no picture sits under the ones
+  that have one and does not get ordered. An **absolute `http(s)` URL**, trimmed,
+  max 500 chars — normally the one `POST /uploads/menu-photo` just answered with
+  (below), though any reachable image URL is accepted.
+  The PATCH may swap it for another but **cannot blank it**: `null` and `""` are
+  both 400, and omitting the field is how an edit leaves the photo alone.
+  Reads still type it `string | null`: the column is nullable for anything that
+  predates the rule, and the seed fills those in rather than the API inventing
+  a picture at read time.
 - **Blank translations are dropped** before storing — an empty string is not a
-  translation, and it would beat the `hy` fallback.
-- **A dish that has ever been ordered cannot be deleted** → **409**, telling the
-  owner to set `isAvailable: false` instead. `order_items` points at it, and an
-  order that can no longer say what was bought is not an order.
+  translation, and it would beat the `hy` fallback. `nameI18n` is **replaced,
+  not merged**: a language left out of the object is a language removed from the
+  dish.
+- **`prepMin: null` clears the estimate**, and is the one field here where
+  `null` is a value rather than a mistake — an estimate can turn out to be
+  wrong, and a dish that could claim one but never take it back would keep a
+  number the kitchen has stopped believing. The exact opposite of `photoUrl`
+  above, which the same request refuses to blank. Absent still means "leave it
+  alone" for both.
+- **A PATCH that moves nothing writes no history entry.** The body is diffed
+  against the stored row before anything is recorded, so a form that re-sends an
+  untouched price does not fill a dish's trail with "2400 → 2400".
+- **Any dish can be deleted, ordered or not.** This used to be a **409** for a
+  dish that appeared in an order, telling the caller to set `isAvailable: false`
+  instead — the foreign key made a real delete impossible. Soft-deleting removes
+  that objection: the reference stays valid and past orders still say what was
+  bought, so the refusal is gone.
+- **A deleted dish is gone from every read**, including the public menu and the
+  lookup order placement validates against — it comes back as `not_on_menu` in a
+  quote. `GET|PATCH|DELETE` on it are **404**, so a stale panel cannot re-price
+  something already withdrawn.
+- **`DELETE` and `isAvailable: false` are different states.** The second is
+  "sold out tonight", reversible by a shift on `menu:availability`. The first is
+  "off the menu", needs `menu:write`, and no endpoint undoes it.
 - **Changing a price does not touch existing orders**: every order item stores
   the price it was bought at.
 
-### GET /owner/reservations · *implemented*
-The book for a service, chronological.
-- **Query:** `branchId?, date=YYYY-MM-DD?` (local day), `status?`, `page`, `limit`
-- Defaults to everything still active. `date` is a **Yerevan** calendar day —
-  a restaurant's "today" is not UTC's.
+### GET /restaurant/menu-items/{id}/history · *implemented* — `menu:read`
+Everything that has happened to one dish — what the menu row's **History**
+button opens. Who put it on the menu, every edit since, who changed the price,
+and who marked it sold out.
+
+- **Response 200:** `{ "items":[ { "id","action","actor":{"id","name","impersonatedBy","impersonatedById"},"before","after","at" } ] }`
+- **`action`** is one of `menu_item.create` · `.update` · `.availability` ·
+  `.delete` — the same vocabulary `audit_log` stores (see
+  ROLES_AND_PERMISSIONS.md, "What is recorded"). A sold-out flip is its own
+  action rather than an `.update` carrying one field, because a shift holds
+  `menu:availability` and not `menu:write`.
+- **`actor.name`** is null for an account since deleted — the entry outlives the
+  actor (`ON DELETE SET NULL`). `actor.id` is the `staff_users` row, which is
+  what lets the panel turn a name into a link to `/people?person=`; it is an id
+  and nothing else, and the screen behind it needs `staff:read`, which
+  `menu:read` does not imply.
+- **`actor.impersonatedBy`** names the super admin really at the keyboard when
+  the account above was being acted as, and is null otherwise.
+- **Which of `before`/`after` is set follows the action**, and a client must not
+  assume both: a creation has `after` alone (nothing preceded it), a withdrawal
+  has `before` alone (what the dish was), and an edit has both.
+- **On an edit, the keys of `after` are the diff.** `before` carries the dish's
+  `nameI18n` as a *label* on every entry, changed or not — without it an entry
+  could only say "a price changed" and the reader would have to go and look up
+  which dish. A client that diffs the keys of `before` will render a phantom
+  name change on every price edit.
+- **No entry exists for a request that changed nothing.** Entries carry only
+  fields that actually moved, diffed against the stored row rather than the
+  request body.
+- **Oldest first** — a story reads forwards, the same direction an order's
+  timeline runs.
+- **A withdrawn dish still has a history.** Unlike every other menu read, this
+  one does not filter out `deleted_at` — the dish somebody took off the menu is
+  precisely the one they come here to ask about. Nothing here is editable, so
+  there is no path by which a stale panel writes to it.
+- `menu:read`, not `staff:activity`: this is the record of one **dish**, which
+  whoever may read the menu may read — the same rule that puts an order's
+  timeline behind `orders:read`. `GET /staff/{id}/activity` is the record of one
+  **person** across every dish they touched, and that is a different power.
+- Scoped in the query, so a dish outside reach is **404**, not 403.
+
+### GET /restaurant/reservations · *implemented* — `reservations:read`
+- **Query:** `branchId?, date=YYYY-MM-DD?` (a **Yerevan** calendar day),
+  `status?`, `page`, `limit`
 - **Response 200:** the reservation object plus `customerName` and
   `customerPhone`.
 
-### PATCH /owner/reservations/{id}/status · *implemented*
+### PATCH /restaurant/reservations/{id}/status · *implemented* — `reservations:advance`
 - **Body:** `{ "status": "confirmed|seated|completed|no_show|cancelled" }`
-- Legality comes from `RESERVATION_STATUS_FLOW`, so the panel can only offer
-  moves the API accepts. **422** otherwise.
+- Legality comes from `RESERVATION_STATUS_FLOW`; **422** otherwise.
 - `confirmed` and `seated` **leave the deposit alone**; only an ending decides
-  the money, per the table in BUSINESS_LOGIC.md §3.
+  the money, per BUSINESS_LOGIC.md §3.
 
-### Admin · *implemented*
+---
 
-> `admin` role only. Everything below is refused with **403** for owner, staff
-> and customer alike.
+## Uploads
 
-#### GET /admin/metrics
+### POST /uploads/menu-photo · *implemented* — `menu:write`
+
+Stores one dish photograph and answers with the URL to save on the dish.
+
+- **Request:** the image **bytes as the raw body**, under their own
+  `Content-Type` (`image/jpeg`, `image/png`, `image/webp`). Not multipart: one
+  request carries exactly one file, so the envelope would be packaging with
+  nothing to package. From a browser that is `fetch(url, { method: 'POST', body: file })`.
+- **Response 201:** `{ "url": "https://api.amragrir.am/uploads/menu/<uuid>.jpg" }`
+- **Max 5 MB** — `MAX_IMAGE_UPLOAD_BYTES` in `@amragrir/shared`, which the back
+  office reads too so it can refuse an oversized file without sending it.
+- `menu:write`, the same permission that adds the dish the photo will hang on:
+  an account that cannot put a dish on the menu has no reason to be able to put
+  a file on this disk.
+
+Rules worth knowing:
+- **The `Content-Type` is a hint, not a claim that is acted on.** The bytes are
+  sniffed (JPEG/PNG/WebP magic numbers) and the *sniffed* type decides the
+  extension the file is stored under — which in turn decides the `Content-Type`
+  it is served with. Believing the header would let somebody store a page of
+  HTML as `photo.png` and have the API hand it back as HTML from its own origin.
+- **415** for anything that is not one of the three formats, **413** over the
+  size limit, **400** for an empty body. SVG is refused along with everything
+  else: it is a document with scripts in it, arriving from outside.
+- **The stored name is a fresh uuid**, never the name the file arrived with —
+  an uploaded name is attacker-controlled text that would otherwise become a
+  path on this disk, and two restaurants uploading `photo.jpg` would be one
+  overwriting the other.
+- **Uploading and creating the dish are two requests.** The photo goes up while
+  somebody is still typing the price, so it can be shown back to them before the
+  dish exists. A form abandoned afterwards leaves the file behind; nothing
+  sweeps those yet, which is the known cost of the split.
+
+### Where images are served from
+
+Both outside `/v1` — these are files, not an API version.
+
+- `GET /uploads/…` — what was uploaded, from `UPLOAD_DIR`. Immutable and cached
+  for a year: every name is a fresh uuid, so a file never changes under its URL.
+- `GET /static/…` — artwork that ships with the repo, from `apps/api/public`.
+  Includes `/static/menu/<category>.svg`, the placeholder photographs every
+  seeded dish points at. Cached for an hour, because these keep their names
+  across deploys and a corrected one has to be able to arrive.
+- Both send `X-Content-Type-Options: nosniff`.
+- Both are built from **`API_PUBLIC_URL`**, which is what a stored `photoUrl`
+  is absolute against. Changing that value after photos exist leaves the old
+  ones pointing at the old host.
+
+---
+
+## Staff management
+
+> Not under `/admin`: a `restaurant_admin` hires for their own restaurant and
+> holds no platform permissions. Everything here is scoped to the caller's own
+> reach.
+
+### GET /staff · *implemented* — `staff:read`
+Who works here, within reach.
+- **Query:** `q`, `role`, `id`, `page` (1-based, default 1), `limit` (default 20, **max 50**)
+- **Response 200:** `{ "items":[ { "id","email","name","isActive","lastLoginAt","assignments":[{ "id","role","restaurantId","restaurantName","branchId","branchName" }] } ], "total", "page" }`
+- **`id` narrows to one person exactly** — what a link that already knows who it
+  means asks for, such as a staff name in an order's history. `q` cannot answer
+  it: a `contains` over names and emails matches everyone who shares a name.
+  **Alongside the reach filter, never instead of it** — holding somebody's id is
+  not permission to see them, so an id from outside reach lists nobody, exactly
+  as that person's name does.
+- **`q` covers a name, an email, or the restaurant or branch someone is
+  assigned to** — the three things the back office shows on a person's card, in
+  one box.
+- **A search cannot reach past the caller's reach.** The term is `AND`ed onto
+  the query rather than assigned over it, and its "where they work" arm carries
+  the reach filter with it, so matching a restaurant name never surfaces
+  somebody by an assignment the caller may not see.
+- **`role` narrows which *people* appear, not which of their roles are shown.**
+  The role and the reach are required of the *same* assignment — otherwise
+  filtering to managers would list somebody who manages out of reach and washes
+  dishes here — but a listed person still comes back with every assignment
+  within reach. This is the screen roles are revoked from, and a card showing
+  one of three is how one gets taken away in the belief it was the last.
+- **The assignments are filtered to the caller's reach**, not just the accounts:
+  seeing that someone works here does not mean seeing everywhere else they work.
+- **`restaurantId`/`restaurantName` are the restaurant the role *reaches*, not a
+  copy of the `restaurant_id` column.** An assignment names a restaurant or a
+  branch and never both, so for `restaurant_manager` and `branch_staff` the
+  column is null and the restaurant here is the one the **branch** belongs to.
+  Read raw, a shift's row said only "Northern Ave", which is a branch of three
+  different restaurants. Null now means what it sounds like — a platform role,
+  over no restaurant at all — and `branchId` still says which of the two columns
+  the assignment actually names.
+- `branchName` falls back to the branch's city, as everywhere else a branch is
+  named.
+- Ordered by name (`name asc`, `id asc` — a stable tiebreak, so a row cannot
+  appear on two pages).
+
+### GET /staff/invites · *implemented* — `staff:read`
+Invitations still open, so a resend is a decision rather than a guess.
+- **Query:** the same `q`, `role`, `page` and `limit` as `GET /staff` — the
+  search on that screen is over *people*, and somebody invited last week is a
+  person you are looking for who has not accepted yet. `q` matches the invited
+  address or the restaurant/branch it is for. The back office pages this 10 at
+  a time, against the directory's 20.
+- **Response 200:** `{ "items":[…], "total", "page" }`
+- Only unaccepted invitations, newest first.
+
+### POST /staff/invites · *implemented* — `staff:invite`
+- **Body:** `{ "email","role","restaurantId"?,"branchId"? }`
+- The scope must match the role: platform roles take neither id,
+  `restaurant_admin` a restaurant, branch roles a branch. **422** otherwise.
+- **If the address already belongs to an active account, the role is granted
+  immediately** and no invitation is sent — the response says
+  `{ "granted": true }`. Sending a "set your password" email to someone who
+  already has one trains people to click password links they did not ask for.
+- **403 — you cannot grant what you do not hold.** The role's permissions must
+  be a subset of the caller's, and its scope within their reach. Otherwise a
+  restaurant admin could invite a `super_admin`.
+- **403** for any platform role unless the caller holds `platform:staff`.
+
+### DELETE /staff/invites/{id} · *implemented* — `staff:invite` → **204**
+
+### DELETE /staff/assignments/{id} · *implemented* — `staff:revoke` → **204**
+Takes a role away, not the account — the person may hold roles elsewhere, and
+`audit_log` still has to be able to name them.
+- **Ends every session that account holds.** Scopes travel in the access token,
+  so the revoked role would keep working until it expired.
+- **403** removing your own role, or the last `super_admin` — no route exists to
+  appoint another one afterwards.
+
+### GET /staff/{id}/activity · *implemented* — `staff:activity`
+What this person has done — menu edits, the orders they moved, the people they
+invited — newest first.
+
+- **Query:** `page` (1–25), `limit` (≤50, default 20)
+- **Response 200:** `{ "items": [ … ], "total", "page" }`, where each item is one
+  of two shapes discriminated by `kind`:
+
+```jsonc
+// kind: "audit" — from audit_log
+{ "kind": "audit", "id", "action": "menu_item.update", "entity": "menu_item",
+  "entityId", "before": { "nameI18n": {…}, "priceAmd": 2400 },
+  "after": { "priceAmd": 2600 },
+  "where": { "restaurantId", "restaurantName", "branchId", "branchName" },
+  "impersonatedBy": null, "at" }
+
+// kind: "order" — from order_events
+{ "kind": "order", "id", "type": "status_changed",
+  "fromStatus": "preparing", "toStatus": "ready", "orderId", "orderCode": "A41",
+  "where": {…}, "impersonatedBy": null, "at" }
+```
+
+- **Two tables, merged at read time.** Order status changes live in
+  `order_events` (whose actor is usually a customer or the payment provider) and
+  everything else in `audit_log`. Writing status changes to both would mean two
+  records of one fact, free to drift; this merges them at the one place that
+  wants them interleaved. `total` is the sum across both.
+- **A union rather than a flattened shape**: an `audit` entry has an action and a
+  `before`/`after` pair, an `order` entry has two statuses and a code. Merging
+  them into one optional-everything object would push "which fields are actually
+  set" onto every reader.
+- **Scoped twice.** The person must be somebody the caller can already see in the
+  directory — otherwise this reads the activity of anybody whose id you can
+  guess — **and** the entries are filtered to the caller's reach, so someone who
+  works for two restaurants shows each admin only their own half.
+- **404** for a person outside the caller's reach; a 403 would confirm the
+  account exists.
+- **`page` is capped at 25**, which no other list here does. Merging two ordered
+  streams by offset means fetching the whole prefix of both, so the cost grows
+  with the offset rather than the page size. A date filter is the right answer
+  for going further back; see ROLES_AND_PERMISSIONS.md "Not implemented yet".
+- **An impersonated entry appears in both feeds** — the account acted as, and the
+  super admin who did it — with `impersonatedBy` naming the latter.
+- **Empty for anything that happened before this shipped.** The actions were not
+  recorded, so there is nothing to backfill from; order status changes are the
+  exception and go back to the `order_events` backfill.
+
+### POST /staff/{id}/impersonate · *implemented* — `staff:impersonate` → **200**
+Signs the caller in as this person, for one access TTL.
+- **Response 200:** `{ "accessToken", "expiresIn", "staff": { "id","email","name","scopes":[…],"permissions":[…] } }`
+- **No `refreshToken`, and that is the shape of the thing** rather than an
+  omission. `/auth/staff/refresh` re-reads the target's assignments and mints a
+  fresh pair from them, which would drop the impersonation marker on the way
+  through: a bounded session would quietly become an unlimited one,
+  indistinguishable from that person's own. With no refresh half it closes
+  itself, and the back office falls back to the super admin's own session.
+- **The token's `sub` is the target**, so every guard, scope filter and query
+  behaves exactly as it would for them. The caller's own id travels beside it in
+  `act`, which is what makes the session tellable from a real sign-in.
+- **`staff` is the same shape `GET /auth/staff/me` returns**, so the panel
+  renders its tabs from it without a second request.
+- **403 if the caller is already acting as somebody.** Impersonation does not
+  chain: `act` holds one id, so a second hop would either overwrite the real
+  actor or record somebody who was themselves being acted as.
+- **403** impersonating yourself, a deactivated account, or one holding no
+  roles. The last two are the refusals their own password would get.
+- **404** for an account outside the caller's reach — a 403 would confirm it
+  exists.
+- **Writes `audit_log`** (`staff.impersonate`) with the real actor, the target,
+  the roles being borrowed and the IP, *before* the token is issued. The session
+  carries full write access, so without that row the only record of who advanced
+  an order would name the person who did not do it.
+- **There is no "stop impersonating" endpoint.** The caller's own tokens were
+  never revoked; the back office stashes them and puts them back.
+- Only `super_admin` holds `staff:impersonate` — see ROLES_AND_PERMISSIONS.md
+  for why it cannot be widened without widening every role in reach.
+- **Customers cannot be impersonated.** A customer session is the other identity
+  entirely, and there is nowhere to put one: `apps/web` has no sign-in.
+
+---
+
+## Platform administration
+
+> `platform:*` permissions, held by `platform_admin` and `super_admin` only.
+
+#### GET /admin/metrics — `platform:metrics`
 - **Query:** `from`, `to` (ISO); defaults to the last 30 days.
 - **Response 200:** orders (total, earning, cancelled, `abandonedPct`), revenue
   (gross, service fees, discounts given, average order), `byStatus`,
   `topRestaurants`, users, reservations.
 - **Revenue counts `paid` and later only.** A `created` order is an abandoned
-  basket and a `cancelled` one was refunded; counting either would misreport
-  the business in both directions.
+  basket and a `cancelled` one was refunded.
 
-#### GET /admin/metrics/reconciliation
-Payments and orders that disagree — a captured payment on a cancelled order, or
-a failed payment on an order that says it is paid. **Empty is the expected
-answer**; anything here needs a human.
+#### GET /admin/metrics/reconciliation — `platform:metrics`
+Payments and orders that disagree. **Empty is the expected answer.**
 
-#### GET /admin/users
-- **Query:** `q` (phone, name or email), `role`, `page`, `limit`
-- **Phone numbers come back masked** (`+374******56`). An admin list is not a
-  reason to hand out every number in full.
+#### GET /admin/users — `platform:users`
+The **customer** list. Staff are `GET /staff`.
+- **Query:** `q` (phone, name or email), `role`, `id`, `page` (1-based, default 1), `limit` (default 20, **max 50** — above it is a 400, not a silent clamp)
+- **`id` narrows to one customer exactly** — what a diner's name in an order's
+  history links to. There is no search term that would find only them: names are
+  shared, and the phone this screen shows is masked.
+- **Returns** `{ items, total, page }`; `total` counts everything matching `q`, not the page, which is what lets a client show how much it is not displaying. The back office pages this 25 at a time.
+- Ordered newest first (`createdAt desc`, `id desc`) — a stable tiebreak, so a row cannot appear on two pages.
+- **Phone numbers come back masked** (`+374******56`). The unmasked one is its
+  own route below, one account at a time, and recorded.
 
-#### PATCH /admin/users/{id}/role
-- **Body:** `{ "role": "customer|staff|owner|admin" }` — `guest` is rejected,
-  because it is the `is_guest` flag rather than a database role.
-- **Refusals, each for a reason:**
-  - **422** changing your own role — an admin who demotes themselves loses the
-    panel with no way back.
-  - **422** the target is a guest or has no verified phone.
-  - **409** demoting the last administrator — nobody could restore one.
-  - **409** demoting an owner who still has restaurants; reassign them first,
-    or they become unmanageable.
-- **Every session the account holds is revoked.** Access tokens carry `role`
-  and cannot be recalled, so the old one keeps working until it expires (15
-  min); killing the refresh tokens is what stops that window being extended.
-  The user must sign in again before the new role reaches their claims.
+#### GET /admin/users/{id}/phone — `platform:users`
+One customer's number **in full**.
+- **Response 200:** `{ "id", "phone" }` — the id travels back so a client cannot
+  paste the answer against the wrong row.
+- **404** for an id that belongs to nobody **and** for an account with no number
+  (a guest who never verified one). Both are "there is no phone at this
+  address", and telling them apart would confirm that an id exists.
+- **Its own route because it is its own act.** The list masks so that a page of
+  twenty-five readable numbers is not something anybody can photograph; a
+  support call needs exactly one of them.
+- **Every call writes `audit_log`** (`customer.phone_view`), with the *masked*
+  number in `after` — the row says which number was read without being a second,
+  permanent, readable copy of it. Written **before** the answer: a failure to
+  record is a failure to reveal, because a number handed out with no row saying
+  who asked is the gap this exists to close.
+- Scope columns are both null, which keeps the row readable only by a platform
+  role — the same rule `staff.impersonate` follows.
 
-#### POST /admin/restaurants
-- **Body:** `{ "slug","name","ownerId","cuisine"?,"priceLevel"? }`
+#### GET /admin/users/{id}/orders — `platform:users`
+What one customer has ordered, newest first.
+- **Query:** `q`, `status`, `page` (1-based, default 1), `limit` (default 10, **max 50**)
+- **`q`** matches the **order code** (full or the four-digit pickup code, which is
+  its suffix), a **dish on the order** (the snapshot name, not the dish's name
+  today), or the **restaurant/branch** it was bought at. Deliberately *not* the
+  customer's name, which the order board matches and which would match every row
+  here by construction.
+- **`status`** is `all` (default) / `active` / `completed` / `cancelled` —
+  `CustomerOrderFilter` in `packages/shared`. Not the board's `QueueFilter`:
+  "new", "preparing" and "ready" are stages of work still to be done, and three
+  of five stages would match nothing for all but the last hour of a diner's life.
+  Not the customer app's `active`/`past` either, because that folds cancellations
+  in with completions, and a cancellation is the row a support call is about.
+  `all` leaves the status column out of the query rather than listing every value.
+- **Response 200:** `{ items, total, page, counts }`. `counts` is one number per
+  filter (`all`, `active`, `completed`, `cancelled`), **taken under `q` but not
+  under `status`** — so searching a code and reading `active 0 · completed 0 ·
+  cancelled 1` answers the question before anybody picks a filter. Same rule as
+  the order board's per-stage counts, and `counts.all` is the sum of the group-by
+  rather than of the other three, so a status no filter buckets is still counted.
+- Each item carries the whole order:
+  both codes, status, service mode, the restaurant and branch **ids** as well as
+  their names, every line (`menuItemId`, snapshot `name`, `qty`, `unitPriceAmd`,
+  `lineTotalAmd`), the four money fields plus the total, the payment (`null` for
+  an order nobody ever paid for), the booked table, the notes, `readyAt` and
+  `createdAt`.
+- **Rows arrive whole** rather than as a summary plus a detail route: the back
+  office opens these in place, so ten rows would otherwise be eleven requests to
+  read what one query already joined.
+- **404** for an id that belongs to nobody. An empty page cannot tell "has never
+  ordered" from "does not exist", and only the first is worth an empty state.
+- **`platform:users`, not `orders:read`,** and the difference is which question
+  is being asked. `GET /restaurant/orders` answers "what is this kitchen working
+  on", scoped to the branches a shift can reach. This crosses every restaurant
+  on the platform to answer "what has this person bought", which belongs to
+  whoever may see the person at all.
+
+#### POST /admin/restaurants — `restaurant:create`
+- **Body:** `{ "slug","name","adminEmail"?,"cuisine"?,"priceLevel"? }`
 - `slug` must be lowercase words separated by hyphens — it becomes a public URL
-  on `apps/web`.
-- **422** if `ownerId` is not an owner or admin: the restaurant would exist with
-  an "owner" who cannot open it in the panel. **409** on a duplicate slug.
+  on `apps/web`. **409** on a duplicate.
+- **`ownerId` is gone.** There is no customer account to point at: a restaurant
+  is administered through a `restaurant_admin` assignment. `adminEmail` invites
+  the person who will run it, and the account need not exist yet.
+- The invitation is sent **after** the restaurant is committed. A restaurant
+  with nobody invited is a normal state an admin can fix from the staff screen;
+  an invitation naming a restaurant that was never created is a dead link.
 
-#### POST /admin/promos
+#### POST /admin/promos — `promo:issue`
 - **Body:** `{ "code","discountPct"? | "discountAmd"?,"validUntil"?,"userIds"? }`
 - **Exactly one** of `discountPct` / `discountAmd`; **400** otherwise.
   `discountPct` is capped at 25, the same ceiling as stacked referrals.
 - Goes to every **verified, non-guest** account unless `userIds` is given.
 - Re-issuing the same code **tops up accounts that joined since** and skips
-  those who already hold it; the response reports what was actually created,
-  not what was asked for.
+  those who already hold it; the response reports what was actually created.
+
+### Removed
+
+- **`PATCH /admin/users/{id}/role`.** Promoting a customer into staff is no
+  longer possible in either direction — that is the point of the split. Staff
+  accounts are created by invitation and by nothing else.
 
 ### Not implemented yet
-- `GET|POST|PATCH /owner/tables` — manage tables.
-- **Review moderation.** There is no review API at all yet — moderating content
-  that cannot be created would be theatre.
+- `GET|POST|PATCH /restaurant/tables` — manage tables. `tables:write` exists in
+  the permission map with nothing behind it.
+- **Review moderation.** There is no review API at all yet.
 - **Platform settings** (fees, deposit rates). They live in
   `packages/shared/src/constants.ts`; making them editable means moving pricing
-  into the database, which changes how every order is priced rather than adding
-  a screen.
+  into the database.
+- **TOTP two-factor** for platform roles.

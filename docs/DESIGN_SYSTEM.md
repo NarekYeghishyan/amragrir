@@ -35,6 +35,7 @@ The design is built on CSS custom properties. There are two themes — `:root` (
 | `--good` | `#12A150` | Success, "open", deposit credit |
 | `--shadow` | `rgba(60,40,15,.12)` | Shadows |
 | `--glass` | `rgba(246,245,242,.78)` | Glass surfaces (blur) |
+| `--scrim` | `rgba(26,23,18,.42)` | Backdrop behind a modal or bottom sheet |
 
 ### Dark theme (`.theme-dark`)
 
@@ -55,8 +56,23 @@ The design is built on CSS custom properties. There are two themes — `:root` (
 | `--good` | `#2EC76F` |
 | `--shadow` | `rgba(0,0,0,.55)` |
 | `--glass` | `rgba(16,14,11,.72)` |
+| `--scrim` | `rgba(0,0,0,.62)` |
 
-**Additional spot colors:** rating star `#F5A623`; destructive action (Log out) `#E23755`. QR/barcode drawn in `#111`.
+**Additional spot colors:** rating star `#F5A623` (`--star`); destructive action
+(Log out) `#E23755` (`--destructive`). A QR/barcode is drawn in `#111`
+(`--qr-ink`) on white (`--qr-paper`).
+
+Those four are the same in both themes, and the QR pair deliberately so: dark
+modules on a light field is what the format assumes, so a code that inverted
+itself under a dark theme is one a counter's handheld scanner may refuse to
+read — and the theme is the staff member's choice, not the scanner's. They are
+generated from `packages/ui/src/tokens.ts` like every other token; nothing may
+hard-code them.
+
+`--scrim` and `--glass` are not interchangeable. `--glass` is a *surface* that
+floats over content and stays legible (the status badge over a restaurant
+photo); `--scrim` is the layer that pushes content back behind a modal. Both
+themes darken, so a scrim cannot be derived from `--ink` — that inverts.
 
 ### Two design artifacts, one authority
 
@@ -207,3 +223,62 @@ Header/greeting, Search bar, Location selector, Category rail (horizontal scroll
 ## 9. Expressive tokens (theme tweaks)
 
 The design supports 3 tunable theme parameters (passed via inline `--` variables on the container): **accent color**, **surface temperature** (warmth of surfaces), and **depth/finish** (shadow depth/finish). Build these as theme parameters during development.
+
+---
+
+## 10. Back office (`apps/admin`)
+
+Everything above describes the **customer** products — a phone app and a
+storefront. The internal panel uses the same palette and the same tokens (it
+imports the generated `tokens.css` like the web app does, and the only hex in
+`styles.css` is `#fff` where something sits on accent), but it is a tool
+somebody works in for a whole shift
+rather than a storefront somebody visits. Three values differ, deliberately:
+
+| | Customer apps | Back office | Why |
+|---|---|---|---|
+| Control height | 56px CTA / 52px input | **40px** (32px for inline/small) | Density. A screen of 56px rows shows a third of the dishes. |
+| Corner radius | 18–22px surfaces | **14px** surfaces, 10px controls | Tighter reads as an instrument, not a card feed. |
+| Base type | 15–15.5px body | 15px body, 12.5–13px meta | Unchanged; only the secondary scale tightens. |
+
+**The exception is the order board.** It is the one screen used on a tablet in a
+kitchen, so its status buttons keep the full **44px** hit target from §3 — the
+`.btn--touch` class exists for exactly that.
+
+**The page header is the accent bar.** `.page-header` is solid `--accent` with
+white text — the one saturated surface in the panel, sticky at the top of every
+screen. Being accent costs it accent as a signal, so the controls on it invert:
+`.btn--primary` becomes white with accent text, `.btn--secondary` and
+`.btn--ghost` become white outlines, and a `.badge` swaps only its ground to
+white so its tone still carries (the order board's "live" dot is green because
+green is the message). The glass blur is gone with it — content scrolling under
+an opaque bar is already hidden — and a `--shadow` lift replaces the bottom
+hairline, which a 9%-ink rule could not draw on a saturated ground.
+
+> **Contrast.** White on `--accent` measures **3.5:1** in light and **2.86:1** in
+> dark. The 22px/700 title clears AA-large (3:1) in light only; the 13px
+> description clears neither, and nor does the inverted primary button's label.
+> Near-black (`#1A1712`) on the same bar measures 5.11:1 and 6.24:1 — it is the
+> ink that would pass. White is the deliberate choice here; this note exists so
+> it stays a choice.
+
+**Components.** The panel's primitives are built on
+[Radix](https://www.radix-ui.com/primitives) (dialog, alert-dialog,
+dropdown-menu, select, tabs, toast, tooltip, switch, separator, label) and live
+in `apps/admin/src/ui`. Radix supplies behaviour and accessibility; the
+appearance is CSS in `apps/admin/src/styles.css`, tokens only. Props are listed
+in [COMPONENTS.md](./COMPONENTS.md) under "Back-office primitives".
+
+**States** follow §8, with four additions the panel needs and the phone does not:
+
+| State | Implementation |
+|---|---|
+| **loading (action)** | Button keeps its width and swaps its icon slot for a spinner, so a row does not reflow on every click. |
+| **late / overdue** | Order past its promised time: `--destructive` border plus a soft ring, marked in place rather than re-sorted. |
+| **arrived at** | The row a link from another screen was following (`.role--found`, and `.row--found` for a table row — a menu's dish, arrived at from a line of an order): a 3px `--accent` inset edge and a 12% `--accent` band, flashed in from 34% over 2s by `role-found`. Layout-neutral — an inset shadow and a margin the padding gives back, so nothing shifts against the rows beside it. In a table the tint and the edge go on the cells instead, because a `<tr>`'s box is laid out by the table rather than by itself. |
+| **disclosed** | A branch with its team open (`.branch--open`): a `--chip` band down the branch and the rows it disclosed, so the two read as one block where indentation alone stops carrying. Neutral, not accent — an **arrived-at** row is marked in accent *inside* this band, and accent on accent would leave the two arguing over which is the answer. Layout-neutral in the same way, and horizontal only: vertical padding would push the branches below it down at the moment of the click, on top of the team already unfolding. |
+
+The **arrived-at** tint settles rather than fading out. A flash that has finished
+playing cannot answer "which row was I sent to" for somebody who looked away, and
+under `prefers-reduced-motion` — where the panel collapses every animation to
+0.01ms — a fade-out would leave nothing behind at all.

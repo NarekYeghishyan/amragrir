@@ -317,6 +317,15 @@ export class ReservationsService {
     /** `null` leaves the hold untouched — confirming or seating a guest is not
      *  a moment to take or return money. */
     outcome: DepositOutcome | null,
+    /**
+     * Run inside the same transaction as the status change, after it.
+     *
+     * Here so the staff path can write its `audit_log` entry atomically with the
+     * move it describes, without this service having to know what an audit entry
+     * is — a guest cancelling their own booking has no staff actor to record and
+     * simply passes nothing.
+     */
+    alsoInTransaction?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<ReservationDetail> {
     const paymentStatus =
       outcome && reservation.payment
@@ -333,7 +342,7 @@ export class ReservationsService {
             data: { status: paymentStatus },
           });
         }
-        return tx.reservation.update({
+        const moved = await tx.reservation.update({
           // Matched on the status this decision was made against, so a change
           // that landed in between loses instead of being overwritten.
           where: { id: reservation.id, status: reservation.status },
@@ -345,6 +354,12 @@ export class ReservationsService {
           },
           include: RESERVATION_INCLUDE,
         });
+
+        // After the update, so a `where` that matched nothing has already thrown
+        // and no entry is written for a move that did not happen.
+        await alsoInTransaction?.(tx);
+
+        return moved;
       })
       .catch((err: unknown) => {
         if (paymentStatus === PaymentStatus.Refunded) {

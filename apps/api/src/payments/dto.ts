@@ -9,9 +9,10 @@ export class CreatePaymentDto {
   method!: PaymentMethod;
 
   /**
-   * Wallet/card token produced by the client SDK. Optional because `cash`
-   * needs none. Note what is *not* here: no amount. The server reads the total
-   * from the order, so a client cannot decide what it pays.
+   * Wallet/card token produced by the client SDK. Optional because the
+   * development provider takes none and a wallet may hand one over out of band.
+   * Note what is *not* here: no amount. The server reads the total from the
+   * order, so a client cannot decide what it pays.
    */
   @IsString()
   @IsOptional()

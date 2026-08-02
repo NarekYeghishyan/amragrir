@@ -13,9 +13,9 @@
 | Cache / queues / OTP | **Redis** |
 | Mobile | **React Native + Expo** (expo-router) |
 | Web | **Next.js** (App Router) — customer-facing; public restaurant/menu pages need SEO |
-| Admin / back office | **React + Vite** (SPA, no SSR) — internal tool for `owner` + `admin` roles combined |
+| Admin / back office | **React + Vite** (SPA, no SSR) — internal tool for every staff role |
 | Realtime | WebSocket (NestJS Gateway) / polling fallback |
-| Auth | JWT (access + refresh), OTP via SMS |
+| Auth | JWT (access + refresh). Customers: OTP via SMS. Staff: email + password (scrypt), invitation only |
 | Files | S3-compatible storage (dish/restaurant photos) |
 | Payments | Acquiring provider + Apple Pay / Google Pay |
 | i18n | shared dictionary package hy/ru/en |
@@ -32,22 +32,37 @@ amragrir/
 │   ├── api/          # NestJS backend
 │   ├── mobile/       # React Native Expo — customer app
 │   ├── web/          # Next.js — customer-facing web
-│   └── admin/        # React + Vite SPA — owner + admin back office
+│   └── admin/        # React + Vite SPA — staff back office
 ├── packages/
 │   ├── shared/       # types, DTOs, enums, business constants
-│   ├── i18n/         # dictionaries hy/ru/en
+│   ├── i18n/         # dictionaries hy/ru/en (root = customer, /admin = back office)
 │   ├── ui/           # reusable UI primitives (web + admin)
 │   └── config/       # eslint/tsconfig/prettier bases
 └── docs/             # this documentation
 ```
 
-`apps/admin` serves both the `owner` and `admin` roles (see
-ROLES_AND_PERMISSIONS.md) behind role-based access control in a single app —
+`apps/admin` serves every staff role (see ROLES_AND_PERMISSIONS.md) in a single
+app, with each screen gated on the permission it needs rather than on a role —
 split into two apps later only if scale requires it. It has no public pages,
 so it skips Next.js/SSR in favor of a plain Vite SPA; `apps/web` keeps Next.js
 because its restaurant/menu pages are public and need SEO.
 
-- **Backend — modular NestJS architecture** (one module per domain): `auth`, `users`, `restaurants`, `branches`, `menu`, `categories`, `cart`, `orders`, `reservations`, `payments`, `favorites`, `referrals`, `reviews`, `notifications`, `owner`, `admin`.
+Each of its screens has its own URL (`/orders`, `/restaurants/:id`, … — the
+table is in `apps/admin/README.md`), routed client-side by `src/router.tsx`
+over the History API rather than by a routing library. **Wherever it is hosted,
+every path has to serve `index.html`** (`try_files $uri /index.html;` in nginx,
+or the platform's SPA/rewrite setting): without that, a reload or a pasted link
+on any screen but the root is a 404 from the static host. `vite dev` and
+`vite preview` do this already, so the failure only ever shows up in a real
+deployment.
+
+- **Backend — modular NestJS architecture** (one module per domain): `auth`, `users`, `restaurants`, `branches`, `menu`, `categories`, `cart`, `orders`, `reservations`, `payments`, `favorites`, `referrals`, `reviews`, `notifications`, `restaurant`, `staff`, `uploads`, `admin`, `email`.
+- **Images are files the API serves itself**, from two mounts outside `/v1`:
+  `/uploads/…` (what staff upload, `UPLOAD_DIR`, git-ignored) and `/static/…`
+  (artwork committed in `apps/api/public`). Both are absolute against
+  `API_PUBLIC_URL`, which is what a row stores — so no client needs to know
+  where files live. Local disk is deliberate and single-instance; the URL is
+  built in `UploadsService` alone, so moving to object storage is one change.
 - Each module: `*.controller.ts`, `*.service.ts`, `*.repository`/prisma, `dto/`, `entities/`, `*.guard.ts`.
 - **Layers:** Controller (HTTP/validation) → Service (business logic) → Repository (data access). Business rules — in the Service only.
 - **Shared types and enums** (order/reservation statuses, roles, service mode) — in `packages/shared`, imported by the backend and clients. **Single source of truth.**
@@ -78,6 +93,7 @@ apps/mobile/
 2. **Shared enums/types** from `packages/shared` — do not duplicate statuses as strings.
 3. **Money — integers in AMD** (`*_amd`). Formatting only in UI (`formatMoney`).
 4. **i18n:** no hardcoded strings in UI — dictionary keys only. `hy` is the default language.
+   See §5 for how a language is chosen per app and how plurals are formed.
 5. **Theme tokens:** colors/radii/spacing — from `theme`, do not hardcode hex (see DESIGN_SYSTEM.md).
    **A raw colour value belongs in exactly one file: `packages/ui/src/tokens.ts`.**
    Web and admin read the CSS variables generated from it; mobile imports the
@@ -90,7 +106,9 @@ apps/mobile/
 ### Backend
 - All money calculations (subtotal, service fee, deposit, total) — **on the server**; do not trust the client.
 - Business-rule checks before mutation: slot availability, capacity, working hours, restaurant status, status transitions (state machine).
-- DB migrations versioned; dev seeds cover the design's fixtures (categories, restaurants, menu, tables).
+- DB migrations versioned; dev seeds cover the design's fixtures (categories, restaurants, menu, tables) **plus staff, orders and each order's history, and what the staff have been doing** — a screen with nothing on it cannot be checked. Seeded data is derived from a stable key, never randomised: a bug found on one seeded database has to reproduce on another.
+- **A seed that describes a change must make it.** `seed-activity.ts` writes the `audit_log` entries the People screen's activity panel reads, and actually soft-deletes the dish each `menu_item.delete` names and closes the branch each `branch.status` names. A seeded audit trail that describes changes the database does not reflect is worse than an empty one — the value of that table is that it can be believed.
+- **Seeded data has to look like the thing it stands for.** Demo dishes carry a photograph of that dish (`prisma/menu-photos.ts`, hotlinked; `MENU_PHOTOS=local` for the committed placeholders), because a menu is a list somebody reads with their eyes and a screen full of grey boxes cannot be judged. Every URL in that table was fetched and looked at before it was written down — a keyword search for "cola" returned a bottle among sugar skulls. **A seed may never overwrite what a user chose:** `db:photos` rewrites a missing or seeded picture and never an uploaded one.
 - Logging, rate-limit on `auth/*`, OTP TTL in Redis (120s).
 
 ### API conventions
@@ -230,7 +248,59 @@ A change is done when **all** of these hold. "It compiles" is not on the list.
 
 ---
 
-## 5. Implementation priorities (roadmap)
+## 5. Languages (hy / ru / en)
+
+Three languages everywhere, `hy` the default and the fallback. `packages/i18n`
+holds the dictionaries behind **two entry points**, because the two vocabularies
+have almost nothing in common and would collide on short keys like `menu` and
+`search`:
+
+| Import | Holds | Used by |
+|---|---|---|
+| `@amragrir/i18n` | customer strings | `apps/web` (and `apps/mobile` when it lands) |
+| `@amragrir/i18n/admin` | back-office strings | `apps/admin` |
+
+Separate modules rather than one file with prefixes, so the server-rendered
+customer site does not ship several hundred staff strings to every visitor.
+
+**`hy` is the reference in both.** `TranslationKey` / `AdminTranslationKey` are
+`keyof typeof hy`, and each dictionary is checked with `satisfies`, so a key
+added to one language and forgotten in another is a **compile error** — not an
+Armenian word surfacing in an English page.
+
+### How each app decides which language to show
+
+| App | Source | Why |
+|---|---|---|
+| `apps/api` | `Accept-Language` header | One process serves everyone; see §3 "API conventions". |
+| `apps/web` | the URL — `/hy`, `/ru`, `/en` | A crawler sends one header, so header negotiation alone leaves two languages unindexed. Needs a URL per language with `hreflang`. |
+| `apps/admin` | a stored choice (`amragrir.language`), then the browser's, then `hy` | Internal, behind a sign-in, nothing to index. Staff work a shift in one language, so the choice sits in storage next to the theme and is switched from the account menu (and from the sign-in card, which is in front of anyone who cannot yet read the panel). |
+
+The admin panel sends its choice as `Accept-Language` on every request, so the
+API's error messages and `*_i18n` columns come back in the same language the
+screen is in. Anything the API said is shown verbatim; the panel only translates
+failures it invents itself (see `ApiError.messageKey`).
+
+### Plurals
+
+Never build a count message by hand — the three languages do not agree on what
+"plural" means:
+
+- **English** — `one` is exactly 1.
+- **Armenian** — `one` covers **0 and 1**.
+- **Russian** — `one` covers 1, 21, 101…; `few` covers 2–4; `many` the rest.
+
+`t.plural(key, count)` selects through `Intl.PluralRules` over `_one` / `_few` /
+`_many` / `_other` suffixed keys and passes `{count}` in for you. Armenian and
+English define only the two categories they select; Russian adds its two.
+
+**A `_one` string may only hardcode the digit "1" in English.** In Armenian it
+would report zero branches as one; in Russian it would report twenty-one as one.
+Everywhere else the string carries `{count}`.
+
+---
+
+## 6. Implementation priorities (roadmap)
 
 Order is chosen so each step can be exercised end-to-end before the next
 depends on it — build thin vertical slices, not horizontal layers.

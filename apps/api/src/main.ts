@@ -1,4 +1,6 @@
 import 'reflect-metadata';
+import type { ServerResponse } from 'node:http';
+import { resolve } from 'node:path';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -6,6 +8,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { STATIC_URL_PREFIX, UPLOADS_URL_PREFIX } from './uploads/uploads';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: false });
@@ -21,6 +24,37 @@ async function bootstrap(): Promise<void> {
 
   // All routes live under /v1 to match the public base https://api.amragrir.am/v1.
   app.setGlobalPrefix('v1');
+
+  // Images. Outside `/v1` on purpose: these are files, not an API version —
+  // a menu photo uploaded today keeps its address when the API is versioned
+  // again, and an `<img src>` never negotiates a version anyway.
+  //
+  // `nosniff` on both, because one of the two directories holds bytes that came
+  // from outside: the extension decides the Content-Type a file is served with,
+  // `UploadsService` decides the extension from the bytes themselves, and this
+  // stops a browser from overruling either.
+  const images = (cacheControl: string) => ({
+    index: false,
+    setHeaders: (res: ServerResponse): void => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', cacheControl);
+    },
+  });
+
+  // Uploads are immutable by construction — every stored name is a fresh uuid,
+  // so a file never changes under its URL and a year is safe to promise.
+  app.useStaticAssets(resolve(config.get<string>('UPLOAD_DIR') ?? './uploads'), {
+    ...images('public, max-age=31536000, immutable'),
+    prefix: `${UPLOADS_URL_PREFIX}/`,
+  });
+  // The artwork that ships with the repo — the placeholders every seeded dish
+  // points at — kept apart from `UPLOAD_DIR` so that emptying uploads cannot
+  // take the fallbacks with it. An hour rather than a year: these keep their
+  // names across deploys, so a corrected placeholder has to be able to arrive.
+  app.useStaticAssets(resolve(__dirname, '..', 'public'), {
+    ...images('public, max-age=3600'),
+    prefix: `${STATIC_URL_PREFIX}/`,
+  });
 
   // Plain `ws`, not socket.io: React Native and every browser ship a WebSocket
   // client already, so the app needs no extra dependency and no protocol shim.

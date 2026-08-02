@@ -74,7 +74,7 @@ describe('TokenService', () => {
   // older build) must not be accepted either.
   it('refuses a correctly signed token that has no type claim', async () => {
     const { service, jwt } = build();
-    const legacy = await jwt.signAsync({ sub: 'user-1', role: Role.Admin }, { expiresIn: 900 });
+    const legacy = await jwt.signAsync({ sub: 'user-1', role: Role.Guest }, { expiresIn: 900 });
 
     await expect(service.verifyAccess(legacy)).rejects.toThrow(/not an access token/i);
   });

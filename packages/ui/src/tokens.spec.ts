@@ -73,6 +73,16 @@ describe('renderTokensCss', () => {
     expect(css).toContain(`--destructive: ${spot.destructive};`);
   });
 
+  it('keeps the QR colours out of the themes', () => {
+    // Deliberately not derived from `ink`/`card`: those invert, and an inverted
+    // QR code is one a counter's handheld may refuse to read. `#111` is the
+    // value DESIGN_SYSTEM.md §1 names, so a silent edit here would make the
+    // documentation wrong rather than merely stale.
+    expect(spot.qrInk).toBe('#111');
+    expect(css).toContain(`--qr-ink: ${spot.qrInk};`);
+    expect(css).toContain(`--qr-paper: ${spot.qrPaper};`);
+  });
+
   it('says it is generated', () => {
     expect(css.startsWith('/* GENERATED FILE')).toBe(true);
   });

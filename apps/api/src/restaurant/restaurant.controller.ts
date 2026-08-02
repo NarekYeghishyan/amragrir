@@ -1,0 +1,268 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { Permission } from '@amragrir/shared';
+import { CurrentStaff, RequiresPermission, StaffRoute } from '../staff/decorators';
+import type { StaffJwtPayload } from '../staff/staff-token.service';
+import { StaffDirectoryService } from '../staff/staff-directory.service';
+import { ListTeamDto } from '../staff/dto';
+import { RestaurantOrdersService } from './orders.service';
+import { MenuService } from './menu.service';
+import { MenuHistoryService } from './menu-history.service';
+import { RestaurantReservationsService } from './reservations.service';
+import { ListStaffReservationsDto, SetReservationStatusDto } from '../reservations/dto';
+import { ListQueueDto, SetOrderStatusDto } from './dto';
+import {
+  CreateBranchDto,
+  CreateMenuItemDto,
+  ListMenuItemsDto,
+  ListRestaurantsDto,
+  SetAvailabilityDto,
+  SetBranchStatusDto,
+  UpdateBranchDto,
+  UpdateMenuItemDto,
+} from './menu.dto';
+
+/**
+ * The restaurant side of the platform, for whoever holds a role over it.
+ *
+ * This was `/owner` when "owner" was a role on the customer table. It is now
+ * every back-office role from `branch_staff` upwards, so each route names the
+ * **permission** it needs rather than a list of roles — and the service applies
+ * a scope filter for that same permission, because "may you call this" and
+ * "which rows may you touch" are different questions.
+ */
+@Controller('restaurant')
+@StaffRoute()
+export class RestaurantController {
+  constructor(
+    private readonly orders: RestaurantOrdersService,
+    private readonly menu: MenuService,
+    private readonly menuHistory: MenuHistoryService,
+    private readonly reservations: RestaurantReservationsService,
+    // The people query lives with the rest of the reach-scoped people queries
+    // rather than being reimplemented here: "you only see your own reach" is
+    // that service's whole job, and a second copy of it is a second place for
+    // it to be got wrong.
+    private readonly directory: StaffDirectoryService,
+  ) {}
+
+  @Get('orders')
+  @RequiresPermission(Permission.OrdersRead)
+  listOrders(@CurrentStaff() staff: StaffJwtPayload, @Query() query: ListQueueDto) {
+    return this.orders.listOrders(staff, query);
+  }
+
+  /**
+   * How this order got where it is: placed, paid, and every hand that moved it.
+   *
+   * `orders:read` rather than `orders:advance` — reading the trail is part of
+   * watching the queue, and the counter is often not the person allowed to
+   * advance anything.
+   */
+  @Get('orders/:id/history')
+  @RequiresPermission(Permission.OrdersRead)
+  orderHistory(@CurrentStaff() staff: StaffJwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.orders.history(staff, id);
+  }
+
+  @Patch('orders/:id/status')
+  @RequiresPermission(Permission.OrdersAdvance)
+  setStatus(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetOrderStatusDto,
+  ) {
+    return this.orders.setStatus(staff, id, dto);
+  }
+
+  @Get('reservations')
+  @RequiresPermission(Permission.ReservationsRead)
+  listReservations(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Query() query: ListStaffReservationsDto,
+  ) {
+    return this.reservations.list(staff, query);
+  }
+
+  @Patch('reservations/:id/status')
+  @RequiresPermission(Permission.ReservationsAdvance)
+  setReservationStatus(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetReservationStatusDto,
+  ) {
+    return this.reservations.setStatus(staff, id, dto);
+  }
+
+  /**
+   * The restaurants in reach, each with its branches nested.
+   *
+   * The flat list below cannot show a restaurant that has no branches yet —
+   * and that is the one someone needs to find, to give it a first branch.
+   */
+  @Get('restaurants')
+  @RequiresPermission(Permission.BranchRead)
+  listRestaurants(@CurrentStaff() staff: StaffJwtPayload, @Query() query: ListRestaurantsDto) {
+    return this.menu.listRestaurants(staff, query);
+  }
+
+  /**
+   * One restaurant, opened on its own.
+   *
+   * Declared before `restaurants/:id/people` is irrelevant to Nest's matching,
+   * but note the pair: this one is `branch:read`, the people below are
+   * `staff:read`. A `branch_staff` account holds the first and not the second,
+   * so it sees the restaurant and not who else works there — which is why the
+   * two are separate routes rather than one response with a section in it that
+   * sometimes is not there.
+   */
+  @Get('restaurants/:id')
+  @RequiresPermission(Permission.BranchRead)
+  getRestaurant(@CurrentStaff() staff: StaffJwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.menu.getRestaurant(staff, id);
+  }
+
+  /** Who holds a role over the restaurant itself — its admins. Its branches'
+   *  people are asked for per branch, below. */
+  @Get('restaurants/:id/people')
+  @RequiresPermission(Permission.StaffRead)
+  getRestaurantPeople(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListTeamDto,
+  ) {
+    return this.directory.listRestaurantPeople(staff, id, query);
+  }
+
+  /** The same branches, flat — for screens that pick one (menu, invites). */
+  @Get('branches')
+  @RequiresPermission(Permission.BranchRead)
+  listBranches(@CurrentStaff() staff: StaffJwtPayload) {
+    return this.menu.listBranches(staff);
+  }
+
+  /**
+   * Who works at one branch — its manager and its shifts.
+   *
+   * Asked for a branch at a time because that is how it is read: a restaurant's
+   * page opens one branch's team at a time, and a chain of forty would
+   * otherwise send every one of them to draw the one somebody clicked.
+   */
+  @Get('branches/:id/people')
+  @RequiresPermission(Permission.StaffRead)
+  getBranchPeople(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListTeamDto,
+  ) {
+    return this.directory.listBranchPeople(staff, id, query);
+  }
+
+  /** Adds a branch to a restaurant the caller administers. Until this existed,
+   *  a restaurant created through the admin panel had nowhere to put a menu. */
+  @Post('branches')
+  @RequiresPermission(Permission.BranchCreate)
+  createBranch(@CurrentStaff() staff: StaffJwtPayload, @Body() dto: CreateBranchDto) {
+    return this.menu.createBranch(staff, dto);
+  }
+
+  /**
+   * The shift's own switch: open, closed, and how long food is taking.
+   *
+   * Separate from the PATCH below because a `branch_staff` account may stop the
+   * queue when the kitchen is under water, but has no business editing the
+   * branch's address. One endpoint gated on two permissions would have to make
+   * that distinction in the service, out of sight of the guard.
+   */
+  @Patch('branches/:id/status')
+  @RequiresPermission(Permission.BranchHours)
+  setBranchStatus(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetBranchStatusDto,
+  ) {
+    return this.menu.setBranchStatus(staff, id, dto);
+  }
+
+  @Patch('branches/:id')
+  @RequiresPermission(Permission.BranchWrite)
+  updateBranch(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateBranchDto,
+  ) {
+    return this.menu.updateBranch(staff, id, dto);
+  }
+
+  /** Returns the raw `*_i18n` objects — the caller edits every language, so
+   *  resolving one would hide the others. */
+  @Get('menu-items')
+  @RequiresPermission(Permission.MenuRead)
+  listMenu(@CurrentStaff() staff: StaffJwtPayload, @Query() query: ListMenuItemsDto) {
+    return this.menu.listMenu(staff, query);
+  }
+
+  /**
+   * How this dish got to the price it is at: who put it on the menu, every edit
+   * since, and who marked it sold out.
+   *
+   * `menu:read` rather than `staff:activity` — the same rule that puts an
+   * order's timeline behind `orders:read`. Whoever may read the menu may read
+   * how it came to say what it says; a record of one *person's* day across every
+   * dish they touched is the other endpoint, and the other permission.
+   */
+  @Get('menu-items/:id/history')
+  @RequiresPermission(Permission.MenuRead)
+  menuItemHistory(@CurrentStaff() staff: StaffJwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.menuHistory.list(staff, id);
+  }
+
+  @Post('menu-items')
+  @RequiresPermission(Permission.MenuWrite)
+  createMenuItem(@CurrentStaff() staff: StaffJwtPayload, @Body() dto: CreateMenuItemDto) {
+    return this.menu.create(staff, dto);
+  }
+
+  /**
+   * Sold out, and back again.
+   *
+   * The one menu change a shift may make: it says what is true right now and
+   * reverses in a tap, unlike a price, which outlives the shift that set it.
+   */
+  @Patch('menu-items/:id/availability')
+  @RequiresPermission(Permission.MenuAvailability)
+  setAvailability(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetAvailabilityDto,
+  ) {
+    return this.menu.setAvailability(staff, id, dto);
+  }
+
+  @Patch('menu-items/:id')
+  @RequiresPermission(Permission.MenuWrite)
+  updateMenuItem(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateMenuItemDto,
+  ) {
+    return this.menu.update(staff, id, dto);
+  }
+
+  @Delete('menu-items/:id')
+  @RequiresPermission(Permission.MenuWrite)
+  @HttpCode(204)
+  removeMenuItem(@CurrentStaff() staff: StaffJwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.menu.remove(staff, id);
+  }
+}

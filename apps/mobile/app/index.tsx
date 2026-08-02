@@ -61,8 +61,11 @@ export default function HomeScreen() {
             </Text>
             <Text style={[styles.title, { color: colors.ink }]}>What to eat today?</Text>
 
+            {/* `asChild` clones this Pressable through expo-router's Slot, which
+                merges a single style object onto it — an array style throws
+                "passing an array of styles to a child of <Slot>". Flatten it. */}
             <Link href="/auth" asChild>
-              <Pressable style={[styles.signIn, { borderColor: colors.line }]}>
+              <Pressable style={StyleSheet.flatten([styles.signIn, { borderColor: colors.line }])}>
                 <Text style={[styles.signInText, { color: colors.accent }]}>
                   {user?.phoneVerified ? 'Signed in' : 'Sign in with your phone'}
                 </Text>

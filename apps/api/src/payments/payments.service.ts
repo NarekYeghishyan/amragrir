@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, type Payment } from '@prisma/client';
 import {
+  OrderEventType,
   OrderStatus,
   PaymentMethod,
   PaymentStatus,
@@ -16,6 +17,7 @@ import {
 } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderEventsService, toStatusEvent } from '../orders/order-events.service';
+import { customerActor, orderEventData } from '../orders/order-history';
 import { ReferralsService } from '../referrals/referrals.service';
 import { PAYMENT_PROVIDER, PaymentDeclinedError, type PaymentProvider } from './payment.provider';
 import { CreatePaymentDto } from './dto';
@@ -72,18 +74,9 @@ export class PaymentsService {
 
     const amountAmd = order.totalAmd;
 
-    // Cash is settled at the counter, so nothing is captured now — but the
-    // order still commits, otherwise the kitchen never sees it
-    // (BUSINESS_LOGIC.md §5: "Place order" without online payment).
-    if (dto.method === PaymentMethod.Cash) {
-      return this.settle(order.id, order.status as OrderStatus, order.payment, {
-        method: dto.method,
-        amountAmd,
-        status: PaymentStatus.Pending,
-        providerRef: null,
-      });
-    }
-
+    // Every method goes through the provider. There is no longer a "place the
+    // order and settle at the counter" path — an order reaches the kitchen only
+    // once the money is actually taken (BUSINESS_LOGIC.md §5).
     let providerRef: string;
     try {
       const result = await this.provider.charge({
@@ -97,7 +90,7 @@ export class PaymentsService {
       if (err instanceof PaymentDeclinedError) {
         // Record the attempt: a declined payment the customer can retry is a
         // different situation from one that was never made.
-        await this.record(order.id, order.payment, {
+        await this.record(order, order.payment, {
           method: dto.method,
           amountAmd,
           status: PaymentStatus.Failed,
@@ -108,7 +101,7 @@ export class PaymentsService {
       throw err;
     }
 
-    return this.settle(order.id, order.status as OrderStatus, order.payment, {
+    return this.settle(order, order.payment, {
       method: dto.method,
       amountAmd,
       status: PaymentStatus.Captured,
@@ -120,13 +113,19 @@ export class PaymentsService {
    * Reverses whatever was taken for an order and reports the status the
    * payment should end up in. The caller applies it, so the payment row and
    * the order status change together in one transaction.
+   *
+   * An order can only be cancelled before it is paid, so in practice what
+   * reaches here is a *declined* attempt on an order the customer then dropped
+   * — nothing to refund. The capture branch is kept for the rows that predate
+   * that rule, and because a payment row and an order status that disagree is
+   * exactly the case this must not silently skip.
    */
   async reverse(payment: Payment): Promise<PaymentStatus> {
     if (payment.status === PaymentStatus.Captured) {
       await this.provider.refund(payment.providerRef, payment.amountAmd);
       return PaymentStatus.Refunded;
     }
-    // Pending (cash) or authorized: nothing left the customer's account.
+    // Failed, pending or authorized: nothing left the customer's account.
     return PaymentStatus.Cancelled;
   }
 
@@ -163,20 +162,42 @@ export class PaymentsService {
   /** Writes the payment and moves the order to `paid` in one transaction —
    *  a captured charge with an unpaid order is money the kitchen never hears about. */
   private async settle(
-    orderId: string,
-    expectedStatus: OrderStatus,
+    target: PaidOrder,
     existing: Payment | null,
     data: PaymentWrite,
   ): Promise<PaymentResult> {
+    const expectedStatus = target.status as OrderStatus;
+
     const [payment, order] = await this.prisma
       .$transaction([
-        this.upsert(orderId, existing, data),
+        this.upsert(target.id, existing, data),
         this.prisma.order.update({
           // The status is part of the match, not just the payload: the check
           // above ran before the charge, and a cancellation could have landed
           // in between. Without it, paying would silently un-cancel an order.
-          where: { id: orderId, status: expectedStatus },
+          where: { id: target.id, status: expectedStatus },
           data: { status: OrderStatus.Paid },
+        }),
+        // In the same transaction as the move it describes, so the order's
+        // history cannot end up missing the step that took the money — or
+        // claiming one that the optimistic match above rejected.
+        this.prisma.orderEvent.create({
+          data: {
+            orderId: target.id,
+            ...orderEventData({
+              type: OrderEventType.StatusChanged,
+              // The customer: paying is something they did, even where the
+              // provider is what actually moved the money.
+              actor: customerActor(target.userId),
+              fromStatus: expectedStatus,
+              toStatus: OrderStatus.Paid,
+              detail: {
+                paymentMethod: data.method,
+                paymentStatus: data.status,
+                amountAmd: data.amountAmd,
+              },
+            }),
+          },
         }),
       ])
       .catch((err: unknown) => {
@@ -201,13 +222,35 @@ export class PaymentsService {
     };
   }
 
-  /** Records an attempt without advancing the order (used for declines). */
+  /**
+   * Records an attempt without advancing the order (used for declines).
+   *
+   * The history entry is the whole reason a decline is visible at all: it moves
+   * no status, so without a row of its own the timeline would show an order
+   * sitting in `created` for twenty minutes with nothing to explain why.
+   */
   private async record(
-    orderId: string,
+    target: PaidOrder,
     existing: Payment | null,
     data: PaymentWrite,
   ): Promise<void> {
-    await this.upsert(orderId, existing, data);
+    await this.prisma.$transaction([
+      this.upsert(target.id, existing, data),
+      this.prisma.orderEvent.create({
+        data: {
+          orderId: target.id,
+          ...orderEventData({
+            type: OrderEventType.Payment,
+            actor: customerActor(target.userId),
+            detail: {
+              paymentMethod: data.method,
+              paymentStatus: data.status,
+              amountAmd: data.amountAmd,
+            },
+          }),
+        },
+      }),
+    ]);
   }
 
   private upsert(
@@ -221,6 +264,15 @@ export class PaymentsService {
       ? this.prisma.payment.update({ where: { id: existing.id }, data })
       : this.prisma.payment.create({ data: { orderId, ...data } });
   }
+}
+
+/** The little of an order this service needs: which one, whose it is (the
+ *  history entry has to name somebody), and the status the decision to charge
+ *  was taken against. */
+interface PaidOrder {
+  id: string;
+  userId: string;
+  status: string;
 }
 
 interface PaymentWrite {

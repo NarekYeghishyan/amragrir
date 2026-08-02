@@ -35,13 +35,13 @@ describe('RolesGuard', () => {
   });
 
   it('allows a user whose role is listed', () => {
-    const guard = new RolesGuard(reflectorWith({ [ROLES_KEY]: [Role.Customer, Role.Admin] }));
+    const guard = new RolesGuard(reflectorWith({ [ROLES_KEY]: [Role.Customer, Role.Guest] }));
 
     expect(guard.canActivate(contextWith(customer))).toBe(true);
   });
 
   it('rejects a user whose role is not listed', () => {
-    const guard = new RolesGuard(reflectorWith({ [ROLES_KEY]: [Role.Admin] }));
+    const guard = new RolesGuard(reflectorWith({ [ROLES_KEY]: [Role.Guest] }));
 
     expect(() => guard.canActivate(contextWith(customer))).toThrow(ForbiddenException);
   });
@@ -76,7 +76,7 @@ describe('RolesGuard', () => {
   // request.user to read — sockets authorise themselves per subscription
   // instead. Without this the gateway would throw on every message.
   it('steps aside for a WebSocket context', () => {
-    const guard = new RolesGuard(reflectorWith({ [ROLES_KEY]: [Role.Admin] }));
+    const guard = new RolesGuard(reflectorWith({ [ROLES_KEY]: [Role.Guest] }));
 
     expect(guard.canActivate(contextWith(undefined, 'ws'))).toBe(true);
   });

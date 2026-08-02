@@ -15,7 +15,6 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
   [PaymentMethod.ApplePay]: ' Apple Pay',
   [PaymentMethod.GooglePay]: 'G Pay',
   [PaymentMethod.Card]: 'Credit card',
-  [PaymentMethod.Cash]: 'Cash at the counter',
 };
 
 export default function CheckoutScreen() {
@@ -121,11 +120,12 @@ export default function CheckoutScreen() {
           );
         })}
 
-        {method === PaymentMethod.Cash && (
-          <Text style={[styles.meta, { color: colors.ink2 }]}>
-            Nothing is charged now — you pay when you collect. The kitchen still starts on it.
-          </Text>
-        )}
+        {/* Said before the button rather than after the charge: an order is
+            paid for here and cannot be called off once it is, which is not
+            something to discover on the tracking screen. */}
+        <Text style={[styles.meta, { color: colors.ink2 }]}>
+          Paying places the order with the kitchen. It cannot be cancelled afterwards.
+        </Text>
 
         {quote !== null && (
           <View style={[styles.totals, { borderColor: colors.line }]}>
@@ -156,9 +156,7 @@ export default function CheckoutScreen() {
             {busy ? (
               <ActivityIndicator color={colors.ink2} />
             ) : (
-              <Text style={styles.ctaText}>
-                {method === PaymentMethod.Cash ? 'Place order' : 'Pay now'}
-              </Text>
+              <Text style={styles.ctaText}>Pay now</Text>
             )}
           </Pressable>
         )}

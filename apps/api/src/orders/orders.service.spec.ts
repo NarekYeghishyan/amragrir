@@ -7,7 +7,10 @@
 import {
   Language,
   ORDER_MAX_LEAD_DAYS,
+  OrderActorType,
+  OrderEventType,
   OrderStatus,
+  PaymentMethod,
   PaymentStatus,
   SERVICE_FEE_AMD,
   ServiceMode,
@@ -99,6 +102,9 @@ function build(
     order?: unknown;
     reservation?: unknown;
     coupon?: { coupon: { id: string }; discountAmd: number };
+    /** What `PaymentsService.reverse` reports back. Defaults to a refund,
+     *  which is the only outcome that has anything to check afterwards. */
+    reversedTo?: PaymentStatus;
   } = {},
 ) {
   const orderCreate = jest.fn().mockResolvedValue(options.order ?? orderRow());
@@ -106,6 +112,7 @@ function build(
     Promise.resolve(orderRow({ status: data.status })),
   );
   const paymentUpdate = jest.fn().mockResolvedValue({});
+  const orderEventCreate = jest.fn().mockResolvedValue({ id: 'event-1' });
 
   const prisma = {
     restaurantBranch: {
@@ -132,11 +139,19 @@ function build(
       findFirst: jest.fn().mockResolvedValue(options.reservation ?? null),
     },
     $transaction: jest.fn((fn: (tx: unknown) => unknown) =>
-      Promise.resolve(fn({ order: { update: orderUpdate }, payment: { update: paymentUpdate } })),
+      Promise.resolve(
+        fn({
+          order: { update: orderUpdate },
+          payment: { update: paymentUpdate },
+          orderEvent: { create: orderEventCreate },
+        }),
+      ),
     ),
   } as unknown as PrismaService;
 
-  const payments = { reverse: jest.fn().mockResolvedValue(PaymentStatus.Refunded) };
+  const payments = {
+    reverse: jest.fn().mockResolvedValue(options.reversedTo ?? PaymentStatus.Refunded),
+  };
   const events = { publish: jest.fn(), subscribe: jest.fn() };
   const coupons = {
     preview: jest.fn().mockResolvedValue(options.coupon ?? null),
@@ -158,6 +173,7 @@ function build(
     orderCreate,
     orderUpdate,
     paymentUpdate,
+    orderEventCreate,
   };
 }
 
@@ -529,23 +545,40 @@ describe('cancel', () => {
     await expect(service.cancel('user-1', 'order-1')).rejects.toThrow(UnprocessableEntityException);
   });
 
-  it('reverses a captured payment before cancelling', async () => {
+  it('refuses once the order has been paid for', async () => {
+    // BUSINESS_LOGIC.md §4: paying commits the order. This is the rule that
+    // replaced "cancellable until the kitchen starts", and it is what makes a
+    // refund something this service never has to perform.
+    for (const status of [OrderStatus.Paid, OrderStatus.Confirmed]) {
+      const { service, payments } = build({ order: orderRow({ status }) });
+
+      await expect(service.cancel('user-1', 'order-1')).rejects.toThrow(
+        UnprocessableEntityException,
+      );
+      expect(payments.reverse).not.toHaveBeenCalled();
+    }
+  });
+
+  it('releases an attempt that took nothing when an unpaid order is dropped', async () => {
+    // A card that was refused, on an order the customer then walked away from.
+    // The payment row is closed off with it rather than left looking live.
     const payment = {
       id: 'pay-1',
-      status: PaymentStatus.Captured,
+      status: PaymentStatus.Failed,
       amountAmd: 6160,
-      providerRef: 'dev_1',
+      providerRef: null,
       method: 'card',
     };
     const { service, payments, paymentUpdate } = build({
-      order: orderRow({ status: OrderStatus.Paid, payment }),
+      order: orderRow({ status: OrderStatus.Created, payment }),
+      reversedTo: PaymentStatus.Cancelled,
     });
 
     await service.cancel('user-1', 'order-1');
 
     expect(payments.reverse).toHaveBeenCalledWith(payment);
     expect(paymentUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: PaymentStatus.Refunded } }),
+      expect.objectContaining({ data: { status: PaymentStatus.Cancelled } }),
     );
   });
 
@@ -575,6 +608,96 @@ describe('cancel', () => {
 
     expect(payments.reverse).not.toHaveBeenCalled();
     expect(order.status).toBe(OrderStatus.Cancelled);
+  });
+});
+
+describe('history', () => {
+  it('writes the first entry in the same INSERT that creates the order', async () => {
+    // Nested, not a second call: an order that exists with no record of having
+    // been placed is the one gap this table cannot have.
+    const { service, orderCreate } = build();
+    await service.create('user-1', dto(), Language.En);
+
+    const events = orderCreate.mock.calls[0][0].data.events.create;
+    expect(events).toMatchObject({
+      type: OrderEventType.Created,
+      toStatus: OrderStatus.Created,
+      actorType: OrderActorType.Customer,
+      actorUserId: 'user-1',
+    });
+  });
+
+  it('records what was ordered, so the entry says more than "created"', async () => {
+    const { service, orderCreate } = build();
+    await service.create('user-1', dto({ items: [{ menuItemId: BURGER, qty: 3 }] }), Language.En);
+
+    expect(orderCreate.mock.calls[0][0].data.events.create.detail).toMatchObject({
+      serviceMode: ServiceMode.Pickup,
+      itemsCount: 3,
+    });
+  });
+
+  it('records a status change inside the same transaction as the change', async () => {
+    // Written through `tx`, not `prisma`: the optimistic match on the update
+    // aborts this too, so no entry can claim a move that lost the race.
+    const { service, orderEventCreate } = build();
+    await service.cancel('user-1', 'order-1');
+
+    expect(orderEventCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 'order-1',
+        type: OrderEventType.StatusChanged,
+        fromStatus: OrderStatus.Created,
+        toStatus: OrderStatus.Cancelled,
+        actorUserId: 'user-1',
+      }),
+    });
+  });
+
+  it('says what became of the money when a cancellation closes an attempt off', async () => {
+    // "Cancelled" and "cancelled, and the card attempt was released" are
+    // different answers to the question this timeline gets opened for. A
+    // captured payment can no longer be here — the order would have been
+    // `paid`, and a paid order cannot be cancelled at all.
+    const { service, orderEventCreate } = build({
+      order: orderRow({
+        status: OrderStatus.Created,
+        payment: {
+          id: 'pay-1',
+          status: PaymentStatus.Failed,
+          amountAmd: 6160,
+          providerRef: null,
+          method: PaymentMethod.Card,
+        },
+      }),
+      reversedTo: PaymentStatus.Cancelled,
+    });
+
+    await service.cancel('user-1', 'order-1');
+
+    expect(orderEventCreate.mock.calls[0][0].data.detail).toEqual({
+      paymentStatus: PaymentStatus.Cancelled,
+      paymentMethod: PaymentMethod.Card,
+      amountAmd: 6160,
+    });
+  });
+
+  it('names the staff member on a transition the panel made', async () => {
+    const { service, orderEventCreate } = build();
+    const order = orderRow() as Parameters<typeof service.transition>[0];
+
+    await service.transition(order, OrderStatus.Cancelled, {
+      type: OrderActorType.Staff,
+      staffId: 'staff-7',
+      actingStaffId: 'super-1',
+    });
+
+    expect(orderEventCreate.mock.calls[0][0].data).toMatchObject({
+      actorType: OrderActorType.Staff,
+      actorStaffId: 'staff-7',
+      actingStaffId: 'super-1',
+      actorUserId: null,
+    });
   });
 });
 

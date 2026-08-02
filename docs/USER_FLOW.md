@@ -94,8 +94,8 @@ Food ready at (choose ready time)
    ↓
 Checkout (summary + payment method)
    ↓
-Payment (Apple / Google / Card / Cash)
-   ↓
+Payment (Apple / Google / Card — online only)
+   ↓  the charge goes through; the order can no longer be cancelled
 Order confirmation (Tracking)
    ↓
 Live countdown → Ready → Pickup by code at counter
@@ -179,3 +179,156 @@ Profile → Referral / Settings
 Orders → Tracking (active)
 Settings → Auth (Log out)
 ```
+
+---
+
+## 11. Staff onboarding (back office)
+
+Everything above is the **customer** app. Staff are separate accounts with
+their own flow, and there is no sign-up in it — an account exists only because
+somebody who already had one invited it.
+
+```
+Platform admin → Platform tab → New restaurant (+ administrator email)
+   ↓  (invitation email)
+Restaurant admin → /accept-invite?token=… → set password → signed in
+   ↓
+Branches tab → Add a branch          (opens CLOSED — no menu yet)
+   ↓
+Menu tab → Add dishes                (hy name + price required)
+   ↓
+Branches tab → Open                  (now it accepts orders)
+   ↓
+People tab → Invite a manager / shift staff, scoped to that branch
+```
+
+The back office has three links **between** tabs, and they all run the other
+way:
+
+```
+People tab → a person's role ("Jazzve · Arshakunyats")
+   ↓  (click)
+Restaurants tab → Jazzve, scrolled to Arshakunyats, its team already open
+   ↓
+that person's row in the team, marked and brought into view
+```
+
+```
+Restaurants tab → Jazzve → Arshakunyats → Orders
+   ↓  (click)
+Orders tab → the queue, already narrowed to Jazzve · Arshakunyats
+```
+
+```
+Orders tab → a card → a line of the order ("2× Խորոված")
+   ↓  (click)
+Menu tab → that branch's menu, scrolled to that dish, its row marked
+```
+
+A person's **Activity** adds three more, one per kind of thing an entry names:
+
+```
+People tab → a person → Activity → an entry's dish ("Խորոված")
+   ↓  (click)
+Menu tab → that branch's menu, scrolled to that dish
+```
+
+```
+People tab → a person → Activity → an entry's order code ("ORD-7QK3")
+   ↓  (click)
+Orders tab → the board, narrowed to that one order, on the stage holding it
+```
+
+```
+People tab → a person → Activity → where it happened ("Jazzve · Arshakunyats")
+   ↓  (click)
+Restaurants tab → Jazzve, that branch open
+```
+
+They are links in the ordinary sense: every back-office screen has its own
+address, so the first jump is `/restaurants/:restaurantId/branches/:branchId
+?role=:assignmentId`, the second is `/orders?restaurant=:id&branch=:id`, the
+third is `/menu?branch=:branchId&dish=:menuItemId`, and an order in somebody's
+activity adds `&order=:code` to the second.
+Any of them can be copied out of the address bar, sent to somebody else,
+bookmarked, or opened in a second tab, and lands whoever follows it in the same
+place.
+The full table of addresses is in `apps/admin/README.md`; the rules that matter
+to the flow are:
+
+- **The back button works.** Sidebar, restaurant, branch, role and the queue's
+  scope are all in the URL, so a browser's back and forward move through the
+  panel the way they move through any site, and a reload stays where somebody
+  was rather than returning them to the order queue. The board's own pickers
+  replace the address rather than adding to it, so back from a queue leaves for
+  wherever somebody came from instead of walking them through every filter they
+  touched on the way.
+- **A link somebody cannot open lands somewhere real.** An address for a screen
+  the account lacks the permission for — a platform dashboard sent to a branch
+  manager, or a URL left over from a role since revoked — falls back to the
+  first screen the account does have, rather than showing one where every
+  request 403s.
+- **A link opened signed-out survives the sign-in.** It goes to
+  `/sign-in?next=…` and continues to the address afterwards, so a shared link
+  works for somebody whose session had expired.
+
+Every role names the restaurant it reaches, including a branch role's — a
+branch name alone is ambiguous, since three restaurants have a "Northern Ave".
+A role held over the whole restaurant opens it with no branch disclosed, and a
+platform role is over no restaurant, so it is not a link at all.
+
+The jump to a branch's **orders** carries both halves of the board's scope, not
+just the branch. Two restaurants have a "Northern Ave", and the restaurant
+picker sitting on "All restaurants" beside a branch picker naming one of them
+reads as a board that has lost track of where it is pointed. It is offered only
+to an account holding `orders:read` — every role that can see a branch holds it
+today, and a button leading to a tab the sidebar does not show would be a dead
+end the moment that stops being true.
+
+The jump to a **dish** goes by the dish's id, not by the name printed on the
+ticket. A line of an order keeps the name the dish had when it was ordered —
+that is what the diner bought — so following the name would be a search for a
+word the menu may no longer use. The row it lands on is marked and scrolled to
+for the same reason the role above is: a menu is fifty rows of similar text,
+and "it is in there somewhere" is not an answer to a link that knew which dish
+it meant. Offered only to an account holding `menu:read`; for a shift without
+it the line is plain text, exactly as a name in an order's history is without
+`staff:read`.
+
+The jump to an **order** carries the code rather than the id, because the board
+finds an order by searching for its code — and because a code is what somebody
+reads off the entry and then recognises on the card they land on. It is the full
+code, not the four-digit pickup code a counter says out loud: that one is only
+unique among a branch's *active* orders, so a link built from it would
+eventually mean two different orders. The board then moves itself to the stage
+holding that order, since a link was sent somewhere specific and landing on an
+empty **Active** tab is landing next to the answer. Typing a code by hand is
+different and still behaves as it did — you stay where you are, and the counts
+on the tabs say which stage to look in.
+
+Each of the three is offered only to an account that can open the screen it
+leads to (`menu:read`, `orders:read`, `branch:read`); without it the entry reads
+as the text it was. All three come with `staff:activity` today — the split
+matters because that permission was written to be splittable.
+
+The jump ends on the **role**, not on the branch. A team is a dozen rows, so
+opening the right branch and stopping there leaves the same reading-down-a-list
+the link was meant to replace, one level lower. What gets marked is the
+assignment that was clicked rather than the person holding it: somebody who
+manages two branches appears in two teams, and only one of them is the answer.
+A role over the whole restaurant is marked among the admins in its About card
+instead, which is the section that role is read in.
+
+Two ordering constraints are real rather than conventional:
+
+- **A restaurant with no branch cannot have a menu.** Dishes hang off a branch,
+  so the branch comes first. This is why `POST /restaurant/branches` exists —
+  before it, a restaurant created in the panel was a dead end.
+- **A new branch opens closed.** It has no menu yet, and one that started
+  accepting orders would be a kitchen selling nothing. Opening it is a
+  deliberate second step on the Branches tab.
+
+Password reset follows the same shape: `Forgot password` → email →
+`/reset-password?token=…` → new password → **every other session is signed
+out**, since whoever reset it may have done so because somebody else knows the
+old one.

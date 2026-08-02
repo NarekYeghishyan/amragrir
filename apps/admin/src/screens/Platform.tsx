@@ -1,77 +1,141 @@
-import { useState, type FormEvent } from 'react';
-import { ApiError, api } from '../api';
+import { useState, type FormEvent, type ReactNode } from 'react';
+import { api, errorText } from '../api';
+import { useT } from '../i18n';
+import {
+  Button,
+  Card,
+  Field,
+  PageHeader,
+  Select,
+  TextInput,
+  useToast,
+} from '../ui';
 
 /** Creating restaurants and issuing promos — the two things only an admin
  *  does, and both of them write something a customer will see. */
 export function Platform() {
+  const t = useT();
   return (
     <section>
-      <NewRestaurant />
-      <NewPromo />
+      <PageHeader title={t('platformTitle')} description={t('platformDesc')} />
+      <div className="stack">
+        <NewRestaurant />
+        <NewPromo />
+      </div>
     </section>
+  );
+}
+
+/** A card that holds one form, with its own heading and consequence note. */
+function FormCard({
+  title,
+  note,
+  children,
+  onSubmit,
+}: {
+  title: string;
+  note: string;
+  children: ReactNode;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  return (
+    <Card>
+      <form onSubmit={onSubmit}>
+        <h3 className="form-card__title">{title}</h3>
+        <p className="form-card__note">{note}</p>
+        {children}
+      </form>
+    </Card>
   );
 }
 
 function NewRestaurant() {
   const [slug, setSlug] = useState('');
   const [name, setName] = useState('');
-  const [ownerId, setOwnerId] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
   const [cuisine, setCuisine] = useState('');
-  const [result, setResult] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const t = useT();
+  const toast = useToast();
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     setBusy(true);
-    setError(null);
-    setResult(null);
     try {
       const created = await api.createRestaurant({
         slug,
         name,
-        ownerId,
+        adminEmail: adminEmail || undefined,
         cuisine: cuisine || undefined,
       });
-      setResult(`Created ${created.slug}`);
+      toast.success(
+        adminEmail
+          ? t('newRestaurantWithAdmin', { slug: created.slug, email: adminEmail })
+          : t('newRestaurantNoAdmin', { slug: created.slug }),
+      );
       setSlug('');
       setName('');
-      setOwnerId('');
+      setAdminEmail('');
       setCuisine('');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not create the restaurant');
+      toast.error(errorText(t, err, 'errorCreateRestaurant'));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <form className="card" onSubmit={submit}>
-      <h2 style={{ fontSize: 17, marginTop: 0 }}>New restaurant</h2>
-      <p className="faint" style={{ marginTop: 0 }}>
-        The slug becomes a public URL on the website, so it cannot be changed casually.
-      </p>
-      <div className="row">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" aria-label="Restaurant name" />
-        <input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="url-slug" aria-label="Slug" />
-        <input value={cuisine} onChange={(e) => setCuisine(e.target.value)} placeholder="Cuisine" aria-label="Cuisine" />
+    <FormCard title={t('newRestaurantTitle')} note={t('newRestaurantNote')} onSubmit={submit}>
+      <div className="grid-2">
+        <Field label={t('newRestaurantName')} required>
+          {(id) => (
+            <TextInput
+              id={id}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder={t('newRestaurantNamePlaceholder')}
+            />
+          )}
+        </Field>
+        <Field label={t('newRestaurantSlug')} required hint={t('newRestaurantSlugHint')}>
+          {(id) => (
+            <TextInput
+              id={id}
+              value={slug}
+              onChange={(event) => setSlug(event.target.value)}
+              placeholder={t('newRestaurantSlugPlaceholder')}
+            />
+          )}
+        </Field>
+        <Field label={t('newRestaurantCuisine')}>
+          {(id) => (
+            <TextInput
+              id={id}
+              value={cuisine}
+              onChange={(event) => setCuisine(event.target.value)}
+              placeholder={t('newRestaurantCuisinePlaceholder')}
+            />
+          )}
+        </Field>
+        <Field label={t('newRestaurantAdminEmail')} hint={t('newRestaurantAdminHint')}>
+          {(id) => (
+            <TextInput
+              id={id}
+              type="email"
+              value={adminEmail}
+              onChange={(event) => setAdminEmail(event.target.value)}
+              placeholder={t('newRestaurantAdminPlaceholder')}
+            />
+          )}
+        </Field>
       </div>
-      <div className="row" style={{ marginTop: 12 }}>
-        <input
-          value={ownerId}
-          onChange={(e) => setOwnerId(e.target.value)}
-          placeholder="Owner user id"
-          aria-label="Owner user id"
-          style={{ minWidth: 320 }}
-        />
-        <button className="primary" disabled={busy || !name || !slug || !ownerId}>
-          Create
-        </button>
+
+      <div className="row row--end form-card__foot">
+        <Button type="submit" variant="primary" loading={busy} disabled={!name || !slug}>
+          {t('newRestaurantSubmit')}
+        </Button>
       </div>
-      <p className="faint">The owner must already have the owner role — promote them on the Users tab first.</p>
-      {result !== null && <p className="live">{result}</p>}
-      {error !== null && <p className="error">{error}</p>}
-    </form>
+    </FormCard>
   );
 }
 
@@ -80,15 +144,13 @@ function NewPromo() {
   const [kind, setKind] = useState<'pct' | 'amd'>('pct');
   const [value, setValue] = useState('');
   const [validUntil, setValidUntil] = useState('');
-  const [result, setResult] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const t = useT();
+  const toast = useToast();
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     setBusy(true);
-    setError(null);
-    setResult(null);
     try {
       const issued = await api.issuePromo({
         code: code.toUpperCase(),
@@ -96,54 +158,75 @@ function NewPromo() {
         ...(kind === 'pct' ? { discountPct: Number(value) } : { discountAmd: Number(value) }),
         validUntil: validUntil ? new Date(validUntil).toISOString() : undefined,
       });
-      setResult(`Issued ${issued.code} to ${issued.issued} account(s)`);
+      toast.success(t.plural('promoIssued', issued.issued, { code: issued.code }));
       setCode('');
       setValue('');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not issue the promo');
+      toast.error(errorText(t, err, 'errorIssuePromo'));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <form className="card" onSubmit={submit}>
-      <h2 style={{ fontSize: 17, marginTop: 0 }}>Issue a promo</h2>
-      <p className="faint" style={{ marginTop: 0 }}>
-        Goes to every verified customer. Re-issuing the same code tops up accounts that joined
-        since, and skips those who already have it.
-      </p>
-      <div className="row">
-        <input
-          value={code}
-          onChange={(e) => setCode(e.target.value.toUpperCase())}
-          placeholder="SUMMER"
-          aria-label="Promo code"
-        />
-        <select value={kind} onChange={(e) => setKind(e.target.value as 'pct' | 'amd')} aria-label="Discount kind">
-          <option value="pct">percent off</option>
-          <option value="amd">dram off</option>
-        </select>
-        <input
-          inputMode="numeric"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={kind === 'pct' ? '10' : '1000'}
-          aria-label="Discount value"
-          style={{ width: 120 }}
-        />
-        <input
-          type="date"
-          value={validUntil}
-          onChange={(e) => setValidUntil(e.target.value)}
-          aria-label="Valid until"
-        />
-        <button className="primary" disabled={busy || code.length < 3 || value === ''}>
-          Issue
-        </button>
+    <FormCard title={t('newPromoTitle')} note={t('newPromoNote')} onSubmit={submit}>
+      <div className="grid-2">
+        <Field label={t('newPromoCode')} required>
+          {(id) => (
+            <TextInput
+              id={id}
+              value={code}
+              onChange={(event) => setCode(event.target.value.toUpperCase())}
+              placeholder={t('newPromoCodePlaceholder')}
+            />
+          )}
+        </Field>
+        <Field label={t('newPromoDiscount')}>
+          {(id) => (
+            <Select
+              id={id}
+              value={kind}
+              onValueChange={setKind}
+              options={[
+                { value: 'pct' as const, label: t('newPromoPercent') },
+                { value: 'amd' as const, label: t('newPromoDram') },
+              ]}
+            />
+          )}
+        </Field>
+        <Field label={kind === 'pct' ? t('newPromoPercentLabel') : t('newPromoDramLabel')} required>
+          {(id) => (
+            <TextInput
+              id={id}
+              inputMode="numeric"
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              placeholder={kind === 'pct' ? '10' : '1000'}
+            />
+          )}
+        </Field>
+        <Field label={t('newPromoValidUntil')} hint={t('newPromoValidUntilHint')}>
+          {(id) => (
+            <TextInput
+              id={id}
+              type="date"
+              value={validUntil}
+              onChange={(event) => setValidUntil(event.target.value)}
+            />
+          )}
+        </Field>
       </div>
-      {result !== null && <p className="live">{result}</p>}
-      {error !== null && <p className="error">{error}</p>}
-    </form>
+
+      <div className="row row--end form-card__foot">
+        <Button
+          type="submit"
+          variant="primary"
+          loading={busy}
+          disabled={code.length < 3 || value === ''}
+        >
+          {t('newPromoSubmit')}
+        </Button>
+      </div>
+    </FormCard>
   );
 }

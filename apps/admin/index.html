@@ -1,11 +1,41 @@
 <!doctype html>
-<html lang="en">
+<html lang="hy">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Internal tool: keep it out of search results even if it is ever exposed. -->
     <meta name="robots" content="noindex, nofollow" />
     <title>Amragrir · Back office</title>
+    <script>
+      // Applies the stored theme before the first paint, so a panel set to dark
+      // does not flash light on every load. Mirrors resolveTheme() in
+      // src/theme.ts — the key is the contract between them.
+      try {
+        var stored = localStorage.getItem('amragrir.theme');
+        document.documentElement.dataset.theme =
+          stored === 'light' || stored === 'dark'
+            ? stored
+            : matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+      } catch (e) {
+        /* Storage blocked: the media query in tokens.css still applies. */
+      }
+
+      // Same idea for the language: `lang` decides hyphenation and which font
+      // the browser reaches for, and correcting it after the first paint is a
+      // visible reflow. Mirrors resolveLanguage() in src/language.ts; the
+      // browser-language half is left to it, since the `hy` attribute above is
+      // already the fallback that half ends at.
+      try {
+        var chosen = localStorage.getItem('amragrir.language');
+        if (chosen === 'hy' || chosen === 'ru' || chosen === 'en') {
+          document.documentElement.lang = chosen;
+        }
+      } catch (e) {
+        /* Storage blocked: the provider sets it on mount instead. */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

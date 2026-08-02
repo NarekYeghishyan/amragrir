@@ -95,7 +95,7 @@ export class SetReservationStatusDto {
   status!: ReservationStatus;
 }
 
-export class ListOwnerReservationsDto {
+export class ListStaffReservationsDto {
   @IsUUID()
   @IsOptional()
   branchId?: string;

@@ -1,13 +1,14 @@
 import { Module } from '@nestjs/common';
-import { AuthModule } from '../auth/auth.module';
+import { StaffModule } from '../staff/staff.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { MetricsService } from './metrics.service';
 
-/** AuthModule is imported for TokenService — a role change revokes the
- *  account's sessions. */
+/** StaffModule is imported for InvitesService — creating a restaurant invites
+ *  the person who will administer it, since there is no longer a customer
+ *  account to name as its owner. */
 @Module({
-  imports: [AuthModule],
+  imports: [StaffModule],
   controllers: [AdminController],
   providers: [AdminService, MetricsService],
 })

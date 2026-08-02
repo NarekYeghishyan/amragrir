@@ -4,6 +4,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
+import { AuditModule } from './audit/audit.module';
 import { RedisModule } from './redis/redis.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
@@ -16,9 +17,12 @@ import { ReferralsModule } from './referrals/referrals.module';
 import { OrderEventsModule } from './orders/order-events.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ReservationsModule } from './reservations/reservations.module';
-import { OwnerModule } from './owner/owner.module';
+import { RestaurantModule } from './restaurant/restaurant.module';
+import { StaffModule } from './staff/staff.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
+import { StaffAuthGuard } from './staff/staff-auth.guard';
 import { IdempotencyInterceptor } from './common/idempotency/idempotency.interceptor';
 
 @Module({
@@ -33,6 +37,7 @@ import { IdempotencyInterceptor } from './common/idempotency/idempotency.interce
     // storage adapter before running more than one.
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 120 }]),
     PrismaModule,
+    AuditModule,
     RedisModule,
     AuthModule,
     UsersModule,
@@ -44,7 +49,9 @@ import { IdempotencyInterceptor } from './common/idempotency/idempotency.interce
     ReferralsModule,
     AdminModule,
     ReservationsModule,
-    OwnerModule,
+    RestaurantModule,
+    StaffModule,
+    UploadsModule,
     HealthModule,
   ],
   providers: [
@@ -54,6 +61,10 @@ import { IdempotencyInterceptor } from './common/idempotency/idempotency.interce
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    // The back-office half. Inert on customer routes, and JwtAuthGuard is
+    // inert on staff ones — a route belongs to exactly one of the two, which
+    // is what keeps a customer token from ever reaching a staff endpoint.
+    { provide: APP_GUARD, useClass: StaffAuthGuard },
     // Inert unless a handler declares @Idempotent(); registered globally so
     // adding the decorator is all a new money endpoint needs. Runs after the
     // guards, so it can scope the stored response to the authenticated user.

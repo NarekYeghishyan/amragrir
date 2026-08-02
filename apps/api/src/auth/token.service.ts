@@ -25,12 +25,18 @@ export interface JwtPayload {
   isGuest: boolean;
   phoneVerified: boolean;
   typ?: TokenType;
+  /** Never set on a customer token. Present only so the check below can refuse
+   *  a staff token, which is signed with the same secret and would otherwise
+   *  verify here perfectly — arriving with no `role` at all. */
+  kind?: string;
 }
 
 interface RefreshPayload {
   sub: string;
   jti: string;
   typ?: TokenType;
+  /** See `JwtPayload.kind` — never set on a customer token. */
+  kind?: string;
 }
 
 export interface TokenPair {
@@ -87,6 +93,12 @@ export class TokenService {
     if (payload.typ !== TokenType.Access) {
       throw new UnauthorizedException('Not an access token');
     }
+    // The mirror of the check in StaffTokenService: a staff token carries no
+    // `role`, so without this it would reach a guard as `role: undefined` and
+    // pass anything that does not name an explicit role.
+    if (payload.kind === 'staff') {
+      throw new UnauthorizedException('Not a customer token');
+    }
 
     return payload;
   }
@@ -104,7 +116,10 @@ export class TokenService {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    if (payload.typ !== TokenType.Refresh || !payload.jti) {
+    // A staff refresh token also carries `typ: refresh` and a `jti`, so it
+    // would pass the shape check and then fail as a missing customer — a 500
+    // where a 401 is the honest answer.
+    if (payload.typ !== TokenType.Refresh || !payload.jti || payload.kind === 'staff') {
       throw new UnauthorizedException('Not a refresh token');
     }
 

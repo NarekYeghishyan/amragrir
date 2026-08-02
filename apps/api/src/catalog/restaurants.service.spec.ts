@@ -269,7 +269,10 @@ describe('RestaurantsService.list', () => {
       await service.list(query({ category: 'sushi', dietary: ['vegan'] }), Language.Hy);
 
       expect(findMany.mock.calls[0]![0].where.menuItems).toEqual({
-        some: { category: { key: 'sushi' }, dietaryTags: { hasSome: ['vegan'] } },
+        // `deletedAt: null` alongside them: a dish taken off the menu must not
+        // be why a branch turns up under "vegan", or the search promises
+        // something the menu no longer offers.
+        some: { category: { key: 'sushi' }, dietaryTags: { hasSome: ['vegan'] }, deletedAt: null },
       });
     });
 

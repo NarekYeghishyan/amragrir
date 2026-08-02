@@ -84,8 +84,11 @@ Field legend: **Purpose** · **User** · **Elements** · **Actions** · **Transi
 
 **Purpose:** confirm details and pay.
 **User:** confirming the order.
-**Elements:** back + title; item summary (qty, name, amount); Subtotal + Service; "Ready at" block (time ⚡), method (Pickup/Table), for dine-in — Table deposit + credit note; "Payment" section (Apple Pay, Google Pay, Credit Card, Cash — with radio dot); sticky "Pay / Place order · total" CTA.
-**Actions:** pick payment method; back; place order/pay.
+**Elements:** back + title; item summary (qty, name, amount); Subtotal + Service; "Ready at" block (time ⚡), method (Pickup/Table), for dine-in — Table deposit + credit note; "Payment" section (Apple Pay, Google Pay, Credit Card — with radio dot); a line saying that paying places the order and cannot be undone; sticky "Pay · total" CTA.
+**Actions:** pick payment method; back; pay.
+**Note:** the design's fourth method, *Cash at the counter*, and its "Place
+order" variant of the CTA are gone — every order is paid for online before the
+kitchen receives it (BUSINESS_LOGIC.md §5).
 **Transitions:** back → Pre-order; Place order → Tracking (`placed:true`, `secondsLeft:480`).
 **API:** `POST /orders` (create), `POST /payments` (process), `GET /payment-methods`. Response contains `order_id`, `pickup_code`, `ready_at`, status.
 

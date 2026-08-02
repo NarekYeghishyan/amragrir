@@ -1,4 +1,6 @@
 import {
+  OrderActorType,
+  OrderEventType,
   OrderStatus,
   ReservationStatus,
   Role,
@@ -45,5 +47,10 @@ describe('@amragrir/shared wiring', () => {
       'completed',
       'cancelled',
     ]);
+
+    // `order_events.type` and `order_events.actor_type` are Postgres enums too,
+    // so the same drift would make every history write fail at the column.
+    expect(Object.values(OrderEventType)).toEqual(['created', 'status_changed', 'payment']);
+    expect(Object.values(OrderActorType)).toEqual(['customer', 'staff', 'system']);
   });
 });

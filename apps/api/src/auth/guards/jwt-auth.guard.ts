@@ -1,9 +1,11 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
+import type { Permission } from '@amragrir/shared';
 import { IS_PUBLIC_KEY } from '../decorators';
 import { bearerFrom } from '../bearer';
 import { JwtPayload, TokenService } from '../token.service';
+import { PERMISSION_KEY, STAFF_ROUTE_KEY } from '../../staff/decorators';
 
 /**
  * Registered globally, so every route is authenticated unless explicitly
@@ -26,11 +28,20 @@ export class JwtAuthGuard implements CanActivate {
       return true;
     }
 
-    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const targets = [context.getHandler(), context.getClass()];
+
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, targets);
     if (isPublic) {
+      return true;
+    }
+
+    // Back-office routes carry a staff token, which deliberately fails to
+    // verify here. StaffAuthGuard authenticates them instead; this guard
+    // standing down is what lets the two identities coexist on one API.
+    const isStaffRoute =
+      this.reflector.getAllAndOverride<Permission>(PERMISSION_KEY, targets) !== undefined ||
+      this.reflector.getAllAndOverride<boolean>(STAFF_ROUTE_KEY, targets) === true;
+    if (isStaffRoute) {
       return true;
     }
 
