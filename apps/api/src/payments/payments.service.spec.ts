@@ -16,6 +16,11 @@ import type { ReferralsService } from '../referrals/referrals.service';
 
 const ORDER_ID = '44444444-4444-4444-8444-444444444444';
 
+/** An hour from now, which is far enough ahead to be a pre-order under any
+ *  prep estimate. Relative rather than fixed: what matters is only that the
+ *  column is set, and a hard-coded date would expire. */
+const SCHEDULED_FOR = () => new Date(Date.now() + 60 * 60_000);
+
 function orderRow(over: Record<string, unknown> = {}) {
   return {
     id: ORDER_ID,
@@ -24,6 +29,11 @@ function orderRow(over: Record<string, unknown> = {}) {
     status: OrderStatus.Created,
     totalAmd: 6160,
     payment: null,
+    // Null is what an ordinary order carries — placed for as soon as possible,
+    // nothing to warn anybody about. Spelled out rather than left off, because
+    // absent and null are the same to a cast fixture and very much not the same
+    // to the code under test.
+    reminderAt: null,
     ...over,
   };
 }
@@ -44,7 +54,14 @@ function build(options: { order?: unknown; charge?: jest.Mock } = {}) {
   const prisma = {
     order: {
       findFirst: jest.fn().mockResolvedValue(options.order === undefined ? orderRow() : options.order),
-      update: jest.fn().mockResolvedValue(orderRow({ status: OrderStatus.Paid })),
+      // Echoes back whatever status the write asked for, so a settlement that
+      // writes twice — paid, then the automatic confirmation of a pre-order —
+      // does not get the first row's answer for the second move.
+      update: jest
+        .fn()
+        .mockImplementation(({ data }: { data: { status?: OrderStatus } }) =>
+          Promise.resolve(orderRow({ status: data.status ?? OrderStatus.Paid })),
+        ),
     },
     payment: { create: paymentCreate, update: paymentUpdate },
     orderEvent: { create: orderEventCreate },
@@ -183,6 +200,16 @@ describe('pay', () => {
     expect((prisma.$transaction as jest.Mock).mock.calls[0][0]).toHaveLength(3);
   });
 
+  it('leaves an ordinary order waiting for the restaurant to accept it', async () => {
+    // The counterpart to the pre-order cases below, and the reason `reminderAt`
+    // is spelled out in the fixture: `paid` is a real stage of the board, and
+    // confirming everything on payment would empty the tab a kitchen opens on.
+    const { service, prisma } = build();
+    const result = await service.pay('user-1', dto());
+
+    expect(result.orderStatus).toBe(OrderStatus.Paid);
+    expect(prisma.order.update).toHaveBeenCalledTimes(1);
+  });
   it('lets a failed payment be retried on the same row', async () => {
     const existing = { id: 'pay-1', status: PaymentStatus.Failed, amountAmd: 6160 };
     const { service, paymentUpdate, paymentCreate } = build({
@@ -247,6 +274,82 @@ describe('pay', () => {
   it('404s on someone else\'s order', async () => {
     const { service } = build({ order: null });
     await expect(service.pay('user-1', dto())).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('paying for a pre-order', () => {
+  const preOrder = (over: Record<string, unknown> = {}) =>
+    build({ order: orderRow({ reminderAt: SCHEDULED_FOR(), ...over }) });
+
+  it('accepts it there and then', async () => {
+    // Nobody is going to press Confirm on Monday for a Saturday order — and
+    // until somebody did, the diner's screen would say the restaurant had not
+    // looked at it. The branch hears about it from the reminder instead.
+    const { service } = preOrder();
+    const result = await service.pay('user-1', dto());
+
+    expect(result.orderStatus).toBe(OrderStatus.Confirmed);
+  });
+
+  it('confirms in the same transaction as the payment', async () => {
+    const { service, prisma } = preOrder();
+    await service.pay('user-1', dto());
+
+    // Five writes: the payment, the move to paid and its entry, then the
+    // confirmation and its entry. A paid pre-order that failed to confirm would
+    // sit on no board at all.
+    expect((prisma.$transaction as jest.Mock).mock.calls[0][0]).toHaveLength(5);
+  });
+
+  it('matches on paid, so the confirmation cannot overwrite something else', async () => {
+    const { service, prisma } = preOrder();
+    await service.pay('user-1', dto());
+
+    expect(prisma.order.update).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: { id: ORDER_ID, status: OrderStatus.Paid },
+        data: { status: OrderStatus.Confirmed },
+      }),
+    );
+  });
+
+  it('records the confirmation as the system, not as the customer', async () => {
+    // A diner cannot accept an order on a restaurant's behalf, and no member of
+    // staff was here. The timeline says a rule did it, which is what happened.
+    const { service, orderEventCreate } = preOrder();
+    await service.pay('user-1', dto());
+
+    expect(orderEventCreate).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({
+        type: OrderEventType.StatusChanged,
+        fromStatus: OrderStatus.Paid,
+        toStatus: OrderStatus.Confirmed,
+        actorType: OrderActorType.System,
+        actorUserId: null,
+        actorStaffId: null,
+      }),
+    });
+  });
+
+  it('announces both moves, so no watcher sees a jump the machine cannot make', async () => {
+    const { service, events } = preOrder();
+    await service.pay('user-1', dto());
+
+    expect(events.publish).toHaveBeenCalledTimes(2);
+    expect(
+      events.publish.mock.calls.map(([event]) => (event as { status: string }).status),
+    ).toEqual([OrderStatus.Paid, OrderStatus.Confirmed]);
+  });
+
+  it('still confirms one whose hour has already come round', async () => {
+    // Whether this was a pre-order is a fact about how it was placed. Deciding
+    // it against the clock would mean a customer who took an hour to reach the
+    // payment screen got a different rule than one who paid at once.
+    const { service } = preOrder({ reminderAt: new Date(Date.now() - 60_000) });
+    const result = await service.pay('user-1', dto());
+
+    expect(result.orderStatus).toBe(OrderStatus.Confirmed);
   });
 });
 

@@ -98,7 +98,7 @@ Additionally, per task topic:
 ## Keeping documentation in sync
 
 This is the **single source of truth** for "which doc do I update" — both
-`.cursor/rules/project-rules.md` and the root `CLAUDE.md` point here instead
+`.cursor/rules/project-rules.md` and the root agent-instructions file point here instead
 of repeating their own copy, so the rule can't drift out of sync with itself.
 
 Every code or product change must update the matching doc(s) **and** get a

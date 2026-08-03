@@ -46,8 +46,13 @@ function build(rows: ReturnType<typeof branchRow>[], tables: unknown[] = []) {
   const findMany = jest.fn().mockResolvedValue(rows);
   const count = jest.fn().mockResolvedValue(rows.length);
   const tableFindMany = jest.fn().mockResolvedValue(tables);
+  // The grouped list counts restaurants, not branches.
+  const restaurantCount = jest
+    .fn()
+    .mockResolvedValue(new Set(rows.map((row) => row.restaurantId)).size);
   const prisma = {
     restaurantBranch: { findMany, count, findFirst: jest.fn().mockResolvedValue(rows[0] ?? null) },
+    restaurant: { count: restaurantCount },
     menuItem: { findMany: jest.fn().mockResolvedValue([]) },
     table: { findMany: tableFindMany },
   } as unknown as PrismaService;
@@ -62,11 +67,15 @@ function build(rows: ReturnType<typeof branchRow>[], tables: unknown[] = []) {
     service: new RestaurantsService(prisma, search),
     findMany,
     count,
+    restaurantCount,
     tableFindMany,
     prisma,
     search,
   };
 }
+
+/** Oldest-first is the tie-break every ordering ends in. */
+const TIE_BREAK = [{ createdAt: 'asc' }, { id: 'asc' }];
 
 function query(over: Partial<ListRestaurantsDto> = {}): ListRestaurantsDto {
   return Object.assign(new ListRestaurantsDto(), { page: 1, limit: 20, sort: 'recommended' }, over);
@@ -203,7 +212,7 @@ describe('RestaurantsService.list', () => {
       Language.Hy,
     );
 
-    expect(findMany.mock.calls[0]![0].orderBy).toEqual([{ avgPrepMin: 'asc' }]);
+    expect(findMany.mock.calls[0]![0].orderBy).toEqual([{ avgPrepMin: 'asc' }, ...TIE_BREAK]);
   });
 
   // Regression: the radius was compared against the rounded display distance,
@@ -287,8 +296,8 @@ describe('RestaurantsService.list', () => {
 
   describe('sorting', () => {
     it.each([
-      [RestaurantSort.Fastest, [{ avgPrepMin: 'asc' }]],
-      [RestaurantSort.TopRated, [{ restaurant: { ratingAvg: 'desc' } }]],
+      [RestaurantSort.Fastest, [{ avgPrepMin: 'asc' }, ...TIE_BREAK]],
+      [RestaurantSort.TopRated, [{ restaurant: { ratingAvg: 'desc' } }, ...TIE_BREAK]],
     ])('orders by %s in the database', async (sort, expected) => {
       const { service, findMany } = build([branchRow()]);
 
@@ -307,8 +316,129 @@ describe('RestaurantsService.list', () => {
       expect(findMany.mock.calls[0]![0].orderBy).toEqual([
         { restaurant: { ratingAvg: 'desc' } },
         { restaurant: { reviewsCount: 'desc' } },
+        ...TIE_BREAK,
       ]);
     });
+
+    // Regression: a chain's branches share one rating, so the ORDER BY was a
+    // tie for every row of it. Postgres may return tied rows in any order,
+    // which makes skip/take paging drop and repeat rows between pages.
+    it.each([RestaurantSort.Recommended, RestaurantSort.TopRated, RestaurantSort.Fastest])(
+      'breaks ties deterministically under %s',
+      async (sort) => {
+        const { service, findMany } = build([branchRow()]);
+
+        await service.list(query({ sort }), Language.Hy);
+
+        expect(findMany.mock.calls[0]![0].orderBy.slice(-2)).toEqual(TIE_BREAK);
+      },
+    );
+  });
+});
+
+// The list is a branch list, and the web renders one page per *restaurant* —
+// so a five-branch chain drew five identical cards that all linked to the same
+// page, and the heading counted 78 "restaurants" where there were 23.
+describe('RestaurantsService.list grouped by restaurant', () => {
+  const chain = (id: string, restaurantId: string, over: Record<string, unknown> = {}) =>
+    branchRow({
+      id,
+      restaurantId,
+      restaurant: { ...branchRow().restaurant, id: restaurantId, slug: restaurantId },
+      ...over,
+    });
+
+  it('returns one row per restaurant', async () => {
+    const { service } = build([
+      chain('a1', 'rest-a'),
+      chain('a2', 'rest-a'),
+      chain('a3', 'rest-a'),
+      chain('b1', 'rest-b'),
+    ]);
+
+    const { items } = await service.list(query({ groupByRestaurant: true }), Language.Hy);
+
+    expect(items.map((i) => i.id)).toEqual(['a1', 'b1']);
+  });
+
+  // The kept branch has to be the one `/restaurants/{slug}` resolves to, or a
+  // card reading "open · 12 min" opens a page that says something else.
+  it('keeps the branch the restaurant page itself resolves to', async () => {
+    const { service, findMany } = build([chain('a1', 'rest-a'), chain('a2', 'rest-a')]);
+
+    const { items } = await service.list(query({ groupByRestaurant: true }), Language.Hy);
+
+    expect(findMany.mock.calls[0]![0].orderBy.slice(-2)).toEqual(TIE_BREAK);
+    expect(items[0]!.id).toBe('a1');
+  });
+
+  it('counts restaurants rather than branches', async () => {
+    const { service, restaurantCount } = build([
+      chain('a1', 'rest-a'),
+      chain('a2', 'rest-a'),
+      chain('b1', 'rest-b'),
+    ]);
+
+    const { total } = await service.list(query({ groupByRestaurant: true }), Language.Hy);
+
+    expect(total).toBe(2);
+    expect(restaurantCount).toHaveBeenCalledWith({ where: { branches: { some: {} } } });
+  });
+
+  // Collapsing before the filter ran would let a closed branch stand in for a
+  // restaurant that does have an open one — and vice versa.
+  it('collapses after the filters, so the kept branch matches the query', async () => {
+    const { service, findMany } = build([chain('a2', 'rest-a', { isOpen: true })]);
+
+    const { items } = await service.list(
+      query({ groupByRestaurant: true, openNow: true }),
+      Language.Hy,
+    );
+
+    expect(findMany.mock.calls[0]![0].where.isOpen).toBe(true);
+    expect(items[0]!.isOpen).toBe(true);
+  });
+
+  // Paging happens after collapsing, or page 2 would start 24 branches in and
+  // skip past restaurants page 1 never showed.
+  it('pages the collapsed set rather than the branch rows', async () => {
+    const { service } = build([
+      chain('a1', 'rest-a'),
+      chain('a2', 'rest-a'),
+      chain('b1', 'rest-b'),
+      chain('c1', 'rest-c'),
+    ]);
+
+    const { items } = await service.list(
+      query({ groupByRestaurant: true, page: 2, limit: 1 }),
+      Language.Hy,
+    );
+
+    expect(items.map((i) => i.id)).toEqual(['b1']);
+  });
+
+  it('still applies the distance filter before collapsing', async () => {
+    const near = chain('a-near', 'rest-a', { lat: 40.178, lng: 44.5128 });
+    const far = chain('b-far', 'rest-b', { lat: 40.5, lng: 45.0 });
+    const { service } = build([near, far]);
+
+    const { items, total } = await service.list(
+      query({ groupByRestaurant: true, ...CENTRE, distMax: 2 }),
+      Language.Hy,
+    );
+
+    expect(items.map((i) => i.id)).toEqual(['a-near']);
+    // A distance query filters in the app, so only the collapsed set knows the
+    // total — the database cannot count it.
+    expect(total).toBe(1);
+  });
+
+  it('leaves the branch list untouched when not asked to group', async () => {
+    const { service } = build([chain('a1', 'rest-a'), chain('a2', 'rest-a')]);
+
+    const { items } = await service.list(query(), Language.Hy);
+
+    expect(items.map((i) => i.id)).toEqual(['a1', 'a2']);
   });
 });
 

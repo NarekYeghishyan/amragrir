@@ -2,6 +2,7 @@ import { NotFoundException, UnprocessableEntityException } from '@nestjs/common'
 import {
   ACTIVE_ORDER_STATUSES,
   OrderActorType,
+  OrderEventType,
   OrderStatus,
   QueueFilter,
   StaffRole,
@@ -9,7 +10,7 @@ import {
 } from '@amragrir/shared';
 import { RestaurantOrdersService } from './orders.service';
 
-import { ListQueueDto, SetOrderStatusDto } from './dto';
+import { ListQueueDto, SetOrderReminderDto, SetOrderStatusDto } from './dto';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { OrdersService } from '../orders/orders.service';
 import type { OrderHistoryService } from '../orders/order-history.service';
@@ -34,6 +35,10 @@ function orderRow(over: Record<string, unknown> = {}) {
     serviceMode: 'pickup',
     totalAmd: 6160,
     readyAt: new Date(Date.now() + 600_000),
+    // Null is an ordinary order: placed for as soon as possible, with no
+    // warning to give and therefore no lead. The pre-order cases below set both.
+    reminderAt: null,
+    reminderLeadMin: null,
     createdAt: new Date(),
     notes: null,
     branch: { id: 'branch-1', name: 'Northern Ave' },
@@ -46,15 +51,39 @@ function orderRow(over: Record<string, unknown> = {}) {
   };
 }
 
-function build(options: { order?: unknown; grouped?: unknown[] } = {}) {
+function build(
+  options: { order?: unknown; grouped?: unknown[]; scheduled?: number } = {},
+) {
+  // Echoes the write back, which is what the real client does and what
+  // `setReminderLead` reads its answer out of.
+  const orderUpdate = jest
+    .fn()
+    .mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+      Promise.resolve({ id: ORDER_ID, ...data }),
+    );
+  const orderEventCreate = jest.fn().mockResolvedValue({ id: 'event-1' });
+
   const prisma = {
     order: {
       findFirst: jest.fn().mockResolvedValue(options.order === undefined ? orderRow() : options.order),
       findMany: jest.fn().mockResolvedValue([orderRow()]),
-      count: jest.fn().mockResolvedValue(1),
+      // Two counts, in the order `listOrders` asks for them: the page total,
+      // then the pre-orders. The second cannot come from the grouped query —
+      // it is a question about a timestamp, not a status.
+      count: jest
+        .fn()
+        .mockResolvedValueOnce(1)
+        .mockResolvedValue(options.scheduled ?? 0),
       // The per-stage counts the tabs render from.
       groupBy: jest.fn().mockResolvedValue(options.grouped ?? []),
+      update: orderUpdate,
     },
+    orderEvent: { create: orderEventCreate },
+    // The interactive form: the service hands in a callback, and the real
+    // client hands it a transaction client. Handing back the same mock is the
+    // equivalent here — what is being asserted is that both writes happen under
+    // one call, not that Postgres held a lock.
+    $transaction: jest.fn((run: (tx: unknown) => Promise<unknown>) => run(prisma)),
   } as unknown as PrismaService;
 
   const orders = { transition: jest.fn().mockResolvedValue({ status: OrderStatus.Preparing }) };
@@ -69,6 +98,8 @@ function build(options: { order?: unknown; grouped?: unknown[] } = {}) {
     prisma,
     orders,
     history,
+    orderUpdate,
+    orderEventCreate,
   };
 }
 
@@ -101,12 +132,19 @@ describe('listOrders', () => {
     ]);
   });
 
-  it('lists oldest first — a kitchen works a queue, not a stack', async () => {
+  it('lists by when the kitchen has to start — a queue, not a stack', async () => {
+    // It used to sort on `created_at`, which for an as-soon-as-possible order is
+    // the same ordering: `prep_start_at` is that time plus a prep estimate. What
+    // it is not the same as is a pre-order, whose place in the queue is the hour
+    // it must be started and not the day it was placed.
+    //
+    // Nulls last, so orders from before this column existed — all of them
+    // finished — do not sort to the front of a live board.
     const { service, prisma } = build();
     await service.listOrders(staff, query());
 
     expect((prisma.order.findMany as jest.Mock).mock.calls[0][0].orderBy).toEqual([
-      { createdAt: 'asc' },
+      { prepStartAt: { sort: 'asc', nulls: 'last' } },
       { id: 'asc' },
     ]);
   });
@@ -172,14 +210,14 @@ describe('listOrders', () => {
     await service.listOrders(staff, query({ q: '4821' }));
 
     const where = (prisma.order.findMany as jest.Mock).mock.calls[0][0].where;
-    expect(where.AND).toEqual([
-      {
-        OR: [
-          { code: { contains: '4821', mode: 'insensitive' } },
-          { user: { name: { contains: '4821', mode: 'insensitive' } } },
-        ],
-      },
-    ]);
+    // The search is the first narrowing; the due/scheduled split is always the
+    // last one, on every stage.
+    expect(where.AND[0]).toEqual({
+      OR: [
+        { code: { contains: '4821', mode: 'insensitive' } },
+        { user: { name: { contains: '4821', mode: 'insensitive' } } },
+      ],
+    });
   });
 
   it('keeps the ownership filter intact while searching', async () => {
@@ -200,7 +238,50 @@ describe('listOrders', () => {
     const { service, prisma } = build();
     await service.listOrders(staff, query({ q: '   ' }));
 
-    expect((prisma.order.findMany as jest.Mock).mock.calls[0][0].where.AND).toBeUndefined();
+    // Only the due/scheduled split is left — nothing was searched for, so
+    // nothing else narrows the board.
+    const and = (prisma.order.findMany as jest.Mock).mock.calls[0][0].where.AND;
+    expect(and).toHaveLength(1);
+    expect(and[0].OR).toBeDefined();
+  });
+
+  it('keeps pre-orders off the live board until their hour comes', async () => {
+    // The whole point of the split. An order placed today for next Tuesday is
+    // `paid`, and by `created_at` it is the *oldest* paid order for a week — so
+    // without this it would sit pinned above the work somebody is doing now.
+    const { service, prisma } = build();
+    await service.listOrders(staff, query({ status: QueueFilter.Paid }));
+
+    const and = (prisma.order.findMany as jest.Mock).mock.calls[0][0].where.AND;
+    expect(and[and.length - 1]).toEqual({
+      OR: [{ reminderAt: null }, { reminderAt: { lte: expect.any(Date) } }],
+    });
+  });
+
+  it('asks for the pre-orders themselves under the scheduled stage', async () => {
+    // The mirror image, and the only stage that reads the column the other way
+    // round. Sorted by when the kitchen must start, like every other stage.
+    const { service, prisma } = build();
+    await service.listOrders(staff, query({ status: QueueFilter.Scheduled }));
+
+    const where = (prisma.order.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.AND[where.AND.length - 1]).toEqual({ reminderAt: { gt: expect.any(Date) } });
+    // Paid *or* confirmed: accepting a pre-order does not take it off this
+    // board, because accepting it is not cooking it.
+    expect(where.status).toEqual({ in: [OrderStatus.Paid, OrderStatus.Confirmed] });
+  });
+
+  it('splits on the clock rather than on whether the reminder was sent', async () => {
+    // `reminder_sent_at` is the job's own bookkeeping. If the board read it, a
+    // deployment where the job had stopped would strand every pre-order off the
+    // queue on the day it was due — the worst possible failure for the feature.
+    const { service, prisma } = build();
+    await service.listOrders(staff, query({ status: QueueFilter.Scheduled }));
+
+    const where = JSON.stringify(
+      (prisma.order.findMany as jest.Mock).mock.calls[0][0].where,
+    );
+    expect(where).not.toContain('reminderSentAt');
   });
 
   it('narrows to one restaurant', async () => {
@@ -226,6 +307,7 @@ describe('listOrders', () => {
       [QueueFilter.Active]: 2,
       [QueueFilter.Paid]: 0,
       [QueueFilter.Unpaid]: 0,
+      [QueueFilter.Scheduled]: 0,
       [QueueFilter.Confirmed]: 0,
       [QueueFilter.Preparing]: 0,
       [QueueFilter.AlmostReady]: 0,
@@ -251,6 +333,7 @@ describe('listOrders', () => {
       [QueueFilter.Active]: 1,
       [QueueFilter.Paid]: 1,
       [QueueFilter.Unpaid]: 0,
+      [QueueFilter.Scheduled]: 0,
       [QueueFilter.Confirmed]: 0,
       [QueueFilter.Preparing]: 0,
       [QueueFilter.AlmostReady]: 0,
@@ -384,6 +467,138 @@ describe('setStatus', () => {
     await expect(
       service.setStatus(staff, ORDER_ID, dto(OrderStatus.Confirmed)),
     ).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('setReminderLead', () => {
+  /** Tomorrow at 13:00 Yerevan, warned about forty minutes ahead — the default
+   *  a thirty-minute dish arrives with. */
+  const READY_AT = new Date('2026-08-06T09:00:00.000Z');
+  const DEFAULT_LEAD = 40;
+
+  const preOrder = (over: Record<string, unknown> = {}) =>
+    orderRow({
+      status: OrderStatus.Confirmed,
+      readyAt: READY_AT,
+      reminderAt: new Date(READY_AT.getTime() - DEFAULT_LEAD * 60_000),
+      reminderLeadMin: DEFAULT_LEAD,
+      ...over,
+    });
+
+  const dto = (leadMin: number): SetOrderReminderDto =>
+    Object.assign(new SetOrderReminderDto(), { leadMin });
+
+  it('counts the lead back from when the food is due', async () => {
+    // The whole contract, and the reason the number is stored rather than
+    // derived: "warn me 45 minutes before it is due" has to mean 12:15 for a
+    // 13:00 order, whatever the kitchen's own estimate says it takes to cook.
+    const { service, orderUpdate } = build({ order: preOrder() });
+    const result = await service.setReminderLead(staff, ORDER_ID, dto(45));
+
+    expect(orderUpdate.mock.calls[0][0].data.reminderAt.toISOString()).toBe(
+      '2026-08-06T08:15:00.000Z',
+    );
+    expect(result.reminderLeadMin).toBe(45);
+  });
+
+  it('re-arms a warning that had already gone out', async () => {
+    // Lengthening the notice on an order somebody was already told about means
+    // the earlier telling was for a moment nobody chose any more. Leaving
+    // `reminder_sent_at` set would make the new time silently never fire.
+    const { service, orderUpdate } = build({ order: preOrder() });
+    await service.setReminderLead(staff, ORDER_ID, dto(45));
+
+    expect(orderUpdate.mock.calls[0][0].data.reminderSentAt).toBeNull();
+  });
+
+  it('leaves the sent mark alone when the new moment is already past', async () => {
+    // A lead long enough to land in the past is legal — it means "warn me now"
+    // — but it is not a request to be told twice about the same order.
+    const { service, orderUpdate } = build({
+      order: preOrder({ readyAt: new Date(Date.now() + 10 * 60_000) }),
+    });
+    const result = await service.setReminderLead(staff, ORDER_ID, dto(60));
+
+    expect(orderUpdate.mock.calls[0][0].data.reminderSentAt).toBeUndefined();
+    // And it leaves the Scheduled tab, because its hour has effectively come.
+    expect(result.scheduled).toBe(false);
+  });
+
+  it('records who moved it, and what it was before', async () => {
+    // `reminder_lead_min` is overwritten in place, so this entry is the only
+    // record that it ever moved — and "somebody set it to 45" does not answer
+    // "why did this go out so early".
+    const { service, orderEventCreate } = build({ order: preOrder() });
+    await service.setReminderLead(staff, ORDER_ID, dto(45));
+
+    expect(orderEventCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: ORDER_ID,
+        type: OrderEventType.ReminderSet,
+        // Not a status change: the order stays where it is and the food is
+        // still promised for the same minute.
+        fromStatus: null,
+        toStatus: null,
+        actorType: OrderActorType.Staff,
+        actorStaffId: 'staff-1',
+        detail: expect.objectContaining({
+          reminderLeadMin: 45,
+          previousReminderLeadMin: DEFAULT_LEAD,
+        }),
+      }),
+    });
+  });
+
+  it('writes the column and the entry under one transaction', async () => {
+    const { service, prisma } = build({ order: preOrder() });
+    await service.setReminderLead(staff, ORDER_ID, dto(45));
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses an order placed for as soon as possible', async () => {
+    // There is no warning to move: the kitchen already has it.
+    const { service } = build({ order: orderRow() });
+
+    await expect(service.setReminderLead(staff, ORDER_ID, dto(45))).rejects.toThrow(
+      UnprocessableEntityException,
+    );
+  });
+
+  it('refuses an order that is over', async () => {
+    for (const status of TERMINAL_ORDER_STATUSES) {
+      const { service, orderUpdate } = build({ order: preOrder({ status }) });
+
+      await expect(service.setReminderLead(staff, ORDER_ID, dto(45))).rejects.toThrow(
+        UnprocessableEntityException,
+      );
+      expect(orderUpdate).not.toHaveBeenCalled();
+    }
+  });
+
+  it('scopes the lookup on orders:advance, like every other move', async () => {
+    const watcher: StaffJwtPayload = {
+      sub: 'staff-2',
+      kind: 'staff',
+      scopes: [{ role: StaffRole.BranchStaff, restaurantId: null, branchId: 'branch-1' }],
+    };
+    const { service, prisma } = build({ order: preOrder() });
+    await service.setReminderLead(watcher, ORDER_ID, dto(45));
+
+    const where = (prisma.order.findFirst as jest.Mock).mock.calls[0][0].where;
+    expect(where.id).toBe(ORDER_ID);
+    expect(where.OR).toEqual([
+      { branch: { restaurantId: { in: [] } } },
+      { branchId: { in: ['branch-1'] } },
+    ]);
+  });
+
+  it('404s on an order outside the caller scope', async () => {
+    const { service } = build({ order: null });
+
+    await expect(service.setReminderLead(staff, ORDER_ID, dto(45))).rejects.toThrow(
+      NotFoundException,
+    );
   });
 });
 

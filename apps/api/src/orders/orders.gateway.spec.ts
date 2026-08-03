@@ -2,6 +2,8 @@ import { NotFoundException } from '@nestjs/common';
 import { OrderStatus } from '@amragrir/shared';
 import { OrdersGateway } from './orders.gateway';
 import { OrderEventsService } from './order-events.service';
+import { NotificationEventsService } from '../notifications/notification-events.service';
+import type { StaffNotificationsService } from '../notifications/staff-notifications.service';
 import type { OrdersService } from './orders.service';
 import type { TokenService } from '../auth/token.service';
 import type { StaffTokenService } from '../staff/staff-token.service';
@@ -34,7 +36,14 @@ function fakeSocket() {
 }
 
 function build(
-  options: { user?: unknown; staff?: unknown; findVisible?: jest.Mock; findStaff?: jest.Mock } = {},
+  options: {
+    user?: unknown;
+    staff?: unknown;
+    findVisible?: jest.Mock;
+    findStaff?: jest.Mock;
+    /** Branches a panel may hear about; `null` is a platform-wide account. */
+    branches?: string[] | null;
+  } = {},
 ) {
   const events = new OrderEventsService();
   const tokens = {
@@ -52,9 +61,25 @@ function build(
     findVisibleToStaff: options.findStaff ?? jest.fn().mockResolvedValue(snapshot()),
   } as unknown as OrdersService;
 
-  const gateway = new OrdersGateway(tokens, staffTokens, orders, events);
+  // The staff notification fan-out, and the service that says which branches a
+  // panel may hear about. Separate from `events` above because the two are
+  // addressed differently: an order change goes to whoever is watching that
+  // order, a reminder goes to a branch.
+  const notificationEvents = new NotificationEventsService();
+  const notifications = {
+    reachableBranchIds: jest.fn().mockResolvedValue(options.branches ?? ['branch-1']),
+  } as unknown as StaffNotificationsService;
+
+  const gateway = new OrdersGateway(
+    tokens,
+    staffTokens,
+    orders,
+    events,
+    notificationEvents,
+    notifications,
+  );
   gateway.onModuleInit();
-  return { gateway, events, tokens, staffTokens, orders };
+  return { gateway, events, tokens, staffTokens, orders, notificationEvents, notifications };
 }
 
 describe('subscribe', () => {

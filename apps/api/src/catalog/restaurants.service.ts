@@ -19,6 +19,15 @@ const NEAREST_RADIUS_KM = 5;
 /** Backstop on how many rows a distance query may materialise. */
 const MAX_DISTANCE_CANDIDATES = 500;
 
+/**
+ * Backstop on how many branch rows the grouped list may materialise.
+ *
+ * Collapsing branches to restaurants happens in the app (see `listGrouped`),
+ * so the rows have to exist in memory first — and an unbounded materialisation
+ * is exactly what the cap above already exists to prevent.
+ */
+const MAX_GROUPED_CANDIDATES = 500;
+
 export interface RestaurantListItem {
   id: string;
   slug: string;
@@ -127,6 +136,10 @@ export class RestaurantsService {
       priceFiltered,
     );
 
+    if (query.groupByRestaurant) {
+      return this.listGrouped(query, where, origin, radiusKm);
+    }
+
     if (!usesDistance) {
       const [rows, total] = await Promise.all([
         this.prisma.restaurantBranch.findMany({
@@ -167,6 +180,76 @@ export class RestaurantsService {
 
     return {
       items: scored.map(({ row }) => this.toListItem(row, origin)),
+      total,
+      page: query.page,
+    };
+  }
+
+  /**
+   * The same list, collapsed to one row per restaurant.
+   *
+   * Collapsing happens **after** filtering and ordering, so the branch kept is
+   * the best one under the active query — the fastest under `sort=fastest`, an
+   * open one under `openNow`. With no branch-level sort in play the ordering
+   * ends in the tie-break below, so the row kept is the oldest branch: the very
+   * one `/restaurants/{slug}` resolves to, which is what a card claiming "open,
+   * 12 min" must describe if the page behind it is to agree.
+   *
+   * Done here rather than in SQL because the interesting orderings are not
+   * expressible as a `DISTINCT ON` over this query, and because the distance
+   * path already has to materialise rows for the same reason. Both are capped.
+   */
+  private async listGrouped(
+    query: ListRestaurantsDto,
+    where: Prisma.RestaurantBranchWhereInput,
+    origin: { lat: number; lng: number } | null,
+    radiusKm: number | undefined,
+  ): Promise<{ items: RestaurantListItem[]; total: number; page: number }> {
+    const rows = await this.prisma.restaurantBranch.findMany({
+      where,
+      include: { restaurant: true },
+      orderBy: this.orderBy(query.sort),
+      take: MAX_GROUPED_CANDIDATES,
+    });
+
+    let ranked: BranchWithRestaurant[] = rows;
+
+    // Distance is computed in the app, so it has to be applied before rows are
+    // collapsed — a branch outside the radius must not be the one that
+    // represents its restaurant.
+    if (radiusKm !== undefined && origin !== null) {
+      const scored = rows
+        .map((row) => ({ row, km: this.exactDistanceKm(row, origin) }))
+        .filter(({ km }) => km !== null && km <= radiusKm);
+
+      if (query.sort === RestaurantSort.Nearest) {
+        scored.sort((a, b) => a.km! - b.km!);
+      }
+      ranked = scored.map(({ row }) => row);
+    }
+
+    const seen = new Set<string>();
+    const collapsed = ranked.filter((row) => {
+      if (seen.has(row.restaurantId)) {
+        return false;
+      }
+      seen.add(row.restaurantId);
+      return true;
+    });
+
+    // Counted in the database when it can be, so the figure a client prints
+    // ("Restaurants in Yerevan (23)") is the real total rather than however
+    // many rows happened to fit under the cap. A distance query cannot: its
+    // final filter runs in the app, above, so only the collapsed set knows.
+    const total =
+      radiusKm === undefined
+        ? await this.prisma.restaurant.count({ where: { branches: { some: where } } })
+        : collapsed.length;
+
+    const start = (query.page - 1) * query.limit;
+
+    return {
+      items: collapsed.slice(start, start + query.limit).map((row) => this.toListItem(row, origin)),
       total,
       page: query.page,
     };
@@ -359,15 +442,26 @@ export class RestaurantsService {
    * SQL ordering. `nearest` never reaches here with coordinates — that path is
    * sorted in the app — and without coordinates it is meaningless, so it takes
    * the default ordering rather than an arbitrary one.
+   *
+   * Every ordering ends in `BRANCH_PICK_ORDER`. Ratings tie constantly (a
+   * chain's branches share one), and rows tied under `ORDER BY` come back in
+   * whatever order the database felt like, which makes `skip`/`take` paging
+   * drop and repeat rows between pages. It also decides which branch
+   * represents its restaurant in `listGrouped` — and the tie-break being the
+   * same one `/restaurants/{slug}` uses is what makes the two agree.
    */
   private orderBy(sort: RestaurantSort): Prisma.RestaurantBranchOrderByWithRelationInput[] {
     if (sort === RestaurantSort.Fastest) {
-      return [{ avgPrepMin: 'asc' }];
+      return [{ avgPrepMin: 'asc' }, ...RestaurantsService.BRANCH_PICK_ORDER];
     }
     if (sort === RestaurantSort.TopRated) {
-      return [{ restaurant: { ratingAvg: 'desc' } }];
+      return [{ restaurant: { ratingAvg: 'desc' } }, ...RestaurantsService.BRANCH_PICK_ORDER];
     }
-    return [{ restaurant: { ratingAvg: 'desc' } }, { restaurant: { reviewsCount: 'desc' } }];
+    return [
+      { restaurant: { ratingAvg: 'desc' } },
+      { restaurant: { reviewsCount: 'desc' } },
+      ...RestaurantsService.BRANCH_PICK_ORDER,
+    ];
   }
 
   private pageArgs(query: ListRestaurantsDto): { skip: number; take: number } {

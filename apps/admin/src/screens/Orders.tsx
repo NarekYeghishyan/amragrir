@@ -18,6 +18,7 @@ import {
   hasOrderFilters,
   type OrderFilters,
   type OrderHistoryEntry,
+  type OrderReminder,
   type StaffBranch,
   type StaffOrder,
 } from '../api';
@@ -27,6 +28,7 @@ import { routePath, type OrderScope } from '../navigation';
 import { OrderQrDialog } from '../order-qr';
 import { Link, navigate } from '../router';
 import { watchOrders } from '../order-stream';
+import { OrderReminderDialog, scheduleLine } from '../order-reminder';
 import { formatAmd, formatCountdown, formatDateTime, formatWaiting } from '../format';
 import { branchesOf, restaurantsOf, showsBranchFilter, soleBranchOf } from '../scope';
 import {
@@ -103,11 +105,17 @@ function paymentTone(status: PaymentStatus | null): Tone {
  * asked for active orders, so a completed or cancelled one could not be looked
  * at again from anywhere in the panel.
  *
- * **`paid` comes first, and is where the board opens.** It is the only stage
- * whose next move belongs to the restaurant — the money is in and nobody has
- * accepted the order, so a diner is watching a timer that has not started.
- * Everything after it is either work under way or work already done, and
- * neither is what a kitchen opens this screen to find out.
+ * **`paid` is where the board opens.** It is the only stage whose next move
+ * belongs to the restaurant — the money is in and nobody has accepted the
+ * order, so a diner is watching a timer that has not started. Everything after
+ * it is either work under way or work already done, and neither is what a
+ * kitchen opens this screen to find out.
+ *
+ * **`scheduled` sits before it**, because a pre-order is not yet anybody's work:
+ * it is a booking, and it is on this tab precisely so it is *not* on the live
+ * board pinned above the orders somebody is cooking. First in the strip and not
+ * the landing tab, which is the difference between "here if you want it" and
+ * "here is what to do next".
  *
  * **`active` is not offered.** It was the old default and it answered "show me
  * everything", which is not a question with an action attached: it mixed a paid
@@ -119,6 +127,7 @@ function paymentTone(status: PaymentStatus | null): Tone {
  * `unpaid` is deliberately **not** here — it is a filter inside `paid`, below.
  */
 export const STAGE_TABS = [
+  { value: QueueFilter.Scheduled, label: 'ordersStageScheduled' },
   { value: QueueFilter.Paid, label: 'ordersStagePaid' },
   { value: QueueFilter.Confirmed, label: 'ordersStageConfirmed' },
   { value: QueueFilter.Preparing, label: 'ordersStagePreparing' },
@@ -153,6 +162,20 @@ export const PAID_TABS = [
  *  beside it, so it lights up Paid. */
 export const topStage = (stage: QueueFilter): QueueFilter =>
   stage === QueueFilter.Unpaid ? QueueFilter.Paid : stage;
+
+/**
+ * Where an order sits in the queue: the moment the kitchen has to start it.
+ *
+ * `Infinity` when nothing recorded that — the rows written before pre-ordering
+ * existed. They sort last rather than first, which is the API's rule too: an
+ * order from before the feature is a finished one, and a finished order has no
+ * claim on the front of a queue.
+ */
+export function startsAt(order: Pick<StaffOrder, 'prepStartAt'>): number {
+  return order.prepStartAt === null
+    ? Number.POSITIVE_INFINITY
+    : new Date(order.prepStartAt).getTime();
+}
 
 /**
  * The "no restaurant / no branch chosen" option, as a value.
@@ -394,6 +417,40 @@ export function Orders({
     }
   };
 
+  /**
+   * One card, after its warning has been moved.
+   *
+   * Patched rather than refetched: the board is live, and re-reading fifty
+   * orders to record that one number changed would let a response that left
+   * before a socket update landed overwrite the status it delivered.
+   *
+   * A card leaves the board when its answer no longer matches the tab. Both
+   * directions are real — a notice long enough to fire immediately takes a
+   * pre-order off Scheduled and onto the live board, and one lengthened past the
+   * clock takes it back — and the rule is the same either way, so neither is a
+   * case handled on its own.
+   */
+  const applyReminder = (reminder: OrderReminder): void => {
+    setOrders((current) =>
+      (current ?? [])
+        .map((order) =>
+          order.id === reminder.id
+            ? {
+                ...order,
+                reminderAt: reminder.reminderAt,
+                reminderLeadMin: reminder.reminderLeadMin,
+                scheduled: reminder.scheduled,
+              }
+            : order,
+        )
+        .filter(
+          (order) =>
+            order.id !== reminder.id ||
+            order.scheduled === (stageRef.current === QueueFilter.Scheduled),
+        ),
+    );
+  };
+
   const narrow = (change: Partial<OrderFilters>): void => {
     setFilters((current) => ({ ...current, ...change }));
     // Any change to what is being looked at makes the current page number a
@@ -449,14 +506,22 @@ export function Orders({
     [branches, filters.restaurantId],
   );
 
-  // Oldest first: a queue is worked in the order it arrived, and the card that
-  // needs attention soonest should not be the one that scrolled off. The API
-  // sorts the same way; this keeps it true after a socket update reorders
-  // nothing but could.
+  // By when the kitchen has to start, soonest first: a queue is worked in the
+  // order it comes up, and the card that needs attention next should not be the
+  // one that scrolled off. The API sorts the same way; this keeps it true after
+  // a socket update reorders nothing but could.
+  //
+  // It used to sort on `createdAt`, which is the same ordering for an order
+  // wanted as soon as possible — `prepStartAt` is that time plus a prep
+  // estimate — and the wrong one for a pre-order, whose place in the queue is
+  // the hour it must be started and not the day it was placed. `createdAt` is
+  // the tie-break, and stands in for orders written before the column existed.
   const shown = useMemo(
     () =>
       [...(orders ?? [])].sort(
-        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        (a, b) =>
+          startsAt(a) - startsAt(b) ||
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
       ),
     [orders],
   );
@@ -476,14 +541,18 @@ export function Orders({
             ? t('ordersEmptyFilteredTitle')
             : filters.stage === QueueFilter.Paid
               ? t('ordersEmptyPaidTitle')
-              : t('ordersEmptyStageTitle')
+              : filters.stage === QueueFilter.Scheduled
+                ? t('ordersEmptyScheduledTitle')
+                : t('ordersEmptyStageTitle')
         }
         description={
           filtered
             ? t('ordersEmptyFilteredDesc')
             : filters.stage === QueueFilter.Paid
               ? t('ordersEmptyPaidDesc')
-              : t('ordersEmptyStageDesc')
+              : filters.stage === QueueFilter.Scheduled
+                ? t('ordersEmptyScheduledDesc')
+                : t('ordersEmptyStageDesc')
         }
         action={
           filtered && (
@@ -505,6 +574,7 @@ export function Orders({
               links={links}
               canOpenMenu={canOpenMenu}
               onAdvance={(status) => void advance(order, status)}
+              onSetReminder={applyReminder}
             />
           ))}
         </div>
@@ -670,6 +740,11 @@ export function headline(t: Translate, entry: OrderHistoryEntry): string {
       return entry.toStatus === null
         ? t('historyMoved')
         : t('historyMovedTo', { status: t(`orderStatus_${entry.toStatus}`) });
+    case OrderEventType.ReminderSet:
+      // Named for what moved rather than for the column: nobody at a pass
+      // thinks in `reminder_lead_min`, and the number itself is on the second
+      // line — see `detailLine`.
+      return t('historyReminderSet');
   }
 }
 
@@ -838,6 +913,19 @@ export function detailLine(t: Translate, entry: OrderHistoryEntry): string | nul
   }
 
   const parts: string[] = [];
+  // The two numbers around a moved warning, and both of them: "somebody set it
+  // to 45" does not answer "why did this go out so early". The previous value is
+  // null on a pre-order placed before the lead was a column of its own.
+  if (detail.reminderLeadMin !== undefined) {
+    parts.push(
+      detail.previousReminderLeadMin === undefined || detail.previousReminderLeadMin === null
+        ? t('historyReminderLead', { minutes: detail.reminderLeadMin })
+        : t('historyReminderMoved', {
+            from: detail.previousReminderLeadMin,
+            to: detail.reminderLeadMin,
+          }),
+    );
+  }
   if (detail.itemsCount !== undefined) {
     parts.push(t.plural('dishCount', detail.itemsCount));
   }
@@ -1002,6 +1090,7 @@ function OrderCard({
   links,
   canOpenMenu,
   onAdvance,
+  onSetReminder,
 }: {
   t: Translate;
   order: StaffOrder;
@@ -1010,7 +1099,9 @@ function OrderCard({
   /** Whether each line is a link to its dish on the menu — see `Orders`. */
   canOpenMenu: boolean;
   onAdvance: (status: OrderStatus) => void;
+  onSetReminder: (reminder: OrderReminder) => void;
 }) {
+  const { language } = useLanguage();
   // Which button was pressed, so only that one spins. `busy` alone would put a
   // spinner on every action the card offers.
   const [pending, setPending] = useState<OrderStatus | null>(null);
@@ -1029,7 +1120,14 @@ function OrderCard({
   // Past its promised time. Marked on the card itself rather than sorted to the
   // top, because a queue that reorders itself under someone's hand is worse
   // than one they have to scan.
-  const late = order.secondsLeft !== null && order.secondsLeft <= 0;
+  //
+  // Never on a pre-order whose hour has not come: `secondsLeft` counts to the
+  // moment the food is due, and on an order placed for next Tuesday it is
+  // negative from the second it is paid for. Warning a kitchen that it is late
+  // for work it was not meant to have started is how a warning stops meaning
+  // anything.
+  const late = !order.scheduled && order.secondsLeft !== null && order.secondsLeft <= 0;
+  const schedule = scheduleLine(t, order, language);
 
   return (
     <article className={late ? 'order order--late' : 'order'}>
@@ -1041,8 +1139,19 @@ function OrderCard({
       <div className="order__meta">
         {order.code} · {order.branch.name ?? t('orderBranchFallback')} ·{' '}
         {formatWaiting(t, order.createdAt)}
-        {countdown !== null && !late && ` · ${t('orderReadyIn', { time: countdown })}`}
+        {/* A countdown on a pre-order would read "ready in 8,640 min", which is
+            not a number anybody can act on — the day and hour it is due are
+            below instead. */}
+        {countdown !== null && !late && !order.scheduled &&
+          ` · ${t('orderReadyIn', { time: countdown })}`}
       </div>
+
+      {schedule !== null && (
+        <p className="order__schedule">
+          <Icon name="clock" size={15} />
+          {schedule}
+        </p>
+      )}
 
       {late && (
         <p className="order__late">
@@ -1112,6 +1221,13 @@ function OrderCard({
         <div className="order__aside">
           <OrderHistoryDialog t={t} order={order} links={links} />
           <OrderQrDialog t={t} order={order} />
+          {/* Only on a pre-order still waiting. An order already in front of
+              somebody has no warning left to move, and a control that did
+              nothing would be one more thing on a card a kitchen reads at a
+              glance. */}
+          {order.scheduled && (
+            <OrderReminderDialog t={t} order={order} onSet={onSetReminder} />
+          )}
         </div>
 
         {nextStatuses(order.status).map((next, index) =>

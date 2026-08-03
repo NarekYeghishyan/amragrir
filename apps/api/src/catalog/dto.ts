@@ -79,6 +79,21 @@ export class ListRestaurantsDto {
   @Transform(toBool)
   openNow?: boolean;
 
+  /**
+   * Collapse the list to one row per restaurant.
+   *
+   * A row is normally a branch, because a branch is what a guest travels to.
+   * But a caller that has no coordinates cannot tell two branches of one chain
+   * apart, and a caller whose pages are per restaurant has nowhere to send the
+   * extras: the web listing drew the same restaurant once per branch, every
+   * card linking to the same page. Off by default — the mobile home feed sends
+   * coordinates and wants the branches.
+   */
+  @IsBoolean()
+  @IsOptional()
+  @Transform(toBool)
+  groupByRestaurant?: boolean;
+
   @IsArray()
   @IsOptional()
   @IsIn(Object.values(DietaryTag), { each: true })

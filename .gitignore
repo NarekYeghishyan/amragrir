@@ -28,9 +28,6 @@ Thumbs.db
 !.vscode/extensions.json
 .history/
 
-# Claude Code settings (harness/machine-specific — keep out of the shared repo)
-.claude/
-
 # Test / coverage
 coverage/
 

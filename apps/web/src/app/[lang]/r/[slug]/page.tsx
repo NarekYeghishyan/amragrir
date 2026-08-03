@@ -1,11 +1,14 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Language } from '@amragrir/shared';
 import { api } from '@/lib/api';
 import { LANGUAGES, parseLanguage, t } from '@/lib/language';
-import { formatAmd, formatRating } from '@/lib/format';
-import { TAB_ORDER, groupByTab, restaurantJsonLd } from '@/lib/jsonld';
-import { SITE_URL, hreflangFor, restaurantPath } from '@/lib/site';
+import { formatAmd, formatPriceLevel, formatRating, telHref } from '@/lib/format';
+import { MENU_TAB_LABEL, TAB_ORDER, groupByTab, restaurantJsonLd } from '@/lib/jsonld';
+import { SITE_URL, cartPath, homePath, hreflangFor, restaurantPath } from '@/lib/site';
+import { StickyBasket } from '@/components/StickyBasket';
+import { addToBasket } from '../../actions';
 
 interface Props {
   params: Promise<{ lang: string; slug: string }>;
@@ -108,64 +111,139 @@ export default async function RestaurantPage({ params }: Props) {
         }}
       />
 
-      <h1>{restaurant.name}</h1>
-      <p className="lede">
-        ★ {formatRating(restaurant.rating)}{' '}
-        <span className="faint">
-          ({restaurant.reviewsCount} {label('reviews')})
-        </span>
-        {restaurant.cuisine && ` · ${restaurant.cuisine}`}
-        {restaurant.branch.prepMin !== null &&
-          ` · ${restaurant.branch.prepMin} ${label('minutes')}`}
-      </p>
+      <Link className="back" href={homePath(language)}>
+        ← {label('backHome')}
+      </Link>
 
-      <p>
-        <span className={restaurant.branch.isOpen ? 'badge open' : 'badge closed'}>
-          {restaurant.branch.isOpen ? label('open') : label('closed')}
-        </span>
-      </p>
+      <div className={restaurant.coverUrl ? 'media banner' : 'media banner ph'}>
+        {restaurant.coverUrl && <img src={restaurant.coverUrl} alt="" />}
+      </div>
 
-      {(restaurant.branch.address ?? restaurant.branch.phone) && (
-        <p className="muted">
-          {restaurant.branch.address}
-          {restaurant.branch.phone && (
-            <>
-              {' · '}
-              {/* A plain anchor, not `Link`: `tel:` leaves the app entirely,
-                  and the router has nothing to navigate to. */}
-              <a href={`tel:${restaurant.branch.phone}`}>{restaurant.branch.phone}</a>
-            </>
+      <div className="rest-head">
+        <div>
+          <h1>{restaurant.name}</h1>
+          {(restaurant.cuisine ?? restaurant.priceLevel) && (
+            <p className="meta">
+              {[restaurant.cuisine, formatPriceLevel(restaurant.priceLevel)]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
           )}
-        </p>
-      )}
+          <div className="tags">
+            {restaurant.branch.prepMin !== null && (
+              <span className="tag prep">
+                ⏱ {restaurant.branch.prepMin} {label('minutes')}
+              </span>
+            )}
+            {restaurant.branch.address && <span className="tag">📍 {restaurant.branch.address}</span>}
+            <span className={restaurant.branch.isOpen ? 'tag good' : 'tag'}>
+              {restaurant.branch.isOpen ? label('open') : label('closed')}
+            </span>
+          </div>
+        </div>
 
+        <div className="score">
+          <div className="value">
+            <span style={{ color: 'var(--star)' }}>★</span> {formatRating(restaurant.rating)}
+          </div>
+          <div className="reviews">
+            {restaurant.reviewsCount} {label('reviews')}
+          </div>
+        </div>
+      </div>
+
+      {/* Ordering used to be the app's job alone, and this block was two lines
+          of inert text. It is now the real thing: the `＋` on each dish fills a
+          basket and this leads to it. The phone stays beside it — some people
+          would rather ask a person, and a closed branch cannot take an order
+          but can still answer. */}
       <div className="cta">
-        <strong>{label('orderInApp')}</strong>
+        <strong>{label('orderAhead')}</strong>
         <span>{label('orderInAppHint')}</span>
+        <Link className="cta-action" href={cartPath(language)}>
+          {label('viewBasket')}
+        </Link>
+        {restaurant.branch.phone && (
+          // A plain anchor, not a `Link`: `tel:` leaves the app entirely and
+          // the router has nothing to navigate to. Secondary now that ordering
+          // works — it is the alternative, no longer the only thing on offer.
+          <a className="ghost-action" href={telHref(restaurant.branch.phone)}>
+            {label('callRestaurant')}
+          </a>
+        )}
       </div>
 
       <h2>{label('menu')}</h2>
+
+      {/* The design's menu tabs *filter* the list. These scroll to it instead:
+          this page exists so that the entire menu is in the HTML a crawler
+          receives, and a tab that hid three quarters of it would defeat the one
+          thing the app is for. Same pill row, and it needs no JavaScript. */}
+      <ul className="menu-nav">
+        {TAB_ORDER.filter((tab) => grouped[tab]?.length).map((tab) => (
+          <li key={tab}>
+            <a href={`#${tab}`}>{label(MENU_TAB_LABEL[tab])}</a>
+          </li>
+        ))}
+      </ul>
+
       {TAB_ORDER.map((tab) => {
         const items = grouped[tab];
         if (!items || items.length === 0) {
           return null;
         }
         return (
-          <section key={tab}>
-            <h3 style={{ fontSize: 16, margin: '20px 0 4px' }}>{tab}</h3>
-            {items.map((item) => (
-              <div key={item.id} className={item.isAvailable ? 'dish' : 'dish unavailable'}>
-                <div>
-                  <div className="name">{item.name}</div>
-                  {item.desc && <div className="desc">{item.desc}</div>}
-                  {!item.isAvailable && <div className="faint">{label('soldOut')}</div>}
+          <section key={tab} className="menu-section">
+            <h3 id={tab}>{label(MENU_TAB_LABEL[tab])}</h3>
+            <div className="dishes">
+              {items.map((item) => (
+                <div key={item.id} className={item.isAvailable ? 'dish' : 'dish unavailable'}>
+                  <div className={item.photoUrl ? 'media' : 'media ph'}>
+                    {item.photoUrl && <img src={item.photoUrl} alt="" loading="lazy" />}
+                  </div>
+                  <div className="text">
+                    <div className="name">{item.name}</div>
+                    {item.desc && <div className="desc">{item.desc}</div>}
+                    <div className="facts">
+                      {[
+                        item.caloriesKcal === null ? null : `${item.caloriesKcal} ${label('kcal')}`,
+                        item.prepMin === null ? null : `${item.prepMin} ${label('minutes')}`,
+                        item.isAvailable ? null : label('soldOut'),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </div>
+                    <div className="price">{formatAmd(item.priceAmd)}</div>
+                  </div>
+
+                  {/* The design's per-dish `＋`. A form rather than a button
+                      with a handler: it posts to a Server Action, so adding to
+                      the basket works with JavaScript off — and it reads no
+                      cookies, which is what lets this page stay pre-rendered. */}
+                  {item.isAvailable && (
+                    <form action={addToBasket}>
+                      <input type="hidden" name="lang" value={language} />
+                      <input type="hidden" name="branchId" value={restaurant.branch.id} />
+                      <input type="hidden" name="slug" value={restaurant.slug} />
+                      <input type="hidden" name="menuItemId" value={item.id} />
+                      <input
+                        type="hidden"
+                        name="returnTo"
+                        value={restaurantPath(language, restaurant.slug)}
+                      />
+                      <button className="add" type="submit" aria-label={label('addToBasket')}>
+                        ＋
+                      </button>
+                    </form>
+                  )}
                 </div>
-                <div className="price">{formatAmd(item.priceAmd)}</div>
-              </div>
-            ))}
+              ))}
+            </div>
           </section>
         );
       })}
+
+      <StickyBasket href={cartPath(language)} label={label('viewBasket')} />
     </>
   );
 }

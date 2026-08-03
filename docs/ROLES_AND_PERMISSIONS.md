@@ -366,6 +366,21 @@ Implemented in `apps/api`:
 - **Reading that trail is `orders:read`**, not `orders:advance`: a shift that may
   only watch the queue still has to be able to answer "when did this come in and
   who confirmed it" at the counter.
+- **Retiming a pre-order's warning is `orders:advance`**
+  (`PATCH /restaurant/orders/{id}/reminder`), not a permission of its own. It is
+  the same person, at the same pass, deciding about the same order — and it moves
+  nothing the customer was promised: the food is still due at the same minute and
+  the price is unchanged. What moves is how much notice the kitchen gives itself,
+  which is a decision about their own shift. It writes an `order_events` row of
+  type `reminder_set` naming who did it and the notice it replaced, because
+  `orders.reminder_lead_min` is overwritten in place and that entry is the only
+  record it ever moved.
+- **A branch's notifications are `orders:read`** (`GET /staff/notifications`,
+  `POST /staff/notifications/read`, and the socket's `watchBranches`). Every
+  notification that exists is about an order, so inventing `notifications:read`
+  would create a permission nobody could hold without also holding this one. The
+  rows are addressed to a **branch**, and read-marks are per person: the first
+  colleague to open the bell must not clear it for the shift.
 - **A person's activity is scoped twice** (`GET /staff/{id}/activity`): to
   somebody the caller can already see in the directory, and then to the entries
   inside the caller's own reach. Someone who works for two restaurants shows each

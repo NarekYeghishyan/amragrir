@@ -58,6 +58,10 @@ enum OrderEventType {
   created
   status_changed
   payment
+  /// A branch moved when it wants warning about a pre-order — see
+  /// `orders.reminder_lead_min`. Not a status change: the order stays where it
+  /// is, and this is the only record of a column that is overwritten in place.
+  reminder_set
 }
 
 /// Who is behind an `order_events` row. Three tables, not one nullable user id:
@@ -108,6 +112,14 @@ enum NotificationType {
   promo
   referral
   system
+}
+
+/// What a `staff_notifications` row is telling a branch about. One value so far;
+/// it is an enum rather than a string so the panel's rendering is exhaustive and
+/// a second kind cannot be added without the switch failing to compile.
+enum StaffNotificationType {
+  /// A pre-order is about to need cooking — see `orders.reminder_at`.
+  prep_due
 }
 
 enum CouponSource {
@@ -200,14 +212,15 @@ model RestaurantBranch {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  restaurant   Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  tables       Table[]
-  menuItems    MenuItem[]
-  orders       Order[]
-  reservations Reservation[]
-  assignments  StaffAssignment[]
-  invites      StaffInvite[]
-  auditEntries AuditLog[]
+  restaurant    Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  tables        Table[]
+  menuItems     MenuItem[]
+  orders        Order[]
+  reservations  Reservation[]
+  assignments   StaffAssignment[]
+  invites       StaffInvite[]
+  auditEntries  AuditLog[]
+  notifications StaffNotification[]
 
   @@index([restaurantId])
   @@index([lat, lng])
@@ -292,6 +305,54 @@ model Order {
   couponId      String?     @map("coupon_id") @db.Uuid
   totalAmd      Int         @map("total_amd")
   readyAt       DateTime?   @map("ready_at") @db.Timestamptz(6)
+  /// The prep estimate this order was priced and scheduled against, in minutes —
+  /// the slowest dish, or the branch average, or `DEFAULT_PREP_MIN`. A snapshot
+  /// for the same reason `order_items.unit_price_amd` is one: the dish's
+  /// `prep_min` may change, and an order must keep saying what it was promised
+  /// against. Null on rows written before pre-ordering existed, which is the
+  /// honest answer for them — nothing recorded it.
+  prepMin       Int?        @map("prep_min") @db.SmallInt
+  /// When the kitchen has to start, so the food is ready when it was promised —
+  /// `ready_at` minus `prep_min`. Stored rather than recomputed because it is
+  /// what the board sorts on, and a sort key derived per row is a sort the
+  /// database cannot do.
+  prepStartAt   DateTime?   @map("prep_start_at") @db.Timestamptz(6)
+  /// How long before `ready_at` the branch is warned, in minutes — the number
+  /// `reminder_at` is computed from, and the one the shift may move.
+  ///
+  /// Defaulted to `prep_min` + `PREP_REMINDER_BUFFER_MIN` when the order is
+  /// placed, which is the arithmetic that was already there. An operator who
+  /// knows the dish better than the estimate does raises it: a skewer wants
+  /// lighting the coals before it wants cooking, and forty-five minutes of
+  /// notice is a thing a person knows and a menu column does not.
+  ///
+  /// Null exactly when `reminder_at` is null — the two are set together and
+  /// cleared together, because a lead with nothing to lead is a number that
+  /// means nothing, and a reminder with no lead could not be explained.
+  reminderLeadMin Int?      @map("reminder_lead_min") @db.SmallInt
+  /// When to warn the branch that this one is coming up: `ready_at` minus
+  /// `reminder_lead_min`.
+  ///
+  /// **Null means the order was placed for as soon as possible**, and that is
+  /// the whole of what distinguishes a pre-order from an ordinary one. Nothing
+  /// needs reminding about an order that is already the kitchen's problem, so
+  /// the column that schedules the reminder is also the flag for having been
+  /// scheduled — the same doubling-up `reservations.active_slot` uses, and for
+  /// the same reason: two columns that must always agree eventually will not.
+  ///
+  /// It is also the boundary the Scheduled stage is drawn on. Still in the
+  /// future, and the order is a booking; passed, and it is this shift's work.
+  /// By the clock rather than by `reminder_sent_at`, so an order still lands on
+  /// the board on time in a deployment where the reminder job never ran.
+  reminderAt    DateTime?   @map("reminder_at") @db.Timestamptz(6)
+  /// Set by the reminder job once it has told the branch. Only ever read to stop
+  /// it telling them twice — never to decide which stage an order is in.
+  ///
+  /// Cleared again when a shift lengthens `reminder_lead_min` past the point the
+  /// warning already went out: the earlier notice was for a moment that is no
+  /// longer the one anybody chose, and leaving this set would mean the new time
+  /// silently never fires.
+  reminderSentAt DateTime?  @map("reminder_sent_at") @db.Timestamptz(6)
   reservationId String?     @unique @map("reservation_id") @db.Uuid
   notes         String?
   createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -304,9 +365,13 @@ model Order {
   items       OrderItem[]
   payment     Payment?
   events      OrderEvent[]
+  notifications StaffNotification[]
 
   @@index([userId, status])
   @@index([branchId, status])
+  /// The board splits every stage on "is this due yet", and sorts on when the
+  /// kitchen has to start. One branch's queue, in the order it will be worked.
+  @@index([branchId, reminderAt, prepStartAt])
   @@index([code])
   @@map("orders")
 }
@@ -547,6 +612,8 @@ model StaffUser {
   orderEvents   OrderEvent[]      @relation("OrderEventStaffActor")
   /// Orders moved while acting as somebody else — see `OrderEvent.actingStaffId`.
   orderEventsAs OrderEvent[]      @relation("OrderEventActingStaff")
+  /// Branch notifications this person has read — see `StaffNotificationRead`.
+  notificationReads StaffNotificationRead[]
 
   @@map("staff_users")
 }
@@ -609,6 +676,69 @@ model StaffInvite {
 
   @@index([email])
   @@map("staff_invites")
+}
+
+/// Something a branch needs telling about, addressed to the branch rather than
+/// to a person.
+///
+/// Not a staff-side copy of `notifications`. That table has a `user_id` and is
+/// one customer's inbox; this one has a `branch_id`, because a shift is not a
+/// person — whoever is holding the tablet needs to see that a pre-order is
+/// coming up, and which of the three people assigned to the branch that is
+/// changes hourly. Fanning one reminder out into a row per assigned staff member
+/// would instead make "who is on tonight" a thing the writer has to know, and
+/// would leave the notification undeliverable to somebody assigned five minutes
+/// later.
+///
+/// Reach follows the same rule as everything else in the back office: a row is
+/// readable by an account whose `orders:read` scope covers its branch.
+///
+/// **Nothing here is prose.** A reminder is written by a job, and a job has no
+/// request to take a language from — writing "Салат нужно начать" at 3am would
+/// pick a language for a reader who has not arrived yet. The row carries the
+/// type and the numbers, and the panel renders them through its own dictionary,
+/// exactly as it does for order statuses and history entries.
+model StaffNotification {
+  id        String                @id @default(uuid()) @db.Uuid
+  branchId  String                @map("branch_id") @db.Uuid
+  type      StaffNotificationType
+  /// What it is about, when it is about an order. Nullable because a later type
+  /// need not be — and `ON DELETE CASCADE`, since a notification pointing at an
+  /// order that is gone has nothing left to say.
+  orderId   String?               @map("order_id") @db.Uuid
+  /// The numbers the panel needs to render the line — pickup code, the time it
+  /// is due, how long it takes. Shaped per `type` and read only for display, so
+  /// a new kind of reminder is not a migration.
+  payload   Json?
+  createdAt DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  branch RestaurantBranch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  order  Order?                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reads  StaffNotificationRead[]
+
+  /// One branch's bell, newest first.
+  @@index([branchId, createdAt])
+  @@map("staff_notifications")
+}
+
+/// That one person has seen one notification.
+///
+/// A join table rather than an `is_read` column on the row above, because the
+/// row above belongs to a branch and being read is something a *person* does.
+/// A single flag would mean the first colleague to open the bell clears it for
+/// everyone else on the shift — which is precisely the failure a kitchen
+/// notification exists to avoid.
+model StaffNotificationRead {
+  notificationId String   @map("notification_id") @db.Uuid
+  staffUserId    String   @map("staff_user_id") @db.Uuid
+  readAt         DateTime @default(now()) @map("read_at") @db.Timestamptz(6)
+
+  notification StaffNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  staffUser    StaffUser         @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+
+  @@id([notificationId, staffUserId])
+  @@index([staffUserId])
+  @@map("staff_notification_reads")
 }
 
 /// Who did what. Once two people share a restaurant, "who marked this sold out"

@@ -15,6 +15,8 @@ import { AdminModule } from './admin/admin.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { ReferralsModule } from './referrals/referrals.module';
 import { OrderEventsModule } from './orders/order-events.module';
+import { NotificationEventsModule } from './notifications/notification-events.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
@@ -43,6 +45,7 @@ import { IdempotencyInterceptor } from './common/idempotency/idempotency.interce
     UsersModule,
     CatalogModule,
     OrderEventsModule,
+    NotificationEventsModule,
     OrdersModule,
     PaymentsModule,
     FavoritesModule,
@@ -52,6 +55,7 @@ import { IdempotencyInterceptor } from './common/idempotency/idempotency.interce
     RestaurantModule,
     StaffModule,
     UploadsModule,
+    NotificationsModule,
     HealthModule,
   ],
   providers: [

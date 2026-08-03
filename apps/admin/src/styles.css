@@ -159,6 +159,112 @@ p {
   flex: none;
 }
 
+/* ── the bell ───────────────────────────────────────────────────────────────
+   Shaped like `.account` below it, because the two are the same kind of thing:
+   the strip at the foot of the sidebar is what the panel says *to* you, as
+   opposed to the map above it. */
+.bell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-inner);
+  background: transparent;
+  color: var(--ink2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.bell:hover {
+  border-color: var(--line);
+  background: var(--chip);
+  color: var(--ink);
+}
+.bell svg {
+  flex: none;
+}
+.bell__text {
+  flex: 1;
+  min-width: 0;
+}
+/* The count sits at the end of the row rather than over the icon: a badge
+   clipped to a corner is unreadable past nine, and this one is a number
+   somebody acts on rather than a dot that says "something". */
+.bell__count {
+  flex: none;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: var(--on-danger, #fff);
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  line-height: 20px;
+}
+
+/* One thing a branch has been told. */
+.bells {
+  display: grid;
+  gap: var(--space-sm);
+  list-style: none;
+}
+.bells__entry {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+}
+/* Unread carries a tint rather than a dot, so the difference survives being
+   read across a room — which is where a kitchen tablet is. */
+.bells__entry--new {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.bells__what {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.bells__at {
+  color: var(--ink3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.bells__detail {
+  color: var(--ink2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.bells__open {
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.bells__open:hover {
+  text-decoration: underline;
+}
+
+/* The two numbers under the warning input: what the menu estimated, and when
+   the notice being typed would actually land. */
+.reminder__facts {
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+}
+.reminder__preview {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .account {
   display: flex;
   align-items: center;
@@ -1712,6 +1818,19 @@ p {
   color: var(--danger);
   font-size: 13px;
   font-weight: 600;
+}
+/* When a pre-order is due, and when the kitchen has to start on it. Accent
+   rather than danger: it is the card telling you something, not warning you —
+   the warning is `.order__late`, and a booking that has not come round yet is
+   the one card on the board that cannot be late. */
+.order__schedule {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .order__note {
   padding: var(--space-sm) var(--space-md);

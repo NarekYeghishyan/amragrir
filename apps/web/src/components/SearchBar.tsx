@@ -36,6 +36,16 @@ export function SearchBar({
 
   return (
     <form className="searchbar" action={action} method="get" role="search" onSubmit={submit}>
+      {/* The magnifier is the submit button, drawn where the design puts its
+          icon. The design has no button — but this form has to submit with
+          JavaScript off, and an icon that only looks like a control is worse
+          than one that is one. Its accessible name is the search label. */}
+      <button type="submit" aria-label={label} title={label}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+          <path d="M20 20l-3.2-3.2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </button>
       <input
         type="search"
         name="q"
@@ -44,7 +54,6 @@ export function SearchBar({
         placeholder={placeholder}
         aria-label={label}
       />
-      <button type="submit">{label}</button>
     </form>
   );
 }

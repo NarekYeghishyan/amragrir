@@ -20,7 +20,7 @@ import { MenuService } from './menu.service';
 import { MenuHistoryService } from './menu-history.service';
 import { RestaurantReservationsService } from './reservations.service';
 import { ListStaffReservationsDto, SetReservationStatusDto } from '../reservations/dto';
-import { ListQueueDto, SetOrderStatusDto } from './dto';
+import { ListQueueDto, SetOrderReminderDto, SetOrderStatusDto } from './dto';
 import {
   CreateBranchDto,
   CreateMenuItemDto,
@@ -83,6 +83,24 @@ export class RestaurantController {
     @Body() dto: SetOrderStatusDto,
   ) {
     return this.orders.setStatus(staff, id, dto);
+  }
+
+  /**
+   * How much notice the branch wants on a pre-order.
+   *
+   * `orders:advance` rather than a permission of its own: it moves nothing the
+   * customer was promised — the food is still due at the same minute — and the
+   * person who should decide how much warning the pass gets is the person
+   * working it.
+   */
+  @Patch('orders/:id/reminder')
+  @RequiresPermission(Permission.OrdersAdvance)
+  setOrderReminder(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetOrderReminderDto,
+  ) {
+    return this.orders.setReminderLead(staff, id, dto);
   }
 
   @Get('reservations')

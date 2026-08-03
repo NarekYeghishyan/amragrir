@@ -63,6 +63,25 @@ export interface OrderEventDetail {
   totalAmd?: number;
   /** When the kitchen promised it, as of this entry. */
   readyAt?: string | null;
+  /** Whether the customer chose that time rather than taking the earliest — set
+   *  on the `created` entry. Recorded because "placed for next Tuesday" and
+   *  "placed, ready in twenty minutes" are different events, and a timeline that
+   *  showed only `readyAt` would leave whoever is reading it to subtract two
+   *  timestamps to find out which happened. */
+  scheduled?: boolean;
+  /**
+   * The notice the branch gave itself, in minutes before `readyAt` — set on a
+   * `reminder_set` entry, together with the value it replaced.
+   *
+   * Both, because the column is overwritten in place: without the previous
+   * figure the timeline could say a warning was moved but not what it was moved
+   * from, and "somebody set it to 45" is not an answer to "why did this go out
+   * so early".
+   */
+  reminderLeadMin?: number;
+  previousReminderLeadMin?: number | null;
+  /** When the warning now falls due, as of this entry. */
+  reminderAt?: string | null;
   paymentMethod?: PaymentMethod;
   paymentStatus?: PaymentStatus;
   amountAmd?: number;

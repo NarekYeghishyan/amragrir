@@ -44,6 +44,16 @@ interface SeedBranch {
   address: string;
   lat: number;
   lng: number;
+  /**
+   * The branch's own line. Seeded because the column existing while no row
+   * filled it meant the restaurant page's contact line — and the "call the
+   * restaurant" action beside it — never rendered for anybody, so nobody
+   * could see that either worked.
+   *
+   * `+374 10 555 0xx`: a Yerevan landline prefix with a 555 block, which is
+   * recognisably demo data and cannot dial a real subscriber.
+   */
+  phone: string;
   avgPrepMin: number;
   isOpen: boolean;
 }
@@ -79,6 +89,7 @@ const RESTAURANTS: SeedRestaurant[] = [
         address: 'Northern Ave 5, Yerevan',
         lat: 40.18111,
         lng: 44.51361,
+        phone: '+374 10 555 001',
         avgPrepMin: 12,
         isOpen: true,
       },
@@ -106,6 +117,7 @@ const RESTAURANTS: SeedRestaurant[] = [
         address: 'Tamanyan St 12, Yerevan',
         lat: 40.19012,
         lng: 44.51567,
+        phone: '+374 10 555 002',
         avgPrepMin: 10,
         isOpen: true,
       },
@@ -281,6 +293,10 @@ function expand(chain: SeedChain, chainIndex: number): SeedRestaurant {
       // Nudged per branch so two restaurants on one street are not one pin.
       lat: Number((spot.lat + chainIndex * 0.0002).toFixed(5)),
       lng: Number((spot.lng + chainIndex * 0.0002).toFixed(5)),
+      // Unique per branch, and derived from the index like everything else
+      // here. Starts at 100, so it never collides with the hand-written pair
+      // above. A branch of a chain answers its own line, not head office.
+      phone: `+374 10 555 ${String(100 + chainIndex * 10 + i).padStart(3, '0')}`,
       avgPrepMin: 8 + ((chainIndex + i) % 5) * 3,
       // Every seventh branch is shut, so the panel's "Closed" badge and the
       // "open and selling nothing" tooltip have something to render against.
@@ -304,6 +320,22 @@ function expand(chain: SeedChain, chainIndex: number): SeedRestaurant {
 
 /** The two hand-written ones, then the twenty chains. */
 const ALL_RESTAURANTS: SeedRestaurant[] = [...RESTAURANTS, ...CHAINS.map(expand)];
+
+/**
+ * Gives already-seeded branches the phone number they predate.
+ *
+ * Matched on the branch name, which is what identifies a branch within its
+ * restaurant here, and applied **only where the column is still null** — a
+ * number corrected in the back office must survive the next reseed.
+ */
+async function backfillPhones(restaurantId: string, branches: SeedBranch[]): Promise<void> {
+  for (const b of branches) {
+    await prisma.restaurantBranch.updateMany({
+      where: { restaurantId, name: b.name, phone: null },
+      data: { phone: b.phone },
+    });
+  }
+}
 
 async function main(): Promise<void> {
   // Demo owner for all seeded restaurants.
@@ -376,6 +408,11 @@ async function main(): Promise<void> {
       where: { restaurantId: restaurant.id },
     });
     if (existingBranch) {
+      // Branches and menus are already there — but a phone may not be. It was
+      // added to this seed after these rows existed, and returning here would
+      // leave every database seeded before then without one, which looks
+      // exactly like the contact line and the call action not working.
+      await backfillPhones(restaurant.id, r.branches);
       continue; // already seeded this restaurant's branches + menus
     }
 
@@ -387,6 +424,7 @@ async function main(): Promise<void> {
           address: b.address,
           lat: b.lat,
           lng: b.lng,
+          phone: b.phone,
           avgPrepMin: b.avgPrepMin,
           isOpen: b.isOpen,
         },

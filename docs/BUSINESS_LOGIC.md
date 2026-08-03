@@ -118,6 +118,77 @@ See the deposit table in §3.
 - A requested `ready_at` earlier than that estimate is rejected; so is one more
   than `ORDER_MAX_LEAD_DAYS` ahead. A minute of slack is allowed for clock skew
   between the quote and the order.
+
+### Ordering for later (pre-orders)
+
+A customer either takes the earliest the kitchen can manage — the ordinary path,
+unchanged — or picks a time: in an hour, this evening, next Tuesday. Picking one
+makes it a **pre-order**, and four things follow from that.
+
+**What is stored.** `orders.prep_min` is the estimate the order was scheduled
+against (a snapshot, like the line prices); `orders.prep_start_at` is
+`ready_at` less that estimate, the moment the kitchen has to begin; and
+`orders.reminder_at` is when the branch is warned. The rules are one pure
+function, `apps/api/src/orders/scheduling.ts`, shared by the basket quote and by
+order creation so the two cannot disagree about which times are legal.
+
+**What makes an order a pre-order is `reminder_at`, and nothing else.** The
+reminder is `ready_at` less the notice below; for an order wanted as soon as
+possible it lands in the past, so the column is null — there is nobody to warn
+about an order the kitchen already has. An order is a pre-order exactly when
+there is still time to warn somebody about it, so the column that schedules the
+warning is also the flag for having been scheduled. This means a basket that
+echoes back the `earliestReadyAt` a quote just gave it is *not* a pre-order,
+which is the correct answer: that is "now", written as a timestamp.
+
+**A pre-order must fall inside the branch's opening hours** (`open_hours`, read
+by `apps/api/src/common/open-hours.ts`, defaulting to `DEFAULT_OPEN_HOURS`).
+Checked only for a genuine pre-order: an order placed ten minutes before closing
+whose food is ready five minutes after is an ordinary thing to sell, and gating
+that on hours would refuse a customer standing in a shop that is open. What the
+check exists to stop is a pickup booked for 04:00 next Sunday.
+*Open in the branch admin: nothing yet writes `open_hours` — the default is the
+live path. Until a branch can set its own, every branch is treated as open
+10:00–23:00.*
+
+**Paying for a pre-order confirms it.** `paid` means "waiting for the restaurant
+to accept it", and that is only a question worth asking about work in front of
+somebody: nobody presses Confirm on Monday for a Saturday order, and until
+somebody did, the diner's screen would say the restaurant had not looked at it.
+So the same transaction that takes the money moves the order to `confirmed`,
+recorded in `order_events` with a **`system`** actor — a diner cannot accept an
+order on a restaurant's behalf, and no member of staff was there. Ordinary
+orders are untouched: they still wait on the Paid tab for a person.
+
+**The branch is warned before it has to start.** `orders.reminder_lead_min` is
+how many minutes before `ready_at` that happens, defaulting to
+`defaultReminderLeadMin(prep_min)` — the prep estimate plus
+`PREP_REMINDER_BUFFER_MIN`, because a notification arriving exactly when work
+must begin is a deadline that has already passed, not a warning.
+
+**A shift may move that notice**, between `REMINDER_LEAD_MIN_MINUTES` and
+`REMINDER_LEAD_MAX_MINUTES` (`PATCH /restaurant/orders/{id}/reminder`,
+`orders:advance`). The estimate is the slowest dish on the ticket and knows
+nothing about the coals a skewer wants lighting first, so thirty minutes of
+cooking can be forty-five minutes of notice. This is the **only** thing about a
+placed order anybody may change, and it changes nothing the customer was
+promised: `ready_at` stands, the price stands. Moving it recomputes
+`reminder_at`, re-arms `reminder_sent_at` when the new moment is still ahead,
+and writes a `reminder_set` entry to `order_events` naming who did it and what
+the notice was before — the column is overwritten in place, so that entry is the
+only record it ever moved. A lead longer than the time remaining is legal and
+means "warn me now"; a terminal order and an order placed for as soon as
+possible are both refused, the latter because it has no warning to move.
+
+**The warning itself** is raised by the API's one scheduled job
+(`OrderRemindersService`, every minute, Redis-locked so one instance sends),
+which writes a `staff_notifications` row for the branch and announces it on the
+socket. See DATABASE.md §8b.
+
+**Pre-orders stay off the live board until their hour comes.** The back office
+splits every stage on `reminder_at` against the clock — never on
+`reminder_sent_at`, so an order still reaches the board on time in a deployment
+where the job is not running. The job announces; it does not gatekeep.
 - **Countdown** after placing: starts at `480 seconds` (8:00 min) to readiness (demo value). **[from design]** In production `ready_at` is computed from the chosen time and current kitchen load.
 - **Pickup code** generated per order; for dine-in — table number. **[from design]**
   It is the **last four digits of `orders.code`** (`AMR-42774033` → `4033`) —
@@ -395,6 +466,8 @@ customer buy the dish would not be a delete.
 | Max dishes per order | 50 | proposed |
 | Max pre-order lead time | 7 days | proposed |
 | Fallback prep time | 15 min | proposed |
+| Pre-order warning buffer (added to the prep estimate) | 10 min | proposed |
+| Warning notice a shift may set | 5 min – 24 h | proposed |
 
 > Move all numeric business constants to config/settings, do not hardcode.
 > They currently live in `packages/shared/src/constants.ts`; the ordering

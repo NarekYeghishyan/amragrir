@@ -47,7 +47,8 @@ Point it elsewhere with `VITE_API_URL=https://api.example.com/v1 pnpm build`.
 
 ```
 src/
-├── App.tsx              # the shell: sidebar, account menu, which screen shows
+├── App.tsx              # the shell: sidebar, the bell, account menu, which
+│                        #   screen shows
 ├── navigation.ts        # which tab needs which permission, what its address
 │                        #   is, and how to read one — pure data + parse/format
 ├── router.tsx           # the address bar as state: useHref, navigate, <Link>
@@ -58,7 +59,14 @@ src/
 ├── acting.tsx           # signing in as somebody: the rule and the button, for
 │                        #   the two screens that list people
 ├── api.ts               # client + endpoints, token storage, refresh
-├── order-stream.ts      # one socket for the whole board
+├── order-stream.ts      # the sockets: one for the whole board, one for the
+│                        #   shell's bell (different lifetimes — see below)
+├── notifications.tsx    # the bell in the sidebar: what a branch has been told,
+│                        #   the sentences built from a job's numbers, and the
+│                        #   read-marks that are per person rather than per shift
+├── order-reminder.tsx   # a pre-order's warning: how much notice the branch
+│                        #   wants, the dialog behind the card's button, and the
+│                        #   line that says when it is due and when to start
 ├── menu-history.tsx     # a dish's change log: the dialog behind each menu
 │                        #   row's History button, and the sentence + diff it
 │                        #   builds out of one recorded entry
@@ -85,8 +93,9 @@ src/
 │   └── icons.tsx        # the inline icon set
 └── screens/
     ├── SignIn.tsx       # email + password, invite acceptance, reset
-    ├── Orders.tsx       # live kitchen queue + status buttons, and the
-    │                    #   History and QR dialogs behind each card
+    ├── Orders.tsx       # live kitchen queue + status buttons, the Booked tab
+    │                    #   for orders placed ahead, and the History, QR and
+    │                    #   warning dialogs behind each card
     ├── Menu.tsx         # price and availability in the row; add, edit and
     │                    #   delete a dish, and the History dialog behind each
     ├── Restaurants.tsx  # the list, and one restaurant opened: facts, admins,
@@ -523,9 +532,10 @@ tells you where the order went — the alternative is an empty board and no
 reason given. `past` also made finished orders reachable at all; before this
 the panel only ever asked for active ones.
 
-**The stage tabs are the state machine: *Paid · Confirmed · Preparing · Almost
-ready · Ready · Done*.** One per status, in the order an order moves through
-them. They used to be coarser — a single *New* spanning `created`, `paid` and
+**The stage tabs are the state machine: *Booked · Paid · Confirmed · Preparing ·
+Almost ready · Ready · Done*.** One per status, in the order an order moves
+through them — with *Booked* ahead of all of it, which is the one that is not a
+status at all (below). They used to be coarser — a single *New* spanning `created`, `paid` and
 `confirmed`, and a *Preparing* that swallowed `almost_ready` — on the argument
 that a kitchen makes one decision there rather than three. It does not:
 accepting an order, starting to cook it and plating it are three different
@@ -542,7 +552,43 @@ for the counter, not everything on its way to the pass.
 **The board opens on Paid**, and that is where clearing the filters returns it.
 It is the only stage whose next move belongs to the restaurant — the money is
 in, nobody has accepted the order, and a diner is watching a timer that has not
-started. Everything after it is work under way or work finished.
+started. Everything after it is work under way or work finished. *Booked* is
+first in the strip and deliberately not the landing tab: the difference between
+"here if you want it" and "here is what to do next".
+
+**Booked is a question about time, not about status.** Its orders are `paid` or
+`confirmed` exactly like an order at the counter, and what tells them apart is
+`orders.reminder_at` still being in the future. It exists because the board sorts
+by when the kitchen must start: without it, an order placed today for next
+Tuesday is the *oldest* paid order for a week and sits pinned above the work
+somebody is doing. Every other tab is implicitly the other half of that split.
+The API decides which side a card is on — against the same instant it selected
+the page under — so the panel's own clock can never put one on the wrong tab.
+
+**A card leaves Booked by the clock, not by anybody pressing anything.** Nothing
+in the panel confirms a pre-order either: paying for one accepts it outright
+(BUSINESS_LOGIC.md §4), so it arrives here already `confirmed`, and when its
+hour comes it simply appears under Confirmed with the rest of the shift's work.
+The bell is what makes that visible — see below.
+
+**Each booked card carries a warning button showing its own notice** — "Warn 40
+min ahead". The number comes from the menu's prep estimate plus a buffer, which
+is a reasonable default and a poor rule: the estimate is the slowest dish on the
+ticket and knows nothing about the coals a skewer wants lighting first. Pressing
+it opens `order-reminder.tsx`, which takes minutes before the food is due —
+bounded by the same `shared` constants the DTO validates, so a form cannot offer
+a value the API refuses — and previews the moment it would land, because "45"
+means nothing on its own to somebody deciding whether it is enough. Saving
+patches the one card rather than refetching the board: the board is live, and
+re-reading fifty orders to record that one number moved would let a stale
+response overwrite a status the socket delivered while it was in flight.
+
+**The countdown and the late warning are both suppressed on a booked card.**
+`secondsLeft` counts to the moment the food is due, so on an order placed for
+next Tuesday it reads "ready in 8,640 min" and goes negative the second it is
+paid for. Warning a kitchen that it is late for work it was not meant to have
+started is how a warning stops meaning anything. The card says the day and hour
+it is due and when to start on it instead.
 
 **`active` is not on the strip.** It was the old default and answered "show me
 everything", which is not a question with an action attached: it mixed a paid
@@ -557,7 +603,7 @@ status: an order placed and never paid for, an abandoned basket or a card that
 was declined. It hangs off Paid rather than taking a place on the strip, because
 the strip is the path an order takes through a kitchen and an unpaid order never
 enters it. It is worth reaching at all because **nothing expires those rows** —
-there is no scheduled job in the API of any kind, so without a tab they pile up
+no job in the API touches an abandoned basket, so without a tab they pile up
 entirely out of sight.
 
 **The nesting is presentation only.** Both levels are ordinary `QueueFilter`
@@ -809,6 +855,31 @@ for the server's broadcast, so what is on screen is what was recorded — a
 kitchen acting on a status that did not actually save is worse than a moment of
 latency.
 
+**The bell lives in the shell, not on the board.** The whole point of a reminder
+is that it reaches somebody who is looking at something else: an order due at
+eight is announced at ten past seven, and nobody is watching the Booked tab at
+ten past seven. It sits at the foot of the sidebar, above the account menu,
+gated on `orders:read` — every notification that exists is about an order.
+
+It has **a socket of its own**, which is the reason `order-stream.ts` exports
+two. The board's opens when somebody looks at the queue and closes when they
+leave it; sharing it would leave the bell deaf on every screen but Orders. What
+arrives on it is deliberately thin — an id and a branch — and the bell re-reads
+the list rather than rendering the frame: `GET /staff/notifications` is where
+reach is checked and where "have *I* seen this" is answered.
+
+**Read is per person, and the API is what makes that possible.** A branch's bell
+is read by people, one at a time, so opening it marks only the ids that were on
+screen when it opened — a row that arrives while it is open stays new, which is
+the honest answer. A colleague on their own tablet still sees everything as new.
+A failed mark is swallowed rather than surfaced: failing to record that somebody
+looked at a list is not worth interrupting them over, and the next open retries.
+
+**Nothing in a notification is prose from the API.** The rows are written by a
+job, and a job has no request to take a language from, so they carry a type and
+some numbers and the sentences are built here — exactly as order statuses and
+history entries are.
+
 **Every card has a History button, because the card itself can only show the
 present.** A badge reading "Preparing" cannot say when the order came in, who
 confirmed it, or whether the card that paid for it was declined twice first —
@@ -896,3 +967,12 @@ a row's link lands on the board scoped to its branch and narrowed to its code. I
 also asserts that **every order status falls into exactly one of the three
 narrowing filters** — a status in two is double counted on the segments and one
 in none disappears from them, and neither fails loudly anywhere else.
+
+`reminder-ui.spec.ts` covers pre-orders as the panel presents them: the notice a
+shift may type (whole minutes, inside the same bounds the DTO enforces — a
+half-typed "4.5" is not a number yet), the moment that notice would land
+(**counted back from when the food is due**, which is the whole contract), the
+card's two lines about a booking, and the sentences the bell builds out of a
+job's numbers. It also pins the queue's sort key, including that a row which
+never recorded a start time sorts **last** rather than first — the API's rule
+too, and the two disagreeing would reorder the board under somebody's hand.

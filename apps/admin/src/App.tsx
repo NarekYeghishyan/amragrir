@@ -11,6 +11,7 @@ import {
   type StaffProfile,
 } from './api';
 import type { Acting } from './acting';
+import { NotificationBell } from './notifications';
 import { LanguageProvider, useLanguage, useT } from './i18n';
 import { LANGUAGES, LANGUAGE_LABEL_KEYS } from './language';
 import {
@@ -340,6 +341,18 @@ function Shell({
             </Fragment>
           ))}
         </nav>
+
+        {/* Above the account and below the map, because it is neither: it is
+            what the panel has to say to whoever is holding it. In the shell
+            rather than on the board, since the whole point of a reminder is
+            that it reaches somebody who is looking at something else — an order
+            due at eight is announced at ten past seven, and nobody is watching
+            the Scheduled tab at ten past seven.
+
+            Gated on `orders:read`, which is what the API gates the list on.
+            Every notification that exists is about an order, so an account that
+            cannot see the board has nothing to be told. */}
+        {can(Permission.OrdersRead) && <NotificationBell t={t} />}
 
         <AccountMenu me={me} onSignOut={onSignOut} />
       </aside>

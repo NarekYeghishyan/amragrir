@@ -1,9 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { Language } from '@amragrir/shared';
 import { dictionaries } from '@amragrir/i18n';
-import { LANGUAGES, negotiate, parseLanguage, t } from './language';
+import { LANGUAGES, parseLanguage, t } from './language';
 import { formatAmd, formatDistance, formatPriceLevel, formatRating } from './format';
-import { hreflangFor, homePath, restaurantPath } from './site';
+import {
+  cartPath,
+  checkoutPath,
+  hreflangFor,
+  homePath,
+  orderPath,
+  ordersPath,
+  preorderPath,
+  resolveLanguageRoute,
+  restaurantPath,
+  routePath,
+  searchPath,
+  sessionPath,
+  signinPath,
+} from './site';
 
 describe('parseLanguage', () => {
   it('accepts the three supported languages', () => {
@@ -20,20 +34,44 @@ describe('parseLanguage', () => {
   });
 });
 
-describe('negotiate', () => {
-  it('picks the first supported tag', () => {
-    expect(negotiate('ru-RU,ru;q=0.9,en;q=0.8')).toBe(Language.Ru);
-    expect(negotiate('en-GB,en;q=0.9')).toBe(Language.En);
+describe('resolveLanguageRoute', () => {
+  it('serves Armenian at the bare domain, without a redirect', () => {
+    // A rewrite, so the visitor keeps the unprefixed URL they asked for.
+    expect(resolveLanguageRoute('/')).toEqual({ action: 'rewrite', pathname: '/hy' });
+    expect(resolveLanguageRoute('/r/sunny-table')).toEqual({
+      action: 'rewrite',
+      pathname: '/hy/r/sunny-table',
+    });
   });
 
-  it('skips unsupported tags rather than giving up on the first one', () => {
-    expect(negotiate('de-DE,de;q=0.9,hy;q=0.5')).toBe(Language.Hy);
-    expect(negotiate('fr,ru;q=0.7')).toBe(Language.Ru);
+  it('leaves the prefixed languages alone', () => {
+    expect(resolveLanguageRoute('/ru')).toEqual({ action: 'pass' });
+    expect(resolveLanguageRoute('/en/r/sunny-table')).toEqual({ action: 'pass' });
   });
 
-  it('defaults to Armenian', () => {
-    expect(negotiate(null)).toBe(Language.Hy);
-    expect(negotiate('de,fr')).toBe(Language.Hy);
+  it('redirects /hy away, so one page never has two addresses', () => {
+    expect(resolveLanguageRoute('/hy')).toEqual({ action: 'redirect', pathname: '/' });
+    expect(resolveLanguageRoute('/hy/r/sunny-table')).toEqual({
+      action: 'redirect',
+      pathname: '/r/sunny-table',
+    });
+  });
+
+  it('names the route, not the link, for revalidation', () => {
+    // Every route in this app is `/[lang]/…`; the unprefixed URL is a rewrite.
+    expect(routePath('/')).toBe('/hy');
+    expect(routePath('/cart')).toBe('/hy/cart');
+    expect(routePath('/orders/abc')).toBe('/hy/orders/abc');
+    expect(routePath('/ru/cart')).toBe('/ru/cart');
+    // A cache entry is per route, never per query string.
+    expect(routePath('/cart?switch=7%7Ca%7Cb')).toBe('/hy/cart');
+  });
+
+  it('does not mistake a longer segment for a language', () => {
+    // `/rubicon` starts with `ru` but is not Russian, and `/hyphen` is not a
+    // stale Armenian URL — both are Armenian pages (and then 404s).
+    expect(resolveLanguageRoute('/rubicon')).toEqual({ action: 'rewrite', pathname: '/hy/rubicon' });
+    expect(resolveLanguageRoute('/hyphen')).toEqual({ action: 'rewrite', pathname: '/hy/hyphen' });
   });
 });
 
@@ -69,20 +107,49 @@ describe('t', () => {
 });
 
 describe('paths', () => {
-  it('build language-prefixed urls', () => {
+  it('prefix the other languages but not the default one', () => {
     expect(homePath('ru')).toBe('/ru');
     expect(restaurantPath('en', 'sunny-table')).toBe('/en/r/sunny-table');
+
+    // Armenian is served at the bare domain; `/` is a path, `''` is not.
+    expect(homePath('hy')).toBe('/');
+    expect(restaurantPath('hy', 'sunny-table')).toBe('/r/sunny-table');
+    expect(searchPath('hy', 'khorovats')).toBe('/search?q=khorovats');
+  });
+
+  it('never emit a /hy url', () => {
+    // The middleware redirects those away, so a helper that built one would
+    // put a pointless round trip in front of most of the site's traffic.
+    const builders = [
+      homePath,
+      cartPath,
+      preorderPath,
+      checkoutPath,
+      ordersPath,
+      searchPath,
+      signinPath,
+      (language: string) => restaurantPath(language, 'sunny-table'),
+      (language: string) => orderPath(language, 'abc'),
+      (language: string) => sessionPath(language, '/'),
+      (language: string) => searchPath(language, 'khorovats'),
+      (language: string) => signinPath(language, '/checkout'),
+    ];
+
+    for (const build of builders) {
+      expect(build('hy')).not.toMatch(/^\/hy(\/|$|\?)/);
+      expect(build('ru')).toMatch(/^\/ru(\/|$|\?)/);
+    }
   });
 
   it('offer every language plus x-default for hreflang', () => {
     const map = hreflangFor(LANGUAGES, homePath);
 
     expect(map).toEqual({
-      hy: 'https://amragrir.am/hy',
+      hy: 'https://amragrir.am/',
       ru: 'https://amragrir.am/ru',
       en: 'https://amragrir.am/en',
       // Armenian is the product default, so it is what an unmatched visitor gets.
-      'x-default': 'https://amragrir.am/hy',
+      'x-default': 'https://amragrir.am/',
     });
   });
 });

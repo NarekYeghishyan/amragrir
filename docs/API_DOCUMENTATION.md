@@ -35,11 +35,21 @@ Exceeding either returns 429 `RATE_LIMITED`.
 
 ### POST /auth/send-code · *public*
 Send an OTP to the phone.
-- **Body:** `{ "phone": "+37499123456" }` — any Armenian spelling is accepted
-  (`99123456`, `099123456`, `+374 99 123 456`) and normalised to E.164.
+- **Body:** `{ "phone": "+37499123456" }` — normalised to E.164, in two
+  readings tried in that order:
+  1. **A whole international number**, for any country in `PHONE_COUNTRIES`
+     (`packages/shared`) — currently Armenia `+374`, Russia `+7`, Georgia
+     `+995`, USA `+1`, France `+33`, Germany `+49`, Iran `+98`, UAE `+971`.
+     The national trunk prefix is dropped (`+7 8 912…` → `+7912…`).
+  2. **A bare national number, read as Armenian** — the market, and what
+     somebody typing their own number means. So `99123456`, `099123456`,
+     `99 123 456` and `+374 99 123 456` all still collapse to `+37499123456`.
+- The sign-in form is built from that same list, so it cannot offer a country
+  this endpoint would refuse.
 - **Response 200:** `{ "sent": true, "expiresIn": 120 }`
-- **400** invalid/non-Armenian number. **429** resend requested inside the
-  60s cooldown, with `retryAfter` in the payload.
+- **400** for a number that is neither of the two readings — a wrong length for
+  its country, or a country not on the list. **429** resend requested inside
+  the 60s cooldown, with `retryAfter` in the payload.
 
 ### POST /auth/verify-code · *public*
 Verify the code, return tokens. Creates the account on first verification.
@@ -126,14 +136,36 @@ failing the signup.
 > Each item is a **branch**: that is what a guest travels to, and what carries
 > hours, coordinates and prep time. `id` is the branch id; `slug` identifies the
 > restaurant. Localised fields are resolved from `Accept-Language` (default `hy`).
+>
+> A restaurant therefore appears once per branch. Callers that show restaurants
+> rather than branches — anything without coordinates to tell two branches of a
+> chain apart — pass `groupByRestaurant=1` on the listing below; `/search`
+> already collapses.
 
 ### GET /restaurants
 Nearby list with filters (Home feed).
-- **Query:** `lat, lng, sort(recommended|nearest|fastest|top_rated), distMax, minRating, openNow, dietary[]=vegan…, service[]=pickup|dinein|reserve, category, q, page, limit`
+- **Query:** `lat, lng, sort(recommended|nearest|fastest|top_rated), distMax, minRating, openNow, groupByRestaurant, dietary[]=vegan…, service[]=pickup|dinein|reserve, category, q, page, limit`
 - Array params accept either `?dietary=vegan,halal` or repeated `?dietary=vegan&dietary=halal`.
 - **`openNow`** (`1`/`true`) returns only branches currently open (filters on the
   branch `isOpen`). Any other value is treated as off, so a malformed flag never
   400s — it simply applies no filter.
+- **`groupByRestaurant`** (`1`/`true`) collapses the list to **one row per
+  restaurant**, and makes `total` a count of restaurants rather than branches.
+  Off by default. For a caller that renders restaurants rather than branches:
+  the web listing has one page per restaurant and no coordinates, so ungrouped
+  it drew a five-branch chain as five identical cards that all linked to the
+  same page. The app's home feed sends `lat`/`lng`, tells its branches apart by
+  distance, and should not group.
+  - Collapsing happens **after** filtering and ordering, so the branch kept is
+    the best one under the active query — the fastest under `sort=fastest`, an
+    open one under `openNow`.
+  - With no branch-level sort in play the kept branch is the oldest, which is
+    the one `GET /restaurants/{id}` resolves a slug to. A card and the page it
+    opens therefore describe the same address, hours and prep time.
+- **Ties are broken by `created_at`, then `id`,** under every sort. A chain's
+  branches share one rating, so `ORDER BY rating` ties across all of them, and
+  tied rows in an unspecified order make `page`/`limit` drop and repeat rows
+  between pages.
 - `distanceKm` is `null` unless `lat`/`lng` are supplied; `distMax` and
   `sort=nearest` are ignored without them (`nearest` then falls back to the
   default ordering rather than inventing one).
@@ -214,6 +246,11 @@ Ordered by `sortOrder`. `name` is resolved from `Accept-Language` (default `hy`)
 - Two lists rather than one blended one — "Sushi" is both a cuisine and a dish.
 - Restaurants match on name and cuisine; `distanceKm` is filled in when
   `lat`/`lng` are supplied.
+- **One row per restaurant**, always — no flag, unlike the listing above.
+  Name and cuisine are both restaurant columns, so every branch of a match
+  qualifies, and five branches of one chain would otherwise fill five of the
+  twenty slots the other matches need. The branch returned is the one
+  `GET /restaurants/{id}` resolves the slug to.
 - **Dishes match in any language.** The search runs over the whole `name_i18n`
   blob, so "Burger" finds «Бургер»; the returned `name` is then resolved from
   `Accept-Language`. An empty query returns empty lists, not everything.
@@ -279,7 +316,17 @@ Create a pre-order.
 ```
 - `readyAt` is optional and defaults to now + `prepMin`. Earlier than the
   kitchen can manage → **422** carrying `{ "earliestReadyAt" }`; further ahead
-  than 7 days → **422**.
+  than 7 days → **422**; outside the branch's opening hours → **422** carrying
+  `{ "readyAt" }`.
+- **Naming a time far enough ahead makes it a pre-order** (BUSINESS_LOGIC.md §4):
+  the order records `prepMin`, `prepStartAt`, `reminderAt` and
+  `reminderLeadMin`, sits on the back office's **Scheduled** stage rather than
+  its live board, is **confirmed automatically when it is paid for**, and the
+  branch is warned `reminderLeadMin` minutes before it is due. Echoing back the
+  `earliestReadyAt` a quote just gave you is *not* a pre-order — that is "now",
+  written as a timestamp — and the opening-hours check is skipped for it, since
+  an order placed ten minutes before closing whose food is ready five minutes
+  after is an ordinary thing to sell.
 - `serviceMode: "dine_in"` → **422** until table booking ships.
 - **`couponCode` and `reservation` are not accepted** — unknown fields are
   rejected with **400** rather than silently ignored, so a client cannot
@@ -293,9 +340,14 @@ Create a pre-order.
   "serviceMode":"pickup","restaurantName","branch":{ "id","name","address" },
   "items":[ { "id","menuItemId","name","unitPriceAmd","qty","lineTotalAmd" } ],
   "subtotalAmd","serviceFeeAmd","depositAmd","totalAmd",
-  "readyAt","secondsLeft","tableNo":null,"reservationId":null,
+  "readyAt","secondsLeft","scheduled":false,"prepStartAt":null,
+  "tableNo":null,"reservationId":null,
   "notes","payment":null,"createdAt" }
 ```
+- `scheduled` is true when the customer chose a time rather than taking the
+  earliest, so the tracking screen counts down to a promise instead of showing a
+  timer that has not started. `prepStartAt` is when the kitchen begins — shown
+  to staff, not to the diner.
 - `pickupCode` is the **last four digits of `code`** — derived, never stored,
   so the two can never disagree.
 - Item names are **snapshots** taken in the caller's language at purchase
@@ -305,7 +357,9 @@ Create a pre-order.
 
 ### GET /orders
 - **Query:** `status=active|past, page, limit` (limit capped at 50)
-- **Response 200:** `{ "items":[ { "id","code","restaurantName","coverUrl","date","itemsCount","totalAmd","status","readyAt","secondsLeft" } ], "total", "page" }`
+- **Response 200:** `{ "items":[ { "id","code","restaurantName","coverUrl","date","itemsCount","totalAmd","status","readyAt","secondsLeft","scheduled" } ], "total", "page" }`
+- `scheduled` lets the list read "for Tue 13:00" instead of a countdown that
+  would otherwise say "ready in 4,320 minutes".
 - `itemsCount` counts **dishes, not lines** — "3 items" means three things to eat.
 
 ### GET /orders/{id}
@@ -418,9 +472,21 @@ A dine-in order is food brought to a table, so it needs a booking:
 `POST /cart/quote` and `POST /orders` take `serviceMode: "dine_in"` **plus
 `reservationId`**.
 
-- **422** without one, for a booking that is not active, or for one at a
-  different restaurant. **409** if that booking already has an order
-  (`orders.reservation_id` is unique). Another guest's booking is **404**.
+- **`POST /orders` is 422 without one.** `POST /cart/quote` is **not**:
+  choosing "dine in" and booking the table are two steps, so between them
+  there is a real basket that is dine-in with no `reservationId`, and the
+  customer is looking at it. A quote prices it as food alone (`depositAmd: 0`,
+  `tableNo: null`). Pricing is not committing — the same split as
+  `preview`/`claim` for coupons.
+- Whenever a `reservationId` **is** supplied it is checked in full, on both
+  endpoints alike: **422** for a booking that is not active or one at a
+  different restaurant, **409** if it already has an order
+  (`orders.reservation_id` is unique), **404** for another guest's booking.
+  Quoting is not a way around any of these.
+- `canOrder` does not fall to `false` for a dine-in basket with no booking
+  yet. It reports on the basket's *contents* — a closed branch, a sold-out
+  line — and the missing booking is a step in the flow, blocked on the screen
+  that books the table.
 - The quote gains **`dueNowAmd`** — the meal total minus the deposit already
   held — and `tableNo`. `totalAmd` is unchanged: the deposit is credited, not
   charged twice (BUSINESS_LOGIC.md §3). `dueNowAmd` never goes below zero.
@@ -451,6 +517,13 @@ Requires a verified phone.
 - **Every method goes through the provider**, so a successful call means the
   money was taken (`status: "captured"`) and the order is `paid`. There is no
   method that places an order without paying for it.
+- **A pre-order comes back `confirmed`, not `paid`.** Paying for one accepts it,
+  in the same transaction — nobody presses Confirm on Monday for a Saturday
+  order, and until somebody did, the diner would be watching a screen that said
+  the restaurant had not looked at it. Recorded as a second `order_events` row
+  with actor `system`, and announced as its own status change so no watcher sees
+  a jump the state machine has no edge for. Ordinary orders are untouched: they
+  still wait on the board's **Paid** stage for a person.
 - **Declined** → **422**, the attempt is recorded as `failed`, and the order
   stays `created` so the customer can retry on the same row.
 - **Writes `order_events`** in the payment's own transaction: a `status_changed`
@@ -620,10 +693,19 @@ the current access token, and this is what decides which tabs render.
 The kitchen queue.
 - **Query:** `status, q, restaurantId, branchId, page, limit` (default 20, capped at 50)
 - **`status` is the stage:** `active` (default — everything the kitchen still
-  has to do) · `paid` · `unpaid` · `confirmed` · `preparing` · `almost_ready` ·
-  `ready` · `past` (completed or cancelled). The set of order statuses behind
-  each is `QUEUE_FILTER_STATUSES` in `packages/shared` — the same table the
-  panel labels its tabs from, so the two cannot disagree.
+  has to do) · `scheduled` · `paid` · `unpaid` · `confirmed` · `preparing` ·
+  `almost_ready` · `ready` · `past` (completed or cancelled). The set of order
+  statuses behind each is `QUEUE_FILTER_STATUSES` in `packages/shared` — the same
+  table the panel labels its tabs from, so the two cannot disagree.
+- **`scheduled` is the one stage that is a moment in time as well as a set of
+  statuses.** It is the pre-orders whose hour has not come — `paid` or
+  `confirmed`, exactly like an order at the counter, and told apart by
+  `orders.reminder_at` still being in the future. Every other stage is
+  implicitly the other half of that split, so an order placed today for next
+  Tuesday does not sit in **Paid** as the oldest row there, pinned above the
+  work somebody is doing now. The split is taken against the clock and never
+  against `reminder_sent_at`, so an order reaches the board at its proper hour
+  even where the reminder job is not running.
 - **One stage per status now, in the order an order moves through them.** They
   used to be coarser: a single `new` spanning `created`, `paid` and `confirmed`,
   and a `preparing` that swallowed `almost_ready`. Accepting an order, starting
@@ -639,7 +721,8 @@ The kitchen queue.
   question somebody asks. It is not a step in the flow, so it has no place on
   the strip: the panel hangs it off **Paid** as an inner filter, the one stage
   it is the opposite of. Worth reaching at all because **nothing expires those
-  rows** — the API has no scheduled job of any kind, so they accumulate.
+  rows** — no job expires an unpaid basket (the reminder sweep is the API's only
+  scheduled job, and it is about pre-orders), so they accumulate.
 - **`q` matches the order code, the pickup code, or the customer name.** One
   parameter rather than three: the pickup code is the last four digits of
   `code`, so a substring match finds an order by either.
@@ -648,8 +731,21 @@ The kitchen queue.
   search is composed with `AND` for exactly this reason — the scope filter is
   itself an `OR`, and overwriting it would make the search box a way to read
   every restaurant's orders.
-- **Ordered oldest first** — a kitchen works a queue, not a stack.
-- **Response 200:** `{ "items":[ { "id","code","pickupCode","status","serviceMode","branch","customerName","itemsCount","totalAmd","paymentStatus","readyAt","secondsLeft","createdAt","items":[{"menuItemId","name","qty","lineTotalAmd"}],"notes" } ], "total", "page", "counts" }`
+- **Ordered by `prep_start_at`, soonest first** — when the kitchen has to begin,
+  which for an order wanted as soon as possible is `created_at` shifted by a
+  constant, so the ordinary board is ordered exactly as it always was. What
+  changes is that a pre-order whose hour has come slots in where it belongs
+  rather than at the top. Nulls sort last: an order from before the column
+  existed is a finished one, and a finished order has no claim on the front of a
+  queue.
+- **Response 200:** `{ "items":[ { "id","code","pickupCode","status","serviceMode","branch","customerName","itemsCount","totalAmd","paymentStatus","readyAt","secondsLeft","scheduled","prepStartAt","prepMin","reminderAt","reminderLeadMin","createdAt","items":[{"menuItemId","name","qty","lineTotalAmd"}],"notes" } ], "total", "page", "counts" }`
+- **`scheduled`** is whether this is a pre-order still waiting, taken against the
+  same instant the page was selected under — so a card cannot claim to be
+  scheduled while the query that fetched it disagreed. `prepStartAt` is when the
+  kitchen must begin, `prepMin` the estimate it was promised against, and
+  `reminderAt`/`reminderLeadMin` the warning and its notice in minutes. All null
+  on an order placed for as soon as possible, and on rows written before
+  pre-ordering existed.
 - **Each line carries the dish it came from and what it cost.** `name` is the
   snapshot taken when the order was placed — what the diner bought, whatever
   the dish has been renamed to since — and `menuItemId` is the dish itself,
@@ -657,8 +753,8 @@ The kitchen queue.
   needed: an id cannot say what was ordered, and a name cannot say what to
   open. `lineTotalAmd` is the line rather than the unit price, so a client
   showing it beside the quantity is not asking a kitchen to multiply.
-- **`counts`** is one number per stage — `{ active, paid, unpaid, confirmed,
-  preparing, almost_ready, ready, past }` — taken under every filter **except**
+- **`counts`** is one number per stage — `{ active, scheduled, paid, unpaid,
+  confirmed, preparing, almost_ready, ready, past }` — taken under every filter **except**
   the stage itself. That is what lets a search say where an order is: type a pickup code
   while looking at the live board and the counts read `active: 0, past: 1`, one
   click away, instead of an empty board with no explanation. They do **not** sum
@@ -668,9 +764,12 @@ The kitchen queue.
 ### GET /restaurant/orders/{id}/history · *implemented* — `orders:read`
 Everything that has happened to one order — what the card's **History** button opens.
 - **Response 200:** `{ "items":[ { "id","type","fromStatus","toStatus","actor":{"type","name","email","impersonatedBy","id","impersonatedById"},"detail","at" } ] }`
-- **`type`** is `created` · `status_changed` · `payment`. The last is an attempt
-  that moved no status — a decline — which would otherwise be invisible in a
-  timeline whose job is to explain why an order sat unpaid.
+- **`type`** is `created` · `status_changed` · `payment` · `reminder_set`. The
+  third is an attempt that moved no status — a decline — which would otherwise
+  be invisible in a timeline whose job is to explain why an order sat unpaid.
+  The fourth is a shift retiming a pre-order's warning, which moves no status
+  either: `orders.reminder_lead_min` is overwritten in place, so this entry is
+  the only record that it ever moved or of who moved it.
 - **`actor.type`** is `customer` · `staff` · `system`. `name` is null for
   `system`, for a diner who never gave one, and for an account since deleted —
   the entry outlives the actor (`ON DELETE SET NULL`). `email` is staff-only.
@@ -687,7 +786,12 @@ Everything that has happened to one order — what the card's **History** button
   is answered by those endpoints on their own permissions — and a staff id
   outside the caller's reach lists nobody.
 - **`detail`** carries the per-type extras: dish count and total on a placement,
-  payment method, status and amount on anything that touched money. It also
+  payment method, status and amount on anything that touched money, and on a
+  `reminder_set` both `reminderLeadMin` and `previousReminderLeadMin` — the new
+  notice and the one it replaced, because "somebody set it to 45" is not an
+  answer to "why did this go out so early". The `created` entry also carries
+  `scheduled`, so a timeline says an order was placed for later rather than
+  leaving somebody to subtract two timestamps. It also
   carries `backfilled: true` on the single `created` entry the migration wrote
   for orders that predate the table, and `reconstructed: true` on an entry
   inferred from the order row rather than recorded as it happened (dev seed
@@ -715,6 +819,36 @@ Everything that has happened to one order — what the card's **History** button
   because that is what happened.
 - **Writes `order_events`** in the same transaction as the move, naming the staff
   member — and, under impersonation, the super admin actually behind them.
+
+### PATCH /restaurant/orders/{id}/reminder · *implemented* — `orders:advance`
+How much notice the branch wants on one pre-order.
+- **Body:** `{ "leadMin": 45 }` — minutes before the food is due, bounded by
+  `REMINDER_LEAD_MIN_MINUTES`…`REMINDER_LEAD_MAX_MINUTES` (5 min – 24 h).
+- **Response 200:** `{ "id", "reminderAt", "reminderLeadMin", "scheduled" }` —
+  the warning alone, not the whole order. The board patches the one card it
+  already has; re-sending forty fields to say one number moved would let a
+  response that left before a socket update landed overwrite the status it
+  delivered. `scheduled` is whether the new moment is still ahead, decided
+  server-side so the panel's clock cannot put a card on the wrong tab.
+- **Measured from `ready_at`, not from `prep_start_at`.** "Warn me forty-five
+  minutes before it is due" is a sentence somebody can act on; the alternative
+  describes the same instant in a way nobody can hold in their head. The default
+  a pre-order arrives with is the prep estimate plus `PREP_REMINDER_BUFFER_MIN`.
+- **Nothing the customer was promised moves.** `ready_at` stands and so does the
+  price — what changes is when the kitchen hears about it, which is why this is
+  `orders:advance` rather than a permission of its own: the same person, at the
+  same pass, deciding about the same order.
+- **422** on an order placed for as soon as possible (no warning to move) and on
+  one that is `completed` or `cancelled`. **404**, not 403, outside reach —
+  scoped on `orders:advance` in the query.
+- A lead longer than the time remaining is **legal** and means "warn me now": the
+  sweep picks it up on its next pass, and the order leaves the Scheduled stage.
+- **Re-arms `reminder_sent_at`** when the new moment is still ahead — a warning
+  already sent for a time somebody has since moved later was premature, and
+  leaving the mark set would mean the time they chose never fires. Left alone
+  when the new moment is already past: that is not a request to be told twice.
+- **Writes an `order_events` row** of type `reminder_set` in the same
+  transaction, naming who did it and the notice it replaced.
 
 ### GET /restaurant/restaurants · *implemented* — `branch:read`
 The restaurants in reach, each with its branches nested.
@@ -945,6 +1079,61 @@ and who marked it sold out.
 - Legality comes from `RESERVATION_STATUS_FLOW`; **422** otherwise.
 - `confirmed` and `seated` **leave the deposit alone**; only an ending decides
   the money, per BUSINESS_LOGIC.md §3.
+
+---
+
+## Back-office notifications
+
+The bell in the panel's shell. What a **branch** has been told — so far, that a
+pre-order is about to need cooking, raised by the reminder sweep. See
+DATABASE.md §8b for why these are addressed to a branch and not to a person.
+
+Both are gated on **`orders:read`** rather than a permission of their own: every
+notification that exists is about an order, and anyone who can watch the board it
+sits on can be told about it. The service scopes its queries by that same
+permission, because "may you call this" and "which rows may you see" are
+different questions — a branch outside reach is never selected, not merely
+hidden.
+
+### GET /staff/notifications · *implemented* — `orders:read`
+- **Query:** `limit` (default 30, capped at 50). A bell shows the recent ones;
+  the board is where the work is.
+- **Response 200:** `{ "items":[ { "id","type","branchId","orderId","payload","createdAt","read" } ], "unread" }`
+- **`type`** is `prep_due`. An enum rather than a free string so the panel's
+  rendering is exhaustive — a kind added to the database and not to the bell
+  would arrive as a blank row, and this makes it a compile error instead.
+- **`payload` is numbers, never prose** — pickup code, full code, `readyAt`,
+  `prepStartAt`, `prepMin`, `reminderLeadMin`, `itemsCount`, `needsConfirming`.
+  A job has no request to take a language from, so the panel renders the line
+  through its own dictionary, exactly as it does an order status. Fields are
+  absent where the order recorded nothing.
+- **`read` is whether *this* reader has seen it**, not whether anybody has. A
+  branch's bell is read by people, one at a time, and a single flag would let the
+  first colleague to open it clear it for the whole shift.
+- **Newest first.**
+
+### POST /staff/notifications/read · *implemented* — `orders:read` → **200**
+- **Body:** `{ "ids": ["…"] }` — 1 to 50 uuids, which is the list that was on
+  screen. A POST rather than a PATCH per id: a bell is cleared by opening it.
+- **Response 200:** `{ "read": <count> }`
+- **Scoped**, so an id belonging to an unreachable branch marks nothing — the
+  ids come from a list the caller was shown, and one that did not is a probe.
+- Reading something twice is not an error and does not become one.
+
+### `watchBranches` (WebSocket) · *implemented*
+- `{ "event": "watchBranches", "data": { "token": "<staff access token>" } }` on
+  the same socket as the order stream; answers `watchingBranches` with the
+  branches now being heard, or `"all"` for a platform-wide account.
+- **Staff tokens only.** There is no branch a customer may watch, and accepting
+  one here would hand a restaurant's operational feed to anybody with an account.
+- Delivers `{ "event": "notification", "data": { "id","branchId","type","orderId","createdAt" } }`
+  — deliberately thin. It is a signal that the bell should re-read, not the row:
+  the list endpoint is where reach is checked and where "have I seen this" is
+  answered, and a frame carrying the whole notification would be a second,
+  unchecked way to learn what a branch was told.
+- Reach is resolved once, at subscription, from the same `orders:read` scope the
+  REST board is filtered by. A role granted while the socket is open is picked up
+  on the next connection — which a page reload already is.
 
 ---
 

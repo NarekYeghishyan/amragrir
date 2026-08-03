@@ -121,6 +121,25 @@ export const QueueFilter = {
    * asks "which of these were never paid for", not "which are in `created`".
    */
   Unpaid: 'unpaid',
+  /**
+   * Pre-orders whose cooking time has not arrived yet — placed hours or days
+   * ahead, and not this shift's work.
+   *
+   * **The only stage that is not a set of statuses.** Every other one asks where
+   * an order is in the flow; this one asks *when* it is due, and the orders in
+   * it are `paid` or `confirmed` exactly like the two stages above. An order
+   * leaves it by the clock rather than by anybody pressing anything: once
+   * `orders.reminder_at` has passed, the same row appears under Paid or
+   * Confirmed and the branch is notified. `QUEUE_FILTER_STATUSES` below can
+   * therefore only narrow it — the time predicate lives in the service, and
+   * `isInQueueFilter` cannot answer for this stage alone.
+   *
+   * It exists because the board sorts oldest-first: without it, an order placed
+   * today for next Tuesday is the *oldest* paid order for a week and sits pinned
+   * above the work somebody is actually doing. Confirming is still offered here,
+   * which is the whole point — accept it now, and be reminded when it matters.
+   */
+  Scheduled: 'scheduled',
   /** Accepted by the restaurant, not yet being cooked. */
   Confirmed: 'confirmed',
   /** In the kitchen. */
@@ -147,6 +166,10 @@ export const QUEUE_FILTER_STATUSES: Readonly<Record<QueueFilter, readonly OrderS
   [QueueFilter.Active]: ACTIVE_ORDER_STATUSES,
   [QueueFilter.Paid]: [OrderStatus.Paid],
   [QueueFilter.Unpaid]: [OrderStatus.Created],
+  // Not the whole story — see `QueueFilter.Scheduled`. These are the statuses a
+  // pre-order can be sitting in while it waits; whether it is still waiting is a
+  // question about `orders.reminder_at`, which only the service can ask.
+  [QueueFilter.Scheduled]: [OrderStatus.Paid, OrderStatus.Confirmed],
   [QueueFilter.Confirmed]: [OrderStatus.Confirmed],
   [QueueFilter.Preparing]: [OrderStatus.Preparing],
   [QueueFilter.AlmostReady]: [OrderStatus.AlmostReady],
@@ -154,6 +177,31 @@ export const QUEUE_FILTER_STATUSES: Readonly<Record<QueueFilter, readonly OrderS
   [QueueFilter.Past]: TERMINAL_ORDER_STATUSES,
 } as const;
 
+/**
+ * Stages that are a moment in time as well as a set of statuses.
+ *
+ * Only `scheduled`. Written down rather than compared against the literal
+ * because three places have to agree on it — the service adds the time
+ * predicate, the counts are taken separately, and the panel must not decide
+ * membership from a status alone (see `isInQueueFilter`).
+ */
+export const TIME_SCOPED_QUEUE_FILTERS: readonly QueueFilter[] = [QueueFilter.Scheduled];
+
+export function isTimeScopedQueueFilter(filter: QueueFilter): boolean {
+  return TIME_SCOPED_QUEUE_FILTERS.includes(filter);
+}
+
+/**
+ * Whether a status still belongs in a stage.
+ *
+ * The panel's live socket uses this to drop an order off the board when it moves
+ * somewhere else. **A status is all it knows**, which is enough for every stage
+ * but `scheduled`: a pre-order that stays `confirmed` while its hour arrives is
+ * still `confirmed`, so this keeps it on the board and the next poll — twenty
+ * seconds — moves it. Reaching for the clock here instead would make a pure
+ * function depend on the time it is called at, and the board would drop a card
+ * mid-render with no request behind it.
+ */
 export function isInQueueFilter(status: OrderStatus, filter: QueueFilter): boolean {
   return QUEUE_FILTER_STATUSES[filter].includes(status);
 }

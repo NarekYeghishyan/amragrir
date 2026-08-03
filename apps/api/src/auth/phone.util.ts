@@ -1,16 +1,26 @@
 import { BadRequestException } from '@nestjs/common';
-
-const ARMENIA_CC = '374';
-/** Armenian mobile subscriber numbers are 8 digits after the country code. */
-const NATIONAL_LENGTH = 8;
+import { DEFAULT_PHONE_COUNTRY, countryOfE164, toE164 } from '@amragrir/shared';
 
 /**
- * Normalises user input to E.164 (`+374XXXXXXXX`).
+ * Normalises user input to E.164 (`+<dial><subscriber>`).
  *
  * The design's phone field shows `99 123 456`, so input arrives with spaces
- * and without a country code — everything is normalised to one canonical form
- * because `users.phone` is unique and OTP keys are derived from it. Two
+ * and often without a country code — everything is normalised to one canonical
+ * form because `users.phone` is unique and OTP keys are derived from it. Two
  * spellings of the same number must never become two accounts.
+ *
+ * Two readings, tried in this order:
+ *
+ * 1. **A whole international number.** Matched against the dial codes in
+ *    `PHONE_COUNTRIES` (packages/shared), which the sign-in form is built from,
+ *    so the two cannot offer different countries.
+ * 2. **A bare national number**, which is read as Armenian. This is the market,
+ *    and it is what someone typing their own number means — it is also why
+ *    every pre-existing Armenian spelling keeps working unchanged.
+ *
+ * That order matters: `37499123456` is a whole Armenian number and must not be
+ * mistaken for a national one, while `99123456` is national and matches no
+ * dial code at all.
  */
 export function normalizePhone(input: string): string {
   const trimmed = input.trim();
@@ -31,21 +41,20 @@ export function normalizePhone(input: string): string {
     digits = digits.slice(2);
   }
 
-  // Local form with a trunk prefix: 0XXXXXXXX -> XXXXXXXX
-  if (digits.length === NATIONAL_LENGTH + 1 && digits.startsWith('0')) {
-    digits = digits.slice(1);
+  const international = countryOfE164(digits);
+  if (international) {
+    return `+${digits}`;
   }
 
-  // Bare national number -> prepend the country code.
-  if (digits.length === NATIONAL_LENGTH) {
-    digits = ARMENIA_CC + digits;
+  // Not a whole number, so read it as a local one — in the market's country.
+  const national = toE164(DEFAULT_PHONE_COUNTRY, digits);
+  if (!national) {
+    throw new BadRequestException(
+      `Enter a valid phone number, e.g. +${DEFAULT_PHONE_COUNTRY.dial} ${DEFAULT_PHONE_COUNTRY.example}`,
+    );
   }
 
-  if (!digits.startsWith(ARMENIA_CC) || digits.length !== ARMENIA_CC.length + NATIONAL_LENGTH) {
-    throw new BadRequestException('Enter a valid Armenian phone number, e.g. +374 99 123 456');
-  }
-
-  return `+${digits}`;
+  return national;
 }
 
 /** Masks all but the last two digits for logs and responses. */

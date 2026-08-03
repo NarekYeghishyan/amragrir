@@ -239,18 +239,68 @@ describe('quote', () => {
     expect(quote.canOrder).toBe(false);
   });
 
-  it('refuses a dine-in basket with no booking behind it', async () => {
-    // Food brought to a table needs a table, which means a reservation —
-    // that is what keeps orders.reservation_id meaningful.
-    const { service } = build();
-    await expect(
-      service.quote(dto({ serviceMode: ServiceMode.DineIn }), Language.En, 'user-1'),
-    ).rejects.toThrow(UnprocessableEntityException);
-  });
+  // "Food brought to a table needs a table" is a rule about *orders*, and it is
+  // asserted where it belongs — see the `create` suite below. A quote that
+  // enforced it too could not price the basket the customer is looking at while
+  // they book.
 
   it('404s for an unknown branch', async () => {
     const { service } = build({ branch: null });
     await expect(service.quote(dto(), Language.En, 'user-1')).rejects.toThrow(NotFoundException);
+  });
+
+  it('prices a dine-in basket that has no booking yet, instead of refusing it', async () => {
+    // Choosing "dine in" and booking the table are two steps, so in between
+    // there is a real basket on a real screen that is dine-in with no
+    // reservation. Throwing here took down every screen that prices a basket —
+    // and since the basket outlives the page, the customer could not even get
+    // back to it to empty it. Creating the order still needs the booking.
+    const { service } = build();
+
+    const quote = await service.quote(
+      dto({ serviceMode: ServiceMode.DineIn }),
+      Language.En,
+      'user-1',
+    );
+
+    expect(quote.subtotalAmd).toBe(5800);
+    // No table yet, so no deposit yet — the food is priced on its own.
+    expect(quote.depositAmd).toBe(0);
+    expect(quote.tableNo).toBeNull();
+  });
+
+  it('still checks a booking that is supplied, so a quote cannot price someone else’s table', async () => {
+    // The relaxation above is only about *not having* a reservation. Every
+    // check on one that is given must survive, or a quote becomes the way
+    // around them.
+    const { service, prisma } = build({ reservation: null });
+
+    await expect(
+      service.quote(
+        dto({ serviceMode: ServiceMode.DineIn, reservationId: RESERVATION }),
+        Language.En,
+        'user-1',
+      ),
+    ).rejects.toThrow(NotFoundException);
+
+    // Scoped to the caller — that is what makes it *their* booking.
+    expect(prisma.reservation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: RESERVATION, userId: 'user-1' }),
+      }),
+    );
+  });
+
+  it('refuses a booking for another branch even while only quoting', async () => {
+    const { service } = build({ reservation: reservationRow({ branchId: 'other-branch' }) });
+
+    await expect(
+      service.quote(
+        dto({ serviceMode: ServiceMode.DineIn, reservationId: RESERVATION }),
+        Language.En,
+        'user-1',
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
   });
 
   it('credits a table deposit against the bill instead of charging it again', async () => {
@@ -323,6 +373,16 @@ describe('create', () => {
     expect(data.totalAmd).toBe(12_800 + SERVICE_FEE_AMD);
     expect(data.userId).toBe('user-1');
     expect(data.items.create[0].nameSnapshot).toBe('Burger');
+  });
+
+  it('still refuses to create a dine-in order without the booking it belongs to', async () => {
+    // The other half of the split: a quote may price this basket, but an order
+    // is food brought to a table, and there is no table.
+    const { service } = build();
+
+    await expect(
+      service.create('user-1', dto({ serviceMode: ServiceMode.DineIn }), Language.En),
+    ).rejects.toThrow(UnprocessableEntityException);
   });
 
   it('refuses to create an order containing a sold-out dish', async () => {

@@ -77,6 +77,16 @@ Field legend: **Purpose** · **User** · **Elements** · **Actions** · **Transi
 **Actions:** pick Pickup/Dine-in; page months; pick booking date/time; change guest count; pick ready time; continue.
 **Transitions:** back → Basket; Continue → Checkout.
 **API:** `GET /restaurants/{id}/availability?date=` (available slots, capacity), `GET /restaurants/{id}/tables` (for dine-in), deposit calc `deposit = guests × depositPerGuest`.
+**Which "Food ready at" times are offered.** The earliest is `earliestReadyAt`
+from `POST /cart/quote` — now plus the prep estimate — and taking it is an
+ordinary order, which is what the screen does when the customer picks nothing.
+Anything further out is a **pre-order** (BUSINESS_LOGIC.md §4): up to
+`ORDER_MAX_LEAD_DAYS` ahead, and inside the branch's opening hours, which is what
+stops a pickup being booked for 04:00 next Sunday. Both limits are enforced by
+`POST /orders` with a **422**, so a picker that offers a time the server refuses
+is a bug in the picker — the earliest is handed back in the refusal for exactly
+that case. A pre-order is accepted the moment it is paid for rather than waiting
+on somebody at the restaurant, and the branch is warned before it has to start.
 
 ---
 
@@ -101,7 +111,12 @@ kitchen receives it (BUSINESS_LOGIC.md §5).
 **Elements:** "Order confirmed" + restaurant name + animated checkmark; ring progress with "Ready in mm:ss" timer (start 480s = 8 min) + "arrives HH:MM"; status steps (Confirmed → Preparing → Almost ready → Ready); QR/pickup-code card + instruction ("Show this at the counter" / for dine-in — "table #12"); "Done" button.
 **Actions:** wait for readiness; return home.
 **Transitions:** Done → Home. (From Orders you can return to Tracking via the active order.)
-**API:** `GET /orders/{id}` + realtime (WebSocket/polling) of status and `ready_at`. Fields: status, seconds_left/ready_at, pickup_code, table_no.
+**API:** `GET /orders/{id}` + realtime (WebSocket/polling) of status and `ready_at`. Fields: status, seconds_left/ready_at, scheduled, pickup_code, table_no.
+**A pre-order tracks differently.** `scheduled: true` means the customer chose
+the time, so the ring counts down to a promise rather than running a timer that
+has not started — "for Tue 13:00", not "ready in 4,320 min". It also arrives
+already **Confirmed**: paying for a pre-order accepts it, so the first step of
+the tracker is complete from the moment the payment goes through.
 
 ---
 
@@ -168,3 +183,40 @@ kitchen receives it (BUSINESS_LOGIC.md §5).
 **Actions:** set sort/price/distance/rating/diet/service; reset; apply.
 **Transitions:** close/apply → Home (updated list).
 **API:** parameters passed to `GET /restaurants` (sort, priceMax, distMax, minRating, dietary[], service[]).
+
+---
+
+## 14. The web app's screens
+
+These are the same screens on `apps/web`, and they differ enough to be worth
+writing down. Numbering follows the app screens above: web `Basket` is the same
+concept as §4, and where behaviour differs the reason is given rather than the
+difference alone.
+
+**What is the same.** The steps, the vocabulary and the rules: one restaurant
+per basket, the deposit credited rather than added, cancellation only while
+unpaid, online payment only, `hy` by default.
+
+**What is different, and why:**
+
+| | App | Web |
+|---|---|---|
+| Basket | client state | httpOnly cookie of ids + quantities; re-priced by `POST /cart/quote` on every render |
+| Checkout | screen | the design's slide-over via an intercepting route, and the identical component as a full page on direct load |
+| Confirmation | toast over the placing screen | `/[lang]/orders/{id}` — it carries the pickup code, which has to survive a reload |
+| Payment | Apple Pay, Google Pay, Card | **Card only.** Wallets are shown disabled ("available in the app"): they need a browser payment SDK the web does not have |
+| Tracking | WebSocket | `GET /orders/{id}` polled every 10s; the socket needs a handshake the httpOnly token cannot do from the page |
+| Pre-order times | full slot picker | earliest from `earliestReadyAt` plus the next few quarter-hours; the server refuses anything outside opening hours with a 422 |
+| Basket badge | always | needs JavaScript — see `apps/web/README.md` for why the count is a separate readable cookie |
+
+**Every step works with JavaScript disabled.** Each action is a `<form>` posting
+to a Server Action followed by a redirect: quantities, coupon, mode, table
+booking, sign-in, payment and cancellation. The badge and the tracking
+auto-refresh are the only enhancements, and neither is on the path.
+
+**Routes:** `/[lang]/cart`, `/preorder`, `/checkout`, `/signin`, `/orders`,
+`/orders/{id}`, plus `/session` (a route handler that mints or refreshes a token
+and bounces back, because a page render may not write a cookie). All are
+`noindex, follow` **and** disallowed in `robots.txt` — `noindex` is only read
+after a fetch, and these pages do real work per request for a client that can
+never have a basket.

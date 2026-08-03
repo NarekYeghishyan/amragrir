@@ -2,10 +2,16 @@
    Regenerate with: pnpm --filter @amragrir/ui build:css */
 @import './tokens.css';
 
-/* Web-only: a wider corner radius, because this is read on a desktop rather
-   than on a phone. */
+/* Every measurement below is transcribed from docs/design/web-landing.html.
+   Where the design names a token this file uses the repo's spelling for it:
+   the artifact writes `--accentSoft`, `--ph1`, `--ph2` and a literal #F5A623,
+   which are `--accent-soft`, `--placeholder`, `--placeholder2` and `--star`
+   here. Same values, one set of names. */
+
 :root {
-  --radius: 16px;
+  /* The artifact lays every page out on a 1220px column with 28px gutters. */
+  --page: 1220px;
+  --gutter: 28px;
 }
 
 * {
@@ -22,6 +28,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  transition: background 0.3s;
 }
 
 a {
@@ -29,163 +36,323 @@ a {
   text-decoration: none;
 }
 
-.wrap {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 24px 20px 72px;
+img {
+  max-width: 100%;
 }
 
+/* The artifact's own entrance animation, and its scrollbar. */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: fadeUp 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 5px;
+}
+input::placeholder {
+  color: var(--ink3);
+}
+
+.wrap {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: 34px var(--gutter) 80px;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
 header.site {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--glass);
+  backdrop-filter: blur(18px) saturate(160%);
   border-bottom: 1px solid var(--line);
-  background: var(--card);
 }
 header.site .inner {
-  max-width: 960px;
+  max-width: var(--page);
   margin: 0 auto;
-  padding: 16px 20px;
+  padding: 0 var(--gutter);
+  height: 72px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 22px;
 }
 header.site .brand {
-  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: none;
+}
+header.site .brand svg,
+.foot-logo svg {
+  flex: none;
+}
+
+/* The logotype. `.am` is the only part in the accent colour — the domain is
+   the brand, and colouring the whole word would leave nothing to emphasise. */
+.wordmark {
+  font-weight: 800;
   font-size: 18px;
+  letter-spacing: -0.4px;
+  color: var(--ink);
+}
+.wordmark-tld {
   color: var(--accent);
 }
 
+/* ── Search ──────────────────────────────────────────────────────────────── */
+
+/* The magnifier *is* the submit button, sitting where the artifact draws its
+   icon. The artifact has no button at all, but this form must still submit
+   with JavaScript off — and an invisible control is not a control. */
 .searchbar {
-  margin-left: auto;
+  flex: 1;
+  max-width: 420px;
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--card);
 }
+.searchbar:focus-within {
+  border-color: var(--accent);
+}
+.searchbar button {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink3);
+  cursor: pointer;
+}
+.searchbar button:hover {
+  color: var(--accent);
+}
+.searchbar input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14.5px;
+  outline: none;
+}
+
+/* ── Language switch and theme toggle ────────────────────────────────────── */
 
 .langs {
   display: flex;
-  gap: 4px;
+  gap: 3px;
+  margin-left: auto;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--card);
+  flex: none;
 }
 .langs .lang {
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 14px;
-  color: var(--ink3);
+  padding: 7px 11px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink2);
 }
 .langs .lang.current {
-  background: var(--chip);
-  color: var(--ink);
-  font-weight: 600;
+  background: var(--accent);
+  color: #fff;
 }
 
 .theme-toggle {
-  min-height: 40px;
-  min-width: 40px;
+  flex: none;
+  width: 44px;
+  height: 44px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 22px;
   background: var(--card);
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
 }
 .theme-toggle:hover {
   border-color: var(--accent);
 }
-.searchbar input {
-  font: inherit;
-  min-height: 44px;
-  min-width: 220px;
-  padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--bg);
-  color: var(--ink);
+
+/* ── Hero ────────────────────────────────────────────────────────────────── */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 28px;
+  padding: 56px 52px;
+  background: linear-gradient(115deg, var(--accent), var(--accent2));
+  box-shadow: 0 20px 44px var(--shadow);
 }
-.searchbar button {
-  font: inherit;
-  min-height: 44px;
-  padding: 0 18px;
-  border: none;
-  border-radius: 999px;
-  background: var(--accent);
+/* The two translucent discs bleeding off the top-right corner. Decorative, so
+   they are drawn by the stylesheet rather than sent as markup. */
+.hero::before,
+.hero::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+}
+.hero::before {
+  right: -60px;
+  top: -60px;
+  width: 300px;
+  height: 300px;
+}
+.hero::after {
+  right: 120px;
+  bottom: -90px;
+  width: 200px;
+  height: 200px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.hero-body {
+  position: relative;
+  max-width: 560px;
+}
+.promo-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.22);
   color: #fff;
-  font-weight: 600;
-  cursor: pointer;
+  border-radius: 20px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
 }
-
-h1 {
-  font-size: 30px;
-  line-height: 1.2;
-  margin: 0 0 6px;
+.hero h1 {
+  color: #fff;
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -1px;
+  margin: 18px 0 0;
+  text-wrap: pretty;
 }
-h2 {
-  font-size: 20px;
-  margin: 32px 0 12px;
-}
-p.lede {
-  color: var(--ink2);
-  margin: 0 0 24px;
-}
-
-.grid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-}
-
-.card {
-  display: block;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 16px;
-}
-.card:hover {
-  border-color: var(--accent);
-}
-.card .name {
-  font-weight: 650;
+.hero-sub {
+  color: rgba(255, 255, 255, 0.92);
   font-size: 17px;
+  line-height: 1.5;
+  max-width: 460px;
+  margin: 14px 0 0;
+  text-wrap: pretty;
 }
-.card .meta {
-  color: var(--ink2);
-  font-size: 14px;
-  margin-top: 4px;
+.cta-primary {
+  display: inline-block;
+  margin-top: 26px;
+  height: 52px;
+  line-height: 52px;
+  padding: 0 28px;
+  border-radius: 26px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+}
+.cta-primary:hover {
+  opacity: 0.94;
 }
 
-.chips {
+/* ── Category rail ───────────────────────────────────────────────────────── */
+
+.cats {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
+  gap: 14px;
+  overflow-x: auto;
+  margin: 32px 0 0;
+  padding: 0 0 6px;
   list-style: none;
 }
-.chip {
-  background: var(--chip);
-  border-radius: 999px;
-  padding: 8px 14px;
-  font-size: 14px;
+.cat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 88px;
+  padding: 16px 10px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+  transition: transform 0.12s;
+}
+.cat:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.cat .emoji {
+  font-size: 26px;
+  line-height: 1;
+}
+.cat .name {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* ── Quick-filter chips ──────────────────────────────────────────────────── */
 
 .filters {
-  margin: 2px 0 18px;
+  margin: 26px 0 0;
 }
-.chip.filter {
-  border: 1px solid var(--line);
-  cursor: pointer;
-  transition:
-    border-color 0.15s,
-    background 0.15s,
-    color 0.15s;
+.filters .chips {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
-.chip.filter:hover {
-  border-color: var(--accent);
-}
-.chip.filter.on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 22px;
+  background: var(--chip);
+  color: var(--ink2);
+  font-size: 14px;
   font-weight: 600;
+  transition: transform 0.12s;
+}
+.chip:hover {
+  color: var(--ink);
+}
+.chip.on {
+  background: var(--accent);
+  color: #fff;
 }
 .chip.filter-clear {
   background: transparent;
@@ -197,49 +364,331 @@ p.lede {
   border-color: var(--ink3);
 }
 
+/* ── Section heading ─────────────────────────────────────────────────────── */
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 36px 0 22px;
+}
+.section-head h2 {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+  margin: 0;
+}
+.section-head .count {
+  font-size: 14px;
+  color: var(--ink2);
+}
+
+h1 {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+  line-height: 1.15;
+  margin: 0;
+}
+h2 {
+  font-size: 22px;
+  margin: 32px 0 12px;
+}
+p.lede {
+  color: var(--ink2);
+  margin: 0 0 24px;
+}
+
+/* ── Media placeholder ───────────────────────────────────────────────────── */
+
+/* The artifact has no photography, so it draws a diagonal hatch and prints the
+   shot it wants over it. Real rows carry a photo often enough that this is the
+   fallback rather than the rule. */
+.ph {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--placeholder) 0 14px,
+    var(--placeholder2) 14px 28px
+  );
+}
+.media {
+  position: relative;
+  overflow: hidden;
+}
+.media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ── Restaurant grid ─────────────────────────────────────────────────────── */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+.card {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--card);
+  overflow: hidden;
+  box-shadow: 0 10px 26px var(--shadow);
+  transition: transform 0.15s;
+}
+.card:hover {
+  transform: translateY(-2px);
+}
+.card .media {
+  height: 180px;
+}
+.card .body {
+  padding: 16px 17px 18px;
+}
+.card .name {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+.card .meta {
+  font-size: 13.5px;
+  color: var(--ink2);
+  margin-top: 4px;
+}
+.card .tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+/* Badges floating on a photo: translucent, blurred, legible over anything. */
 .badge {
-  display: inline-block;
-  border-radius: 999px;
-  padding: 2px 10px;
-  font-size: 13px;
-  font-weight: 600;
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.badge.status {
+  top: 12px;
+  left: 12px;
+}
+.badge.status .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: currentcolor;
 }
 .badge.open {
-  background: var(--accent-soft);
   color: var(--good);
 }
 .badge.closed {
-  background: var(--chip);
   color: var(--ink3);
 }
+.badge.rating {
+  top: 11px;
+  right: 12px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.badge .star {
+  color: var(--star);
+}
 
+.tag {
+  padding: 6px 11px;
+  border-radius: 12px;
+  background: var(--chip);
+  color: var(--ink2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.tag.prep {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+.tag.good {
+  color: var(--good);
+  font-weight: 700;
+}
+
+/* ── Restaurant page ─────────────────────────────────────────────────────── */
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--card);
+  font-size: 14px;
+  font-weight: 700;
+}
+.back:hover {
+  border-color: var(--accent);
+}
+
+.banner {
+  height: 280px;
+  border-radius: 24px;
+  margin-top: 18px;
+}
+/* Darkened at the foot so a caption stays readable over a bright photo. */
+.banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.34), transparent 60%);
+}
+
+.rest-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 26px;
+}
+.rest-head .meta {
+  font-size: 15px;
+  color: var(--ink2);
+  margin: 5px 0 0;
+}
+.rest-head .tags {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.rest-head .tags .tag {
+  padding: 7px 12px;
+  font-size: 13px;
+}
+.score {
+  flex: none;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  padding: 12px 18px;
+  box-shadow: 0 5px 14px var(--shadow);
+}
+.score .value {
+  font-size: 22px;
+  font-weight: 800;
+}
+.score .reviews {
+  font-size: 11.5px;
+  color: var(--ink2);
+}
+
+/* The artifact's menu tabs filter the list. These are anchors instead: this
+   page exists so that the whole menu is in the HTML a crawler receives, and a
+   tab that hides three quarters of it would defeat that. Same pill, and it
+   still works with JavaScript off. */
+.menu-nav {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 26px 0 4px;
+  padding: 0;
+  list-style: none;
+}
+.menu-nav a {
+  display: inline-block;
+  padding: 10px 18px;
+  border-radius: 22px;
+  background: var(--chip);
+  color: var(--ink2);
+  font-size: 14.5px;
+  font-weight: 700;
+}
+.menu-nav a:hover {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.menu-section h3 {
+  font-size: 17px;
+  font-weight: 800;
+  margin: 26px 0 0;
+  scroll-margin-top: 88px;
+}
+
+.dishes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-top: 18px;
+}
 .dish {
   display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--line);
+  gap: 15px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--card);
+  padding: 14px;
+  box-shadow: 0 6px 18px var(--shadow);
 }
-.dish:last-child {
-  border-bottom: none;
+.dish .media {
+  flex: none;
+  width: 104px;
+  height: 104px;
+  border-radius: 15px;
+}
+.dish .text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dish .name {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
 }
 .dish .desc {
+  font-size: 12.5px;
   color: var(--ink2);
-  font-size: 14px;
-  margin-top: 2px;
+  line-height: 1.35;
+  margin-top: 3px;
+  text-wrap: pretty;
+}
+.dish .facts {
+  font-size: 11px;
+  color: var(--ink3);
+  margin-top: 5px;
 }
 .dish .price {
-  font-weight: 650;
-  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 800;
+  margin-top: auto;
+  padding-top: 10px;
 }
 .dish.unavailable .name,
 .dish.unavailable .price {
   color: var(--ink3);
 }
 
+/* ── Order CTA ───────────────────────────────────────────────────────────── */
+
 .cta {
   background: var(--accent-soft);
-  border-radius: var(--radius);
+  border-radius: 20px;
   padding: 20px;
   margin: 28px 0;
 }
@@ -251,55 +700,24 @@ p.lede {
   color: var(--ink2);
   font-size: 15px;
 }
-
-/* ── Hero (from the web design artifact) ─────────────────────────────────── */
-
-.hero {
-  padding: 48px 0 40px;
-  max-width: 640px;
-}
-.promo-tag {
+/* The one thing this page can offer a visitor who wants to order right now.
+   Smaller than `.cta-primary`: the hero's button is the page's main action,
+   and this must not compete with it. */
+.cta-action {
   display: inline-block;
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: 999px;
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.6px;
-}
-.hero h1 {
-  font-size: 44px;
-  line-height: 1.1;
-  letter-spacing: -1px;
-  margin: 18px 0 0;
-}
-.hero-sub {
-  color: var(--ink2);
-  font-size: 17px;
-  margin: 14px 0 0;
-  text-wrap: pretty;
-}
-.cta-primary {
-  display: inline-block;
-  margin-top: 26px;
+  margin-top: var(--space-md);
   background: var(--accent);
+  /* White on the accent, which is orange in both themes; there is no token for
+     "text on accent" to reach for. */
   color: #fff;
-  font-weight: 700;
-  font-size: 15.5px;
-  padding: 0 26px;
-  line-height: 54px;
-  border-radius: 18px;
-  box-shadow: 0 12px 26px var(--shadow);
+  font-weight: 650;
+  font-size: 15px;
+  padding: 0 var(--space-xl);
+  line-height: 44px;
+  border-radius: var(--radius-md);
 }
-.cta-primary:hover {
+.cta-action:hover {
   opacity: 0.92;
-}
-
-@media (max-width: 640px) {
-  .hero h1 {
-    font-size: 32px;
-  }
 }
 
 /* ── Footer ──────────────────────────────────────────────────────────────── */
@@ -310,64 +728,1030 @@ p.lede {
   margin-top: 48px;
 }
 .foot-inner {
-  max-width: 960px;
+  max-width: var(--page);
   margin: 0 auto;
-  padding: 44px 20px 28px;
+  padding: 52px var(--gutter) 30px;
+}
+.foot-grid {
   display: grid;
-  gap: 32px;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 40px;
+  /* 1.6fr, not 2fr: the brand column holds a blurb capped at 300px, so the
+     extra width the wider ratio gave it was empty. */
+  grid-template-columns: 1.6fr 1fr 1fr 1fr;
 }
-.foot-brand .brand {
-  color: var(--accent);
-  font-weight: 700;
-  font-size: 18px;
-  margin-bottom: 10px;
+.foot-logo {
+  display: flex;
+  align-items: center;
+  gap: 11px;
 }
-.foot-brand p {
-  margin: 0;
-  font-size: 14.5px;
-  max-width: 34ch;
+.foot-blurb {
+  margin: 14px 0 0;
+  font-size: 14px;
+  color: var(--ink2);
+  line-height: 1.6;
+  max-width: 300px;
+  text-wrap: pretty;
+}
+.foot-social {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+.foot-social-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  /* --bg, not --card: the footer *is* --card, so the discs only read as discs
+     against the page colour. */
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
 }
 .foot-head {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.4px;
-  color: var(--ink3);
-  margin-bottom: 12px;
+  /* Full --ink. At --ink3 the headings sat at the same weight as the items
+     under them and the three lists read as one grey block. */
+  color: var(--ink);
 }
 .foot-col ul {
   list-style: none;
-  margin: 0;
+  margin: 15px 0 0;
   padding: 0;
   display: grid;
-  gap: 9px;
+  gap: 11px;
 }
 .foot-col li {
-  font-size: 14.5px;
+  font-size: 14px;
   color: var(--ink2);
 }
 .foot-bottom {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 18px 20px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 44px;
+  padding-top: 22px;
   border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink3);
+}
+.foot-made {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
+/* ── Narrower screens ────────────────────────────────────────────────────── */
+
+/* ── Ordering ────────────────────────────────────────────────────────────────
+   Transcribed from the CHECKOUT SLIDE-OVER and ORDER CONFIRMED TOAST in
+   docs/design/web-landing.html. The drawer's 440px panel, its 24px qty chips,
+   the uppercase 12px section labels and the 54px CTA are the artifact's; the
+   screens it does not draw (basket, pre-order, sign-in, tracking) reuse those
+   same measurements rather than inventing a second set. */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.basket-button {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+.basket-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The design's "View basket" bar. Fixed rather than sticky: it must not stop
+   at the end of the menu section it happens to be inside. */
+.sticky-cta {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  z-index: 20;
+  width: min(520px, calc(100vw - 32px));
+  height: 54px;
+  padding: 0 22px;
+  border-radius: 16px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-shadow: 0 10px 24px var(--shadow);
+}
+.sticky-cta .pill {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 14px;
+}
+
+/* The artifact's add button is a solid accent disc that lifts off the card —
+   it is the one thing on a menu row you are meant to press, and the pale
+   accent-soft chip this used to be did not read as a button at all. */
+.dish .add {
+  flex: none;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 19px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  box-shadow: 0 5px 14px var(--shadow);
+}
+.dish .add:hover {
+  opacity: 0.85;
+}
+
+/* ── Basket ──────────────────────────────────────────────────────────────── */
+
+.empty-state {
+  text-align: center;
+  padding: 72px 20px;
+  color: var(--ink2);
+}
+.empty-state .glyph {
+  font-size: 52px;
+}
+.empty-state h1 {
+  font-size: 22px;
+  margin: 14px 0 6px;
+  color: var(--ink);
+}
+
+.lines {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+.line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.line:last-child {
+  border-bottom: none;
+}
+.line .text {
+  flex: 1;
+  min-width: 0;
+}
+.line .name {
+  font-size: 15px;
+  font-weight: 650;
+}
+.line .each {
+  font-size: 12.5px;
+  color: var(--ink2);
+}
+.line.gone .name,
+.line.gone .each {
+  color: var(--ink3);
+  text-decoration: line-through;
+}
+.line .gone-why {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--danger, #d33);
+  text-decoration: none;
+}
+.line-total {
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 84px;
+  text-align: right;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.stepper button {
+  width: 30px;
+  height: 30px;
+  border-radius: 15px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 16px;
+  cursor: pointer;
+}
+.stepper .qty {
+  min-width: 22px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 14px;
+}
+.line-remove {
+  border: none;
+  background: none;
+  color: var(--ink3);
+  font-size: 15px;
+  cursor: pointer;
+}
+.line-remove:hover {
+  color: var(--ink);
+}
+
+.add-more {
+  display: inline-block;
+  margin-top: 14px;
+  color: var(--accent);
+  font-weight: 650;
+  font-size: 14.5px;
+}
+
+.coupon {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+.coupon input {
+  flex: 1;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+}
+.coupon button {
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.summary {
+  margin: 22px 0 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+}
+.summary div {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  flex-wrap: wrap;
+  padding: 6px 0;
+}
+.summary dt {
+  color: var(--ink2);
+  font-size: 14px;
+}
+.summary dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+.summary .good dt,
+.summary .good dd {
+  color: var(--good);
+}
+.summary .grand {
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  padding-top: 12px;
+}
+.summary .grand dt,
+.summary .grand dd {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--ink);
 }
 
-@media (max-width: 760px) {
-  .foot-inner {
-    grid-template-columns: 1fr 1fr;
+.notice {
+  margin: 14px 0;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: var(--chip);
+  color: var(--ink2);
+  font-size: 14px;
+}
+.notice.warn {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+.notice.good {
+  background: var(--accent-soft);
+  color: var(--good);
+  font-weight: 650;
+}
+.switch-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.switch-prompt button {
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ── Pre-order ───────────────────────────────────────────────────────────── */
+
+.section-label {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink2);
+  margin: 24px 0 11px;
+}
+
+.modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 18px;
+}
+.mode {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.mode.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.mode .emoji {
+  font-size: 20px;
+}
+.mode .name {
+  font-size: 15.5px;
+  font-weight: 700;
+}
+.mode .hint {
+  font-size: 12.5px;
+  color: var(--ink2);
+}
+
+.daypager,
+.guestpicker,
+.slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.day,
+.guest,
+.slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.day.on,
+.guest.on,
+.slot.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.slot:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+.deposit-card {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--card);
+}
+.deposit-card .row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 15px;
+}
+.deposit-card p {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--ink2);
+}
+
+/* ── Checkout, as the artifact's slide-over ──────────────────────────────── */
+
+.drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+}
+.drawer-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+}
+.drawer-panel {
+  position: relative;
+  width: 440px;
+  max-width: 92vw;
+  height: 100%;
+  background: var(--bg);
+  box-shadow: -14px 0 44px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.checkout-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.panel-head {
+  flex: none;
+  padding: 22px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+.panel-head h1 {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  margin: 0;
+}
+.panel-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+.panel-body {
+  padding: 20px 24px;
+}
+.panel-back {
+  display: inline-block;
+  margin-top: 18px;
+  color: var(--ink2);
+  font-size: 14px;
+}
+
+.order-lines {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 6px 16px;
+}
+.order-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.qty-chip {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.order-line .name {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+}
+.order-line .amount {
+  font-size: 15px;
+  font-weight: 700;
+}
+.order-sum {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  font-size: 14px;
+  color: var(--ink2);
+}
+.order-sum span:last-child {
+  font-weight: 600;
+  color: var(--ink);
+}
+.order-sum.good span {
+  color: var(--good);
+}
+
+.fineprint {
+  font-size: 12.5px;
+  color: var(--ink2);
+  line-height: 1.45;
+  margin: 12px 0 0;
+  text-wrap: pretty;
+}
+
+.ready-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ready-value {
+  font-size: 15.5px;
+  font-weight: 700;
+}
+.ready-mode {
+  font-size: 13px;
+  color: var(--ink2);
+}
+.ready-change {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.pay-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pay-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  cursor: pointer;
+}
+.pay-row input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.pay-icon {
+  font-size: 20px;
+  width: 24px;
+  text-align: center;
+}
+.pay-label {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+}
+.pay-label small {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink3);
+}
+.pay-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  border: 2px solid var(--line);
+}
+.pay-row:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.pay-row:has(input:checked) .pay-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--card);
+}
+.pay-row.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.pay-cta {
+  margin-top: 8px;
+  width: 100%;
+  height: 54px;
+  border-radius: 16px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 24px var(--shadow);
+}
+.pay-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ── Sign in ─────────────────────────────────────────────────────────────── */
+
+.signin {
+  max-width: 420px;
+  margin: 40px auto;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+}
+.stack label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink2);
+}
+.stack input {
+  height: 50px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 16px;
+}
+.stack button {
+  margin-top: 10px;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+}
+
+/* Country, then the number. The select sizes to its content so a long country
+   name does not squeeze the field the number goes in — which is the field the
+   visitor is actually typing into. */
+.phone-row {
+  display: flex;
+  gap: 8px;
+}
+.phone-row select {
+  flex: 0 1 auto;
+  max-width: 45%;
+  height: 50px;
+  padding: 0 10px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+  cursor: pointer;
+}
+.phone-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.field-hint {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--ink2);
+}
+.field-hint.warn {
+  color: var(--accent);
+  font-weight: 650;
+}
+.phone-row input[aria-invalid='true'] {
+  border-color: var(--accent);
+}
+
+/* ── Tracking, from the confirmed-order card ─────────────────────────────── */
+
+.tracking {
+  max-width: 460px;
+  margin: 32px auto;
+  text-align: center;
+}
+.confirm-mark {
+  width: 72px;
+  height: 72px;
+  border-radius: 36px;
+  background: var(--good);
+  color: #fff;
+  font-size: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+}
+.confirm-mark.cancelled {
+  background: var(--ink3);
+}
+.tracking h1 {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  margin: 18px 0 0;
+}
+
+.timer {
+  margin: 22px 0;
+}
+.timer .value {
+  display: block;
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+.timer .sub {
+  font-size: 13.5px;
+  color: var(--ink2);
+}
+
+.steps {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 22px 0;
+  counter-reset: step;
+}
+.step {
+  flex: 1;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink3);
+  padding-top: 12px;
+  border-top: 3px solid var(--line);
+}
+.step.done {
+  color: var(--accent);
+  border-top-color: var(--accent);
+}
+
+.code-card {
+  padding: 22px;
+  border-radius: 20px;
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
+}
+.code-label {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--accent);
+}
+.code-value {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  margin: 6px 0;
+  font-variant-numeric: tabular-nums;
+}
+.code-card p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink2);
+}
+
+.tracking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 24px;
+}
+.ghost-action {
+  display: inline-block;
+  height: 44px;
+  line-height: 42px;
+  padding: 0 20px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.ghost-action:hover {
+  border-color: var(--ink3);
+}
+
+/* ── Orders list ─────────────────────────────────────────────────────────── */
+
+.order-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.order-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--card);
+}
+.order-row:hover {
+  border-color: var(--ink3);
+}
+.order-row .who {
+  flex: 1;
+  min-width: 0;
+}
+.order-row .name {
+  display: block;
+  font-size: 15.5px;
+  font-weight: 700;
+}
+.order-row .meta {
+  font-size: 12.5px;
+  color: var(--ink2);
+}
+.order-row .status {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 12px;
+  padding: 4px 10px;
+}
+.order-row .amount {
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 90px;
+  text-align: right;
+}
+
+/* The artifact is drawn at 1280×860 and says nothing about a phone. These are
+   the fewest breakpoints that keep it from breaking: the three-up grid steps
+   down, the hero's padding and headline shrink, and the header wraps rather
+   than crushing the search field. */
+
+@media (max-width: 1080px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
-.muted {
-  color: var(--ink2);
+@media (max-width: 860px) {
+  :root {
+    --gutter: 18px;
+  }
+  .hero {
+    padding: 40px 28px;
+  }
+  .hero h1 {
+    font-size: 34px;
+  }
+  .dishes {
+    grid-template-columns: 1fr;
+  }
+  .banner {
+    height: 200px;
+  }
+  .foot-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+  }
+  header.site .inner {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  .searchbar {
+    order: 1;
+    max-width: none;
+    flex-basis: 100%;
+  }
+  .langs {
+    margin-left: auto;
+  }
 }
-.faint {
-  color: var(--ink3);
-  font-size: 14px;
+
+@media (max-width: 560px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .hero h1 {
+    font-size: 28px;
+  }
+  .rest-head {
+    flex-direction: column;
+  }
+  /* One column, and the drawer becomes the whole screen — a 440px panel with
+     8% of a page peeking behind it is not a phone layout. */
+  .modes {
+    grid-template-columns: 1fr;
+  }
+  .drawer-panel {
+    width: 100%;
+    max-width: 100%;
+  }
+  .line-total {
+    min-width: 0;
+  }
+  .steps {
+    font-size: 10.5px;
+  }
+  /* Two columns of four short links is still two columns of one word each;
+     stacking them reads better than squeezing them. */
+  .foot-grid {
+    grid-template-columns: 1fr;
+  }
+  .foot-bottom {
+    margin-top: 32px;
+  }
 }

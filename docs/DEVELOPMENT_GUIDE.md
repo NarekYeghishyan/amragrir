@@ -135,10 +135,12 @@ in API_DOCUMENTATION.md.
   from `Accept-Language`, falling back to `hy`. Clients receive a plain string,
   never the raw JSON blob.
   - **A public web page is the exception**: `apps/web` puts the language in the
-    URL (`/hy`, `/ru`, `/en`) and forwards it as `Accept-Language`. A crawler
-    sends one header, so header negotiation alone would leave two of the three
-    languages unindexed. Anything meant to be *found* needs a URL per language,
-    linked with `hreflang`.
+    URL and forwards it as `Accept-Language`. A crawler sends one header, so
+    header negotiation alone would leave two of the three languages unindexed.
+    Anything meant to be *found* needs a URL per language, linked with
+    `hreflang`. Armenian is the default and is **unprefixed** — it lives at the
+    bare domain (`/`, `/r/sunny-table`), with only `/ru` and `/en` carrying a
+    segment.
 - **Never return internals.** No stack traces, driver errors, or connection
   strings in responses — the exception filter collapses unknown errors to a
   generic 500.
@@ -205,6 +207,30 @@ in API_DOCUMENTATION.md.
 - Order/status state — realtime subscription + optimistic cart updates.
 - Skeletons for all loads (pattern from the design).
 - Accessibility: hit target ≥ 44px, contrast, dark-theme support.
+
+**On the web (`apps/web`) the first three read differently, and the difference
+is the rule.** That app exists to be crawled, so its pages are server-rendered
+and pre-rendered, and it has no client data layer at all:
+
+- **The browser never calls the API.** Reads happen in server components; writes
+  are Server Actions driven by `<form action={…}>`. There is no
+  `NEXT_PUBLIC_API_URL`, so the API's address is not in the bundle, and no CORS
+  is involved.
+- **Tokens and the basket live in httpOnly cookies**, never in `localStorage`
+  and never in the page. A token in reach of a script is a token an injected
+  script can take, and a basket in reach of the page is a basket the customer
+  can re-price. The basket cookie holds ids and quantities only; every total
+  comes from `POST /cart/quote` on each render.
+- **No optimistic cart updates.** The server is the only place a total is
+  computed, so there is nothing to be optimistic with.
+- **Every flow must work with JavaScript disabled.** A form post and a redirect
+  is the default; a client component is the exception and needs a reason.
+  Anything that reads a cookie on the server opts its whole route tree out of
+  pre-rendering — which is why the basket badge is drawn in the browser from a
+  separate, deliberately readable count cookie.
+- **Per-visitor pages get `noindex` *and* a `robots.txt` disallow.** `noindex`
+  is only read after a fetch; a page that prices a basket per request should not
+  be fetched by a crawler at all.
 
 ### Testing
 
@@ -273,7 +299,7 @@ Armenian word surfacing in an English page.
 | App | Source | Why |
 |---|---|---|
 | `apps/api` | `Accept-Language` header | One process serves everyone; see §3 "API conventions". |
-| `apps/web` | the URL — `/hy`, `/ru`, `/en` | A crawler sends one header, so header negotiation alone leaves two languages unindexed. Needs a URL per language with `hreflang`. |
+| `apps/web` | the URL — the bare domain is `hy`, then `/ru`, `/en` | A crawler sends one header, so header negotiation alone leaves two languages unindexed. Needs a URL per language with `hreflang`. The default language is unprefixed (`/r/x`, not `/hy/r/x`) because it is most of the traffic; `/hy/…` 308s to it so one page keeps one address. |
 | `apps/admin` | a stored choice (`amragrir.language`), then the browser's, then `hy` | Internal, behind a sign-in, nothing to index. Staff work a shift in one language, so the choice sits in storage next to the theme and is switched from the account menu (and from the sign-in card, which is in front of anyone who cannot yet read the panel). |
 
 The admin panel sends its choice as `Accept-Language` on every request, so the

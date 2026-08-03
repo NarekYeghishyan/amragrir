@@ -1,8 +1,22 @@
 import Link from 'next/link';
-import type { Language } from '@amragrir/shared';
+import { RestaurantService, type Language } from '@amragrir/shared';
+import type { TranslationKey } from '@amragrir/i18n';
 import { t } from '@/lib/language';
 import { formatDistance, formatPriceLevel, formatRating } from '@/lib/format';
 import { restaurantPath } from '@/lib/site';
+
+/**
+ * The service badges a restaurant advertises.
+ *
+ * Copy taken verbatim from the design artifact rather than translated afresh —
+ * these are the artifact's own short forms ("Տանել", not the filter chip's
+ * longer "Վերցնել"), and a card has room for the short one.
+ */
+const SERVICE_LABEL: Record<string, TranslationKey> = {
+  [RestaurantService.Pickup]: 'svcPickup',
+  [RestaurantService.DineIn]: 'svcDineIn',
+  [RestaurantService.Reserve]: 'svcReserve',
+};
 
 interface Props {
   restaurant: {
@@ -15,6 +29,9 @@ interface Props {
     prepMin: number | null;
     isOpen: boolean;
     distanceKm?: number | null;
+    coverUrl?: string | null;
+    /** Absent from search results, which do not carry it. */
+    services?: string[];
   };
   language: Language;
 }
@@ -26,24 +43,40 @@ export function RestaurantCard({ restaurant, language }: Props) {
   const meta = [
     restaurant.cuisine,
     formatPriceLevel(restaurant.priceLevel ?? null),
-    restaurant.prepMin === null ? null : `${restaurant.prepMin} ${label('minutes')}`,
     formatDistance(restaurant.distanceKm ?? null),
   ].filter(Boolean);
 
   return (
-    <Link className="card" href={restaurantPath(language, restaurant.slug)}>
-      <div className="name">{restaurant.name}</div>
-      <div className="meta">
-        ★ {formatRating(restaurant.rating)}{' '}
-        <span className="faint">
-          ({restaurant.reviewsCount} {label('reviews')})
-        </span>
-      </div>
-      {meta.length > 0 && <div className="meta">{meta.join(' · ')}</div>}
-      <div style={{ marginTop: 10 }}>
-        <span className={restaurant.isOpen ? 'badge open' : 'badge closed'}>
+    <Link className="card rise" href={restaurantPath(language, restaurant.slug)}>
+      <div className={restaurant.coverUrl ? 'media' : 'media ph'}>
+        {restaurant.coverUrl && <img src={restaurant.coverUrl} alt="" loading="lazy" />}
+        <span className={restaurant.isOpen ? 'badge status open' : 'badge status closed'}>
+          <span className="dot" />
           {restaurant.isOpen ? label('open') : label('closed')}
         </span>
+        <span className="badge rating">
+          <span className="star">★</span>
+          {formatRating(restaurant.rating)}
+        </span>
+      </div>
+
+      <div className="body">
+        <div className="name">{restaurant.name}</div>
+        {meta.length > 0 && <div className="meta">{meta.join(' · ')}</div>}
+        <div className="tags">
+          {restaurant.prepMin !== null && (
+            <span className="tag prep">
+              ⏱ {restaurant.prepMin} {label('minutes')}
+            </span>
+          )}
+          {restaurant.services?.map((service) =>
+            SERVICE_LABEL[service] ? (
+              <span key={service} className="tag">
+                {label(SERVICE_LABEL[service])}
+              </span>
+            ) : null,
+          )}
+        </div>
       </div>
     </Link>
   );

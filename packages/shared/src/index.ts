@@ -3,6 +3,7 @@ export * from './staff-roles';
 export * from './activity';
 export * from './constants';
 export * from './order-status';
+export * from './phone';
 export * from './reservation-status';
 export * from './rewards';
 export * from './uploads';

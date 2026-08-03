@@ -8,5 +8,5 @@ Every time you change code or business logic:
 4. Never leave documentation outdated or inconsistent with the code.
 
 Do not duplicate the file-mapping rules here — edit them in
-`docs/AI_CONTEXT.md` so Cursor and Claude Code (see root `CLAUDE.md`) stay
-in sync with a single copy of the rule.
+`docs/AI_CONTEXT.md` so every AI assistant working on this repo (see the root
+agent-instructions file) stays in sync with a single copy of the rule.

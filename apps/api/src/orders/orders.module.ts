@@ -5,6 +5,7 @@ import { ReferralsModule } from '../referrals/referrals.module';
 import { StaffModule } from '../staff/staff.module';
 import { OrdersController } from './orders.controller';
 import { OrdersGateway } from './orders.gateway';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { OrdersService } from './orders.service';
 import { OrderHistoryService } from './order-history.service';
 
@@ -14,7 +15,10 @@ import { OrderHistoryService } from './order-history.service';
  *  itself and accepts either identity: the customer watching their order, or
  *  the kitchen working it. */
 @Module({
-  imports: [PaymentsModule, AuthModule, ReferralsModule, StaffModule],
+  // NotificationsModule for the gateway's branch subscription: a panel watching
+  // a board has to be told which branches it may hear about, and that answer
+  // comes from the same scope the REST board is filtered by.
+  imports: [PaymentsModule, AuthModule, ReferralsModule, StaffModule, NotificationsModule],
   controllers: [OrdersController],
   providers: [OrdersService, OrdersGateway, OrderHistoryService],
   // The history is read by the back office (the order card's History button)

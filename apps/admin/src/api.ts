@@ -9,6 +9,7 @@ import type {
   PaymentStatus,
   Permission,
   ServiceMode,
+  StaffNotificationType,
   StaffRole,
 } from '@amragrir/shared';
 import type { AdminTranslationKey } from '@amragrir/i18n/admin';
@@ -415,6 +416,25 @@ export interface StaffOrder {
   paymentStatus: PaymentStatus | null;
   readyAt: string | null;
   secondsLeft: number | null;
+  /**
+   * A pre-order placed for later, rather than one wanted now.
+   *
+   * The card reads differently for these: the day and hour it is due, when the
+   * kitchen has to start, and the notice the branch has set itself — instead of
+   * a countdown that would say "ready in 8,640 min" and a late warning for work
+   * nobody was meant to have begun.
+   */
+  scheduled: boolean;
+  /** When the kitchen has to start, so the card can say "start 12:40". */
+  prepStartAt: string | null;
+  /** The estimate it was promised against. Null on orders placed before
+   *  pre-ordering existed. */
+  prepMin: number | null;
+  /** When the branch will be warned, and how many minutes before the food is due
+   *  that is. Null on an order placed for as soon as possible — which is what
+   *  decides whether the card offers the control at all. */
+  reminderAt: string | null;
+  reminderLeadMin: number | null;
   createdAt: string;
   /** The lines of the order. `name` is the snapshot taken when it was placed —
    *  what the diner bought, whatever the dish has been renamed to since — and
@@ -424,6 +444,59 @@ export interface StaffOrder {
    *  unit price beside a quantity would be asking a kitchen to multiply. */
   items: { menuItemId: string; name: string; qty: number; lineTotalAmd: number }[];
   notes: string | null;
+}
+
+/**
+ * A pre-order's warning, after somebody has moved it.
+ *
+ * What the API answers a lead change with — the number, the moment it now falls
+ * due, and whether that moment is still ahead. The last is not derivable here
+ * without trusting the panel's own clock against the server's, which is exactly
+ * the disagreement that would put a card on the wrong tab.
+ */
+export interface OrderReminder {
+  id: string;
+  reminderAt: string;
+  reminderLeadMin: number;
+  scheduled: boolean;
+}
+
+/**
+ * Something a branch has been told, addressed to the branch rather than to a
+ * person.
+ *
+ * `payload` is numbers, never prose: it is written by a job, and a job has no
+ * request to take a language from. The bell renders the line from `type` through
+ * this panel's own dictionary, exactly as it does an order status.
+ *
+ * `read` is whether **this** reader has seen it, not whether anybody has — a
+ * shift is not a person, and the first colleague to open the bell must not clear
+ * it for everyone else.
+ */
+export interface StaffNotification {
+  id: string;
+  type: StaffNotificationType;
+  branchId: string;
+  orderId: string | null;
+  payload: PrepDuePayload | null;
+  createdAt: string;
+  read: boolean;
+}
+
+/** What a `prep_due` row carries. Every field nullable in the way the order's
+ *  own columns are: an order from before pre-ordering existed recorded none of
+ *  them, and the bell says so rather than printing "null minutes". */
+export interface PrepDuePayload {
+  pickupCode?: string;
+  code?: string;
+  readyAt?: string | null;
+  prepStartAt?: string | null;
+  prepMin?: number | null;
+  reminderLeadMin?: number | null;
+  itemsCount?: number;
+  /** Whether anybody still has to accept it. False for every pre-order placed
+   *  since paying began to confirm them; true on the ones that predate it. */
+  needsConfirming?: boolean;
 }
 
 /**
@@ -461,6 +534,17 @@ export interface OrderHistoryEntry {
     itemsCount?: number;
     totalAmd?: number;
     readyAt?: string | null;
+    /** Whether the customer chose that time rather than taking the earliest —
+     *  set on the `created` entry. */
+    scheduled?: boolean;
+    /** On a `reminder_set` entry: the notice the branch moved to, and the one it
+     *  replaced. Both, because the column is overwritten in place and a timeline
+     *  that named only the new value could say a warning moved but not from
+     *  what. The previous one is null on an order placed before the lead was a
+     *  column of its own. */
+    reminderLeadMin?: number;
+    previousReminderLeadMin?: number | null;
+    reminderAt?: string | null;
     paymentMethod?: PaymentMethod;
     paymentStatus?: PaymentStatus;
     amountAmd?: number;
@@ -976,6 +1060,29 @@ export const api = {
 
   setOrderStatus: (id: string, status: OrderStatus) =>
     request<unknown>(`/restaurant/orders/${id}/status`, { method: 'PATCH', body: { status } }),
+
+  /**
+   * How much notice the branch wants on one pre-order.
+   *
+   * Answers with the warning alone rather than the whole order, so the board can
+   * patch the card it already has — re-reading forty fields to say one number
+   * moved would let a stale response overwrite a status the socket delivered
+   * half a second ago.
+   */
+  setOrderReminder: (id: string, leadMin: number) =>
+    request<OrderReminder>(`/restaurant/orders/${id}/reminder`, {
+      method: 'PATCH',
+      body: { leadMin },
+    }),
+
+  /** The bell: what this account's branches have been told, newest first. */
+  notifications: () =>
+    request<{ items: StaffNotification[]; unread: number }>('/staff/notifications'),
+
+  /** Marks notifications read **by this person** — a branch's bell is read by
+   *  people, one at a time, so this is never "clear it for the shift". */
+  readNotifications: (ids: string[]) =>
+    request<{ read: number }>('/staff/notifications/read', { method: 'POST', body: { ids } }),
 
   /**
    * One order's trail. Fetched when the History dialog opens rather than with

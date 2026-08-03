@@ -78,6 +78,15 @@ describe('chipHref', () => {
     expect(chipHref(state, chip('openNow'), Language.Ru)).toBe('/ru');
   });
 
+  it('keeps the leading slash in Armenian, which has no language prefix', () => {
+    // The default language's prefix is empty, so a chip href is built on `/`
+    // rather than on `/hy` — `?openNow=1` alone would resolve against whatever
+    // path the visitor happened to be on.
+    const state = parseFilters({});
+    expect(chipHref(state, chip('openNow'), Language.Hy)).toBe('/?openNow=1');
+    expect(clearHref(Language.Hy)).toBe('/');
+  });
+
   it('makes the two sort chips mutually exclusive', () => {
     const state = parseFilters({ sort: 'top_rated' });
     // Clicking the other sort replaces it, never stacks two sorts.

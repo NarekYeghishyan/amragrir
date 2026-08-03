@@ -34,13 +34,14 @@ export function FilterChips({ state, language }: { state: FilterState; language:
           return (
             <li key={chip.id}>
               <Link
-                className={active ? 'chip filter on' : 'chip filter'}
+                className={active ? 'chip on' : 'chip'}
                 href={chipHref(state, chip, language)}
                 aria-current={active ? 'true' : undefined}
                 // The listing below re-renders; don't jump the viewport to the
                 // top when only the chip row and the results change.
                 scroll={false}
               >
+                <span aria-hidden="true">{chip.icon}</span>
                 {label(chip.labelKey)}
               </Link>
             </li>

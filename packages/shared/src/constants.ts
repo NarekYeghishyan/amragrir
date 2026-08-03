@@ -48,6 +48,59 @@ export const ORDER_MAX_LEAD_DAYS = 7;
 /** Fallback prep estimate when neither the dish nor the branch declares one, in minutes. */
 export const DEFAULT_PREP_MIN = 15;
 
+/**
+ * How long *before* the kitchen must start cooking a pre-order the branch is
+ * reminded, in minutes.
+ *
+ * `orders.prep_start_at` is the moment work has to begin — `ready_at` minus the
+ * prep estimate — and a notification that arrives exactly then is not a warning,
+ * it is a deadline that has already passed. This is the slack: time to read it,
+ * find the ticket and get to the pass.
+ *
+ * Separate from the prep estimate on purpose. That number answers "how long does
+ * this dish take" and belongs to the food; this one answers "how much notice
+ * does a person need" and belongs to the shift. Folding them into one would mean
+ * a branch could not lengthen its notice without claiming its dishes cook
+ * slower — which would also move the earliest time a customer may order for.
+ */
+export const PREP_REMINDER_BUFFER_MIN = 10;
+
+/**
+ * How long before a pre-order is wanted the branch is warned, in minutes — the
+ * number the reminder is actually armed from.
+ *
+ * Measured from `ready_at`, not from `prep_start_at`, because it is the number a
+ * person sets and reads: "warn me forty minutes before it is due" is a sentence
+ * somebody can act on, while "warn me ten minutes before the moment the kitchen
+ * must start, which is itself thirty minutes before it is due" is the same
+ * instant described in a way nobody can hold in their head.
+ *
+ * The default is the arithmetic that was already there — the prep estimate plus
+ * the buffer — so an order nobody touches is warned about at exactly the moment
+ * it always was. What changes is that the number is now visible and can be
+ * moved.
+ */
+export function defaultReminderLeadMin(prepMin: number): number {
+  return prepMin + PREP_REMINDER_BUFFER_MIN;
+}
+
+/**
+ * The bounds a branch may move that warning inside, in minutes.
+ *
+ * The floor is not "as short as you like": under five minutes a reminder is a
+ * notification about something already late. The ceiling is a day, which is the
+ * longest notice that is still notice — beyond it the reminder stops being a
+ * warning and becomes a second copy of the order, and a branch wanting that is
+ * asking for the Scheduled tab, which is already there.
+ *
+ * They are bounds on the *lead*, not on when the reminder lands. A lead longer
+ * than the time left before the order is due simply means "warn me now", and the
+ * job does exactly that on its next pass — which is the right answer, not an
+ * error.
+ */
+export const REMINDER_LEAD_MIN_MINUTES = 5;
+export const REMINDER_LEAD_MAX_MINUTES = 24 * 60;
+
 // ── Table booking ───────────────────────────────────────────────────────────
 // [proposed] — the design shows a time picker and a deposit but no policy
 // numbers. Confirm with product; they are the answers to "how long is a

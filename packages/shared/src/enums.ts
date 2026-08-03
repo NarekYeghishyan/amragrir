@@ -83,8 +83,33 @@ export const OrderEventType = {
   Created: 'created',
   StatusChanged: 'status_changed',
   Payment: 'payment',
+  /**
+   * A branch moved when it wants warning about a pre-order.
+   *
+   * Not a status change: the order stays where it is and the food is still
+   * promised for the same minute. What moved is the notice the kitchen gave
+   * itself, which is a decision somebody made about their own shift — and the
+   * only record of it, since the column it writes is overwritten in place.
+   */
+  ReminderSet: 'reminder_set',
 } as const;
 export type OrderEventType = (typeof OrderEventType)[keyof typeof OrderEventType];
+
+/**
+ * What a `staff_notifications` row is telling a branch about.
+ *
+ * One value so far. An enum rather than a bare string because the panel renders
+ * a line per kind and must do so exhaustively — a second kind added to the
+ * database and not to the bell would arrive as a blank row, and here it is a
+ * compile error instead.
+ */
+export const StaffNotificationType = {
+  /** A pre-order is coming up and the kitchen has to start soon — raised by the
+   *  reminder job when `orders.reminder_at` falls due. */
+  PrepDue: 'prep_due',
+} as const;
+export type StaffNotificationType =
+  (typeof StaffNotificationType)[keyof typeof StaffNotificationType];
 
 /**
  * Which identity is behind a history entry.

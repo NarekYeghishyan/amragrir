@@ -110,6 +110,21 @@ export function reservationScope(
   return branchChildScope(scopes, permission) as Prisma.ReservationWhereInput;
 }
 
+/**
+ * Branch notifications the caller may read.
+ *
+ * Scoped on `orders:read` at the call site rather than on a permission of its
+ * own: the only notification that exists is a reminder about an order, and
+ * anyone who can watch the board it belongs to can be told about it. A separate
+ * permission would be one nobody could hold without also holding this one.
+ */
+export function notificationScope(
+  scopes: readonly StaffScope[],
+  permission: Permission,
+): Prisma.StaffNotificationWhereInput {
+  return branchChildScope(scopes, permission) as Prisma.StaffNotificationWhereInput;
+}
+
 export function menuScope(
   scopes: readonly StaffScope[],
   permission: Permission,

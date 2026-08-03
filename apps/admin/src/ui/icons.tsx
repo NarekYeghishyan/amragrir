@@ -118,6 +118,15 @@ const ICONS = {
       <path d="M12 7v5.3l3.2 1.9" />
     </>
   ),
+  /** The shell's bell — a branch being told something, which is a different
+   *  thing from `warning` (this order is late) and from `clock` (this one is
+   *  due at). */
+  bell: (
+    <>
+      <path d="M18 8.6a6 6 0 1 0-12 0c0 6-3 6.9-3 6.9h18s-3-.9-3-6.9" />
+      <path d="M13.7 19.4a2 2 0 0 1-3.4 0" />
+    </>
+  ),
   /** A clock wound backwards — the trail an order left, not the time it has
    *  left, which is what `clock` says on the same card. */
   history: (

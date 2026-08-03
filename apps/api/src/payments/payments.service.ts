@@ -6,7 +6,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Prisma, type Payment } from '@prisma/client';
+import { Prisma, type Order, type Payment } from '@prisma/client';
 import {
   OrderEventType,
   OrderStatus,
@@ -17,7 +17,8 @@ import {
 } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderEventsService, toStatusEvent } from '../orders/order-events.service';
-import { customerActor, orderEventData } from '../orders/order-history';
+import { SYSTEM_ACTOR, customerActor, orderEventData } from '../orders/order-history';
+import { isScheduledOrder } from '../orders/scheduling';
 import { ReferralsService } from '../referrals/referrals.service';
 import { PAYMENT_PROVIDER, PaymentDeclinedError, type PaymentProvider } from './payment.provider';
 import { CreatePaymentDto } from './dto';
@@ -168,48 +169,106 @@ export class PaymentsService {
   ): Promise<PaymentResult> {
     const expectedStatus = target.status as OrderStatus;
 
-    const [payment, order] = await this.prisma
-      .$transaction([
-        this.upsert(target.id, existing, data),
+    /**
+     * **A pre-order is accepted the moment it is paid for.**
+     *
+     * `paid` means "waiting for the restaurant to say yes", and that question is
+     * only worth asking about work in front of somebody. Left for a human, an
+     * order placed on Monday for Saturday would sit unaccepted for five days —
+     * on nobody's board, since the Scheduled tab is where it lives, and with a
+     * diner watching a screen that says the restaurant has not looked at it yet.
+     * The branch is told when it matters instead, by the reminder, and can still
+     * cancel nothing and confirm nothing because it is already confirmed.
+     *
+     * Decided on `reminder_at` alone rather than on the clock: whether this was
+     * a pre-order is a fact about how it was placed, and the answer must not
+     * depend on how long the customer took to reach the payment screen.
+     */
+    const autoConfirm = isScheduledOrder(target.reminderAt);
+
+    const writes: Prisma.PrismaPromise<unknown>[] = [
+      this.upsert(target.id, existing, data),
+      this.prisma.order.update({
+        // The status is part of the match, not just the payload: the check
+        // above ran before the charge, and a cancellation could have landed
+        // in between. Without it, paying would silently un-cancel an order.
+        where: { id: target.id, status: expectedStatus },
+        data: { status: OrderStatus.Paid },
+      }),
+      // In the same transaction as the move it describes, so the order's
+      // history cannot end up missing the step that took the money — or
+      // claiming one that the optimistic match above rejected.
+      this.prisma.orderEvent.create({
+        data: {
+          orderId: target.id,
+          ...orderEventData({
+            type: OrderEventType.StatusChanged,
+            // The customer: paying is something they did, even where the
+            // provider is what actually moved the money.
+            actor: customerActor(target.userId),
+            fromStatus: expectedStatus,
+            toStatus: OrderStatus.Paid,
+            detail: {
+              paymentMethod: data.method,
+              paymentStatus: data.status,
+              amountAmd: data.amountAmd,
+            },
+          }),
+        },
+      }),
+    ];
+
+    if (autoConfirm) {
+      writes.push(
         this.prisma.order.update({
-          // The status is part of the match, not just the payload: the check
-          // above ran before the charge, and a cancellation could have landed
-          // in between. Without it, paying would silently un-cancel an order.
-          where: { id: target.id, status: expectedStatus },
-          data: { status: OrderStatus.Paid },
+          // Matched on `paid` for the same reason the move above is matched on
+          // `created`: it is the status this decision was taken against.
+          where: { id: target.id, status: OrderStatus.Paid },
+          data: { status: OrderStatus.Confirmed },
         }),
-        // In the same transaction as the move it describes, so the order's
-        // history cannot end up missing the step that took the money — or
-        // claiming one that the optimistic match above rejected.
         this.prisma.orderEvent.create({
           data: {
             orderId: target.id,
             ...orderEventData({
               type: OrderEventType.StatusChanged,
-              // The customer: paying is something they did, even where the
-              // provider is what actually moved the money.
-              actor: customerActor(target.userId),
-              fromStatus: expectedStatus,
-              toStatus: OrderStatus.Paid,
-              detail: {
-                paymentMethod: data.method,
-                paymentStatus: data.status,
-                amountAmd: data.amountAmd,
-              },
+              // `system`, and not the customer: a diner cannot accept an order
+              // on a restaurant's behalf, and no member of staff was here. The
+              // timeline says a rule did this, which is the truth.
+              actor: SYSTEM_ACTOR,
+              fromStatus: OrderStatus.Paid,
+              toStatus: OrderStatus.Confirmed,
+              detail: { scheduled: true },
             }),
           },
         }),
-      ])
-      .catch((err: unknown) => {
-        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
-          throw new ConflictException('The order changed while the payment was being processed');
-        }
-        throw err;
-      });
+      );
+    }
+
+    // Positional, because `$transaction` over a built array cannot carry the
+    // shape in its type. The order is the one written directly above, and the
+    // spec pins both lengths so a write added in the middle fails loudly rather
+    // than quietly returning a payment as an order.
+    const results = (await this.prisma.$transaction(writes).catch((err: unknown) => {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        throw new ConflictException('The order changed while the payment was being processed');
+      }
+      throw err;
+    })) as [Payment, Order, unknown, Order?, unknown?];
+
+    const payment = results[0];
+    const paid = results[1];
+    const confirmed = results[3];
+    const order = confirmed ?? paid;
 
     // Paying is a status change like any other, so anyone watching the order
     // hears about it — otherwise the tracking screen would open on stale data.
-    this.events.publish(toStatusEvent(order));
+    // Both moves are published when there were two: the history records two
+    // rows, and a socket that heard only the second would show a jump the state
+    // machine does not have an edge for.
+    this.events.publish(toStatusEvent(paid));
+    if (confirmed) {
+      this.events.publish(toStatusEvent(confirmed));
+    }
 
     await this.reward(order.userId, order.subtotalAmd);
 
@@ -267,12 +326,15 @@ export class PaymentsService {
 }
 
 /** The little of an order this service needs: which one, whose it is (the
- *  history entry has to name somebody), and the status the decision to charge
- *  was taken against. */
+ *  history entry has to name somebody), the status the decision to charge was
+ *  taken against, and whether it was placed for later. */
 interface PaidOrder {
   id: string;
   userId: string;
   status: string;
+  /** Non-null on a pre-order, and the whole of what makes one — see
+   *  `orders.reminder_at`. Read here to decide whether paying also accepts it. */
+  reminderAt: Date | null;
 }
 
 interface PaymentWrite {

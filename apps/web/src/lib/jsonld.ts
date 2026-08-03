@@ -1,9 +1,24 @@
 import { MenuTab } from '@amragrir/shared';
+import type { TranslationKey } from '@amragrir/i18n';
 import type { MenuItem, RestaurantDetail } from './api';
 import { SITE_URL, restaurantPath } from './site';
 
 /** Menu sections, in the order the design's tabs use. */
 export const TAB_ORDER = [MenuTab.Popular, MenuTab.Mains, MenuTab.Sides, MenuTab.Drinks] as const;
+
+/**
+ * The heading each section is drawn under.
+ *
+ * `MenuTab` is a wire value, not a word: printing it put "mains" and "drinks"
+ * on an Armenian page. Typed as `TranslationKey` so a section added without a
+ * translation is a compile error rather than an English heading in production.
+ */
+export const MENU_TAB_LABEL: Record<(typeof TAB_ORDER)[number], TranslationKey> = {
+  [MenuTab.Popular]: 'menuTabPopular',
+  [MenuTab.Mains]: 'menuTabMains',
+  [MenuTab.Sides]: 'menuTabSides',
+  [MenuTab.Drinks]: 'menuTabDrinks',
+};
 
 /**
  * schema.org `Restaurant` with its menu.

@@ -9,6 +9,7 @@ import { ActivityDialog } from './activity';
 import { CustomerOrdersDialog } from './customer-orders';
 import { dishForm } from './dish';
 import { DishFields, EditDish } from './dish-form';
+import { NotificationBell } from './notifications';
 import { OrderQrDialog, QrPlate } from './order-qr';
 import type { PhotoUpload } from './photo';
 import { Pagination, ToastProvider, TooltipProvider } from './ui';
@@ -76,6 +77,17 @@ const OTHER_BRANCH: StaffBranch = {
 describe('every screen renders', () => {
   it('renders the order queue', () => {
     expect(render(<Orders branches={[BRANCH]} />)).toContain('Order queue');
+  });
+
+  it('renders the shell’s bell, closed and with nothing to report', () => {
+    // It lives in the sidebar rather than on a screen, so no other case here
+    // mounts it. The list arrives in an effect, which never runs — what this
+    // catches is the trigger being built out of parts that mount, and the count
+    // staying off until there is a number to put in it.
+    const html = render(<NotificationBell t={createTranslator(Language.En)} />);
+
+    expect(html).toContain('Notifications');
+    expect(html).not.toContain('bell__count');
   });
 
   it('renders the menu for a branch', () => {
@@ -442,6 +454,13 @@ describe('an order’s code as a QR code', () => {
     paymentStatus: null,
     readyAt: null,
     secondsLeft: 420,
+    // An ordinary order, wanted as soon as possible: no warning to give, and so
+    // no lead either — the two are set together and cleared together.
+    scheduled: false,
+    prepStartAt: null,
+    prepMin: 25,
+    reminderAt: null,
+    reminderLeadMin: null,
     createdAt: '2026-08-02T09:30:00.000Z',
     items: [{ menuItemId: 'd1', name: 'Khorovats', qty: 1, lineTotalAmd: 5800 }],
     notes: null,

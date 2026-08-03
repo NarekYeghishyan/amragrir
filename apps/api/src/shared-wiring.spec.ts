@@ -5,6 +5,7 @@ import {
   ReservationStatus,
   Role,
   ServiceMode,
+  StaffNotificationType,
   REFERRAL_DISCOUNT_PCT,
   REFERRAL_MAX_STACK_PCT,
   SERVICE_FEE_AMD,
@@ -50,7 +51,14 @@ describe('@amragrir/shared wiring', () => {
 
     // `order_events.type` and `order_events.actor_type` are Postgres enums too,
     // so the same drift would make every history write fail at the column.
-    expect(Object.values(OrderEventType)).toEqual(['created', 'status_changed', 'payment']);
+    expect(Object.values(OrderEventType)).toEqual([
+      'created',
+      'status_changed',
+      'payment',
+      'reminder_set',
+    ]);
     expect(Object.values(OrderActorType)).toEqual(['customer', 'staff', 'system']);
+    // `staff_notifications.type` is one too, and the bell switches on it.
+    expect(Object.values(StaffNotificationType)).toEqual(['prep_due']);
   });
 });

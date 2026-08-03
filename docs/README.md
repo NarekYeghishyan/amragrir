@@ -15,6 +15,7 @@ Documentation for the development team and the AI developer (Cursor).
 - [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md) — colors, fonts, sizes, states.
 - [SCREENS.md](./SCREENS.md) — all screens in detail.
 - [COMPONENTS.md](./COMPONENTS.md) — React / React Native components.
+- [design/](./design/) — the design artifacts themselves, so a claim about the design can be checked rather than trusted.
 
 ## Engineering
 - [DATABASE.md](./DATABASE.md) — DB schema (PostgreSQL).

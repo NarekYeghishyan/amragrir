@@ -11,6 +11,15 @@ const RESTAURANT_LIMIT = 20;
 const DISH_LIMIT = 20;
 
 /**
+ * Branch rows read to fill those 20 restaurant results.
+ *
+ * Restaurants are matched by name and cuisine — both restaurant columns — so
+ * every branch of a match qualifies, and taking 20 branches could return one
+ * chain twenty times. Read a wider window and collapse it below.
+ */
+const RESTAURANT_CANDIDATES = 200;
+
+/**
  * Popular searches for the empty search screen.
  *
  * Static and hardcoded, deliberately: deriving them needs query logging that
@@ -103,11 +112,35 @@ export class SearchService {
         },
       },
       include: { restaurant: true },
-      orderBy: [{ restaurant: { ratingAvg: 'desc' } }, { restaurant: { reviewsCount: 'desc' } }],
-      take: RESTAURANT_LIMIT,
+      orderBy: [
+        { restaurant: { ratingAvg: 'desc' } },
+        { restaurant: { reviewsCount: 'desc' } },
+        // A chain's branches share one rating, so without this the tied rows
+        // come back in no particular order and the branch kept below would be
+        // whichever the database happened to yield. Oldest-first is how
+        // `/restaurants/{slug}` picks a branch too, so the result row and the
+        // page it opens describe the same address.
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ],
+      take: RESTAURANT_CANDIDATES,
     });
 
-    return rows.map((row) => {
+    // One row per restaurant: a searcher looking for "green" wants Green Bean
+    // once, not once per branch — five identical cards that all open the same
+    // page, crowding out the other matches.
+    const seen = new Set<string>();
+    const unique = rows
+      .filter((row) => {
+        if (seen.has(row.restaurantId)) {
+          return false;
+        }
+        seen.add(row.restaurantId);
+        return true;
+      })
+      .slice(0, RESTAURANT_LIMIT);
+
+    return unique.map((row) => {
       const exact =
         origin && row.lat !== null && row.lng !== null
           ? distanceKm(origin, { lat: Number(row.lat), lng: Number(row.lng) })

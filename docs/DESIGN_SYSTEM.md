@@ -76,9 +76,17 @@ themes darken, so a scrim cannot be derived from `--ink` — that inverts.
 
 ### Two design artifacts, one authority
 
-There are two Claude Design artifacts: the **mobile app** (820×1020, 12 screens
+There are two design artifacts: the **mobile app** (820×1020, 12 screens
 — the one this document was transcribed from) and a newer **web landing**
-(1280×860). They agree on the whole palette except:
+(1280×860).
+
+The web one is now in the repository at
+[design/web-landing.html](./design/web-landing.html), so the table below can be
+re-derived instead of believed; the mobile one is not there yet, which is why it
+is still the half of this comparison you cannot check. See
+[design/README.md](./design/README.md).
+
+They agree on the whole palette except:
 
 | Token | Mobile | Web |
 |---|---|---|

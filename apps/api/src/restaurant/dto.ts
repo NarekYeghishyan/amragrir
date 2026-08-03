@@ -1,6 +1,11 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
-import { OrderStatus, QueueFilter } from '@amragrir/shared';
+import {
+  OrderStatus,
+  QueueFilter,
+  REMINDER_LEAD_MAX_MINUTES,
+  REMINDER_LEAD_MIN_MINUTES,
+} from '@amragrir/shared';
 
 /**
  * Statuses the restaurant may set.
@@ -20,6 +25,27 @@ export const STAFF_SETTABLE_STATUSES: readonly OrderStatus[] = [
 export class SetOrderStatusDto {
   @IsIn(STAFF_SETTABLE_STATUSES)
   status!: OrderStatus;
+}
+
+/**
+ * How much notice the branch wants on one pre-order.
+ *
+ * Minutes before the food is due, which is the number as the shift says it —
+ * "warn me forty-five minutes before". The default came from the menu's prep
+ * estimate, and this is where somebody who knows the dish overrides it: an
+ * estimate is the slowest line on a ticket, and lighting the coals for a skewer
+ * is not on the ticket at all.
+ *
+ * Bounded in `shared` rather than here, because the panel's input has to refuse
+ * the same numbers this does — a form that offers a value the API rejects is a
+ * form that wastes somebody's time at the pass.
+ */
+export class SetOrderReminderDto {
+  @IsInt()
+  @Min(REMINDER_LEAD_MIN_MINUTES)
+  @Max(REMINDER_LEAD_MAX_MINUTES)
+  @Type(() => Number)
+  leadMin!: number;
 }
 
 /**

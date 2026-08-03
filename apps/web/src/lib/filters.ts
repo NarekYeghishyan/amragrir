@@ -27,15 +27,25 @@ export interface FilterChip {
   /** The API value for `sort`/`service` chips; unused for `bool`. */
   value?: string;
   labelKey: TranslationKey;
+  /**
+   * The glyph the design puts before the label. Decorative — the label says
+   * the same thing in words, so it is `aria-hidden` where it renders.
+   *
+   * Taken from the artifact's own set where a chip corresponds. Its list is
+   * not ours: it has "Near Me" and "Ready in 15 min", which map to no API
+   * parameter (see the note above), and it has no dine-in chip at all — so
+   * that one glyph is chosen here rather than transcribed.
+   */
+  icon: string;
 }
 
 export const FILTER_CHIPS: readonly FilterChip[] = [
-  { id: 'openNow', kind: 'bool', labelKey: 'filterOpenNow' },
-  { id: 'topRated', kind: 'sort', value: 'top_rated', labelKey: 'filterTopRated' },
-  { id: 'fastest', kind: 'sort', value: 'fastest', labelKey: 'filterFastest' },
-  { id: 'pickup', kind: 'service', value: 'pickup', labelKey: 'filterPickup' },
-  { id: 'reserve', kind: 'service', value: 'reserve', labelKey: 'filterReserve' },
-  { id: 'dinein', kind: 'service', value: 'dinein', labelKey: 'filterDineIn' },
+  { id: 'openNow', kind: 'bool', labelKey: 'filterOpenNow', icon: '🟢' },
+  { id: 'topRated', kind: 'sort', value: 'top_rated', labelKey: 'filterTopRated', icon: '⭐' },
+  { id: 'fastest', kind: 'sort', value: 'fastest', labelKey: 'filterFastest', icon: '⏱' },
+  { id: 'pickup', kind: 'service', value: 'pickup', labelKey: 'filterPickup', icon: '🥡' },
+  { id: 'reserve', kind: 'service', value: 'reserve', labelKey: 'filterReserve', icon: '🍽️' },
+  { id: 'dinein', kind: 'service', value: 'dinein', labelKey: 'filterDineIn', icon: '🍴' },
 ];
 
 const SORT_VALUES = new Set(

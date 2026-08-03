@@ -189,9 +189,39 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | deposit_amd | integer DEFAULT 0 | for dine_in |
 | total_amd | integer | |
 | ready_at | timestamptz | target ready time |
+| prep_min | smallint NULL | the prep estimate this order was scheduled against — a snapshot, like `order_items.unit_price_amd` |
+| prep_start_at | timestamptz NULL | when the kitchen must begin: `ready_at` − `prep_min`. Stored because the board sorts on it |
+| reminder_lead_min | smallint NULL | how long before `ready_at` the branch is warned. Defaults to `prep_min` + `PREP_REMINDER_BUFFER_MIN`; a shift may move it |
+| reminder_at | timestamptz NULL | when that warning falls due: `ready_at` − `reminder_lead_min` |
+| reminder_sent_at | timestamptz NULL | set by the reminder job once it has told the branch |
 | reservation_id | uuid FK→reservations.id NULL | if dine_in |
 | notes | text NULL | |
 | created_at / updated_at | timestamptz | |
+
+**`reminder_at` is what makes an order a pre-order.** Null means it was placed
+for as soon as possible: the warning would land in the past, and there is nobody
+to warn about an order the kitchen already has. So the column that schedules the
+warning is also the flag for having been scheduled — the same doubling-up
+`reservations.active_slot` uses, and for the same reason: two columns that must
+always agree eventually will not. `reminder_lead_min` is null exactly when
+`reminder_at` is; they are written together and cleared together.
+
+`reminder_sent_at` is only ever read to stop the job telling a branch twice —
+**never** to decide which stage an order is in. The back office splits its board
+on `reminder_at` against the clock, so an order still arrives on time in a
+deployment where the job is not running. It is cleared again when a shift
+lengthens the notice past the point the warning already went out.
+
+All five are null on rows written before pre-ordering existed, which is the
+honest answer for them: nothing recorded a prep estimate at the time, and every
+one of those orders is finished. `prep_start_at` sorts **nulls last** for that
+reason — a finished order has no claim on the front of a queue.
+
+Indexed as `(branch_id, reminder_at, prep_start_at)` — one branch's queue, split
+on "is this due yet" and ordered by when it has to be started — plus a partial
+index on `reminder_at WHERE reminder_at IS NOT NULL AND reminder_sent_at IS
+NULL`, which is what the job scans every minute. The partial one is not
+expressible in `schema.prisma` and lives in the migration.
 
 ---
 
@@ -220,14 +250,26 @@ happens, because a status column overwrites its own history on every UPDATE.
 |---|---|---|
 | id | uuid PK | |
 | order_id | uuid FK→orders.id ON DELETE CASCADE | the order owns its history |
-| type | enum(`created`,`status_changed`,`payment`) | `payment` is an attempt that moved no status — a decline |
+| type | enum(`created`,`status_changed`,`payment`,`reminder_set`) | `payment` is an attempt that moved no status — a decline; `reminder_set` is a shift retiming a pre-order's warning, which moves no status either |
 | from_status / to_status | enum(OrderStatus) NULL | both null on `payment`; `from_status` null on `created` |
 | actor_type | enum(`customer`,`staff`,`system`) | which identity acted |
 | actor_user_id | uuid FK→users.id NULL ON DELETE SET NULL | set when `actor_type = customer` |
 | actor_staff_id | uuid FK→staff_users.id NULL ON DELETE SET NULL | set when `actor_type = staff` |
 | acting_staff_id | uuid FK→staff_users.id NULL ON DELETE SET NULL | the real human behind an impersonated session; null in the ordinary case |
-| detail | jsonb NULL | per-type extras: dish count and total on a placement, method/status/amount on anything touching money |
+| detail | jsonb NULL | per-type extras: dish count and total on a placement, method/status/amount on anything touching money, the old and new notice on a `reminder_set` |
 | created_at | timestamptz | |
+
+**`reminder_set` records something no column can.** `orders.reminder_lead_min`
+is overwritten in place, so without an entry there would be no record that the
+warning ever moved, or of who moved it. Its `detail` carries both the new notice
+and the one it replaced (`reminderLeadMin`, `previousReminderLeadMin`), because
+"somebody set it to 45" is not an answer to "why did this go out so early". Its
+`from_status` and `to_status` are both null: the order stays where it is, and the
+food is still promised for the same minute.
+
+The `paid → confirmed` move a pre-order gets on payment is recorded here as an
+ordinary `status_changed` with actor_type **`system`** — a diner cannot accept an
+order on a restaurant's behalf, and no member of staff was there.
 
 **Not `audit_log`.** That table's actor is a `staff_users` row, and most of what
 happens to an order is done by the customer who placed it or by the payment
@@ -257,6 +299,49 @@ attributing it to `system`. The status and the time come from the database; the
 actor is genuinely unknown, and naming a plausible one would turn an audit trail
 into fiction. Everything the API itself has moved is skipped, because its history
 already accounts for where it is.
+
+---
+
+## 8b. staff_notifications / staff_notification_reads
+
+Something a branch needs telling about, addressed to the **branch** rather than
+to a person. One kind so far: a pre-order is about to need cooking.
+
+| Field | Type | Description |
+|---|---|---|
+| id | uuid PK | |
+| branch_id | uuid FK→restaurant_branches.id ON DELETE CASCADE | who is being told |
+| type | enum(`prep_due`) | what kind of thing this is |
+| order_id | uuid FK→orders.id NULL ON DELETE CASCADE | what it is about, when it is about an order |
+| payload | jsonb NULL | the numbers the panel renders the line from — pickup code, when it is due, the prep estimate, the notice, the dish count |
+| created_at | timestamptz | |
+
+**Not a staff-side copy of `notifications` (§12).** That table has a `user_id`
+and is one customer's inbox. This one has a `branch_id`, because a shift is not
+a person: whoever is holding the tablet needs to see that a pre-order is coming
+up, and which of the people assigned to the branch that is changes hourly.
+Fanning one reminder out into a row per assigned staff member would make "who is
+on tonight" something the writer has to know, and would leave it undeliverable
+to somebody assigned five minutes later.
+
+**Nothing here is prose.** A reminder is written by a job, and a job has no
+request to take a language from — writing a sentence at 3am would pick a
+language for a reader who has not arrived yet. The row carries the type and the
+numbers; the back office renders them through its own dictionary, exactly as it
+does order statuses and history entries.
+
+Reach follows the same rule as the rest of the back office: a row is readable by
+an account whose **`orders:read`** scope covers its branch. Every notification
+that exists is about an order, so a permission of its own would be one nobody
+could hold without also holding that one.
+
+`staff_notification_reads` is `(notification_id, staff_user_id, read_at)`, keyed
+on the pair. A join table rather than an `is_read` column, because the row above
+belongs to a branch and being read is something a *person* does — a single flag
+would let the first colleague to open the bell clear it for everyone else on the
+shift, which is precisely the failure a kitchen notification exists to avoid.
+
+Indexed as `(branch_id, created_at)` — one branch's bell, newest first.
 
 ---
 
@@ -537,6 +622,14 @@ can read it".
 - `orders(user_id, status)`, `orders(branch_id, status)`, `orders(code)`.
 - `order_events(order_id, created_at)` — the timeline is always read for one
   order, oldest first.
+- `orders(branch_id, reminder_at, prep_start_at)` — one branch's queue, split on
+  "is this due yet" and ordered by when it has to be started.
+- `orders(reminder_at) WHERE reminder_at IS NOT NULL AND reminder_sent_at IS
+  NULL` — partial, and what the reminder job scans every minute across every
+  branch. The rows it wants are a vanishing fraction of the table, and an index
+  over the whole of `orders` would be scanned past on every pass.
+- `staff_notifications(branch_id, created_at)` — one branch's bell, newest
+  first; `staff_notification_reads(staff_user_id)`.
 - `reservations(branch_id, reserved_for)`, `reservations(user_id)`.
 - `favorites(user_id)`, `notifications(user_id, is_read)`.
 - `staff_assignments(staff_user_id)`, `(restaurant_id)`, `(branch_id)` — every

@@ -46,7 +46,14 @@ export default async function HomePage({ params, searchParams }: Props) {
 
   // In parallel: two independent reads should not cost two round trips.
   const [restaurants, categories] = await Promise.all([
-    api.restaurants(language, { limit: 24, ...toApiQuery(filters) }),
+    // One row per restaurant, not one per branch. A row from `/restaurants` is
+    // normally a branch, which is right for the app — it sends coordinates and
+    // shows how far each one is. This app has no coordinates and one page per
+    // restaurant, so ungrouped it drew a five-branch chain as five identical
+    // cards that all linked to the same page, and counted branches in the
+    // heading. Grouping also picks the branch that page resolves to, so a card
+    // reading "open · 12 min" agrees with what opens behind it.
+    api.restaurants(language, { limit: 24, groupByRestaurant: 1, ...toApiQuery(filters) }),
     api.categories(language),
   ]);
 
@@ -55,29 +62,32 @@ export default async function HomePage({ params, searchParams }: Props) {
       <Hero language={language} />
 
       {categories.items.length > 0 && (
-        <>
-          <h2>{label('browseByCuisine')}</h2>
-          <ul className="chips">
-            {categories.items.map((category) => (
-              <li key={category.id}>
-                {/* `Link` renders a real <a href> into the HTML, so a crawler
-                    follows it exactly as before — and a visitor gets client
-                    navigation instead of a full reload. */}
-                <Link className="chip" href={searchPath(language, category.name)}>
-                  {category.icon} {category.name}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </>
+        // A horizontally scrolling rail, as in the design. It is a real list of
+        // real links: `Link` renders an <a href> into the HTML, so a crawler
+        // follows it exactly as before and a visitor gets client navigation.
+        <ul className="cats" aria-label={label('browseByCuisine')}>
+          {categories.items.map((category) => (
+            <li key={category.id}>
+              <Link className="cat" href={searchPath(language, category.name)}>
+                <span className="emoji" aria-hidden="true">
+                  {category.icon}
+                </span>
+                <span className="name">{category.name}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
 
-      {/* The hero CTA anchors here. */}
-      <h2 id="restaurants">
-        {label('nearbyRestaurants')} <span className="faint">({restaurants.total})</span>
-      </h2>
-
       <FilterChips state={filters} language={language} />
+
+      {/* The hero CTA anchors here. */}
+      <div className="section-head">
+        <h2 id="restaurants">{label('nearbyRestaurants')}</h2>
+        <span className="count">
+          {restaurants.total} {label('restaurants').toLowerCase()}
+        </span>
+      </div>
 
       {restaurants.items.length === 0 ? (
         <p className="lede">{label('noResults')}</p>

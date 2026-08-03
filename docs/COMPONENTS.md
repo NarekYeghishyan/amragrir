@@ -55,6 +55,53 @@ Surface wrapper.
 
 ---
 
+> **On the web.** `apps/web` implements five of the domain components below —
+> `RestaurantCard`, `DishCard`, `CategoryRail`, `FilterRail` and `SearchBar` —
+> as server-rendered markup plus classes in `globals.css`, transcribed from
+> [design/web-landing.html](./design/web-landing.html). They take no callbacks:
+> every one is a `<Link>` or a `<form>`, because the page has to work before
+> JavaScript arrives. `onAdd` is a `<form>` posting to a Server Action rather
+> than a callback, and the same is true of every other action in the order flow.
+> Three differences remain deliberate: `MenuTabs` renders as **anchors that
+> scroll**, since the whole menu must stay in the HTML a crawler receives; and
+> `onToggleFavorite` and `LocationSelector` are **absent**, since favourites and
+> geolocation are not built on the web.
+>
+> The web adds components the app has no equivalent for, because they exist to
+> keep pages pre-rendered rather than to draw anything new:
+>
+> - `CheckoutPanel` — the artifact's slide-over. One component rendered two
+>   ways: as a drawer by an intercepting route, and as a full page on direct
+>   load or with JavaScript off.
+> - `BasketButton` / `StickyBasket` — the only client components on the
+>   catalogue. The item count comes from a small readable cookie because reading
+>   the basket on the server would opt every restaurant page out of
+>   pre-rendering.
+> - `OrderRefresh` — polls the order page every 10s. No props but the interval;
+>   it renders nothing.
+> - `Brand` — `BrandMark` (the pin with fork, knife and clock badge) and
+>   `Wordmark` (`amragrir` + `.am` in the accent colour). One component because
+>   the header and the footer draw the same logo. The wordmark is Latin in all
+>   three languages and deliberately not an i18n string — it is a logotype built
+>   on the domain — while the *translated* brand name (`Ամրագրիր`, `Амрагрир`)
+>   is passed as the home link's `aria-label`, so the design is honoured and the
+>   localisation is not lost.
+> - `Footer` — four columns, brand block with social marks, and a
+>   rule-separated bottom bar. **Props:** `language`. Column items and social
+>   marks render as plain text, not links: every destination is a page that does
+>   not exist yet, and dead links on the one app built for crawlers are worse
+>   than labels. The social marks are `aria-hidden` on top of that — three emoji
+>   with no destination are decoration.
+> - `PhoneField` — country, then the number, on the sign-in screen.
+>   **Props:** `countries`, `defaultCountry` (Armenia), `label`, `countryLabel`,
+>   `invalidHint`. Posts two fields (`country`, `phone`) rather than one string,
+>   because a chosen country removes the ambiguity a leading `0` carries. The
+>   countries come from `PHONE_COUNTRIES` in `packages/shared`, which the API's
+>   `normalizePhone` reads too, and the names from `Intl.DisplayNames` rather
+>   than the dictionaries. A client component only for live feedback: it checks
+>   with the same `isValidNational` the server uses, and with JavaScript off the
+>   plain select and input still post and get a translated answer.
+
 ## Domain components
 
 ### RestaurantCard
@@ -376,3 +423,10 @@ Exported from the same module and tested on their own (`menu-history-ui.spec.ts`
 - `formatMoney(amd)` — formats `12 500 ֏` (space thousands separator, ֏ symbol).
 
 > Web (Next.js) reuses the same types and domain logic; presentational components are duplicated for the DOM, but the props contracts are identical.
+
+> **`useCart()` and `useAuth()` have no web counterpart, on purpose.** The web
+> holds both in httpOnly cookies and reads them on the server —
+> `lib/cart.ts` + `lib/cart-store.ts` and `lib/session.ts`. A hook would mean
+> the basket and the tokens living in the page, which is the thing that design
+> avoids: the basket decides what gets charged, and a token in reach of any
+> script is a token an injected script can take.

@@ -12,13 +12,18 @@ import { PAID_TABS, STAGE_TABS, topStage } from './screens/Orders';
  * The shape of the board's tabs.
  *
  * One per status, in the order an order moves through them, with `paid` first
- * because it is the only stage whose next move belongs to the restaurant. The
- * board is the state machine: every count on it is a number somebody can act
- * on, which a coarser tab could not promise.
+ * among them because it is the only stage whose next move belongs to the
+ * restaurant. The board is the state machine: every count on it is a number
+ * somebody can act on, which a coarser tab could not promise.
+ *
+ * `scheduled` sits ahead of all of it and is not part of that run — a pre-order
+ * is not yet anybody's work, and it is on a tab of its own precisely so it is
+ * *not* on the live board pinned above the orders somebody is cooking.
  */
 describe('the stage tabs', () => {
   it('runs one tab per status, in the order the kitchen works them', () => {
     expect(STAGE_TABS.map((tab) => tab.value)).toEqual([
+      QueueFilter.Scheduled,
       QueueFilter.Paid,
       QueueFilter.Confirmed,
       QueueFilter.Preparing,
@@ -28,16 +33,24 @@ describe('the stage tabs', () => {
     ]);
   });
 
-  it('opens on paid, and returns there when the filters are cleared', () => {
+  it('opens on paid, which is not the first tab', () => {
+    // First in the strip and not the landing tab: the difference between "here
+    // if you want it" and "here is what to do next". A booking for Saturday is
+    // the former.
     expect(NO_ORDER_FILTERS.stage).toBe(QueueFilter.Paid);
-    expect(STAGE_TABS[0].value).toBe(NO_ORDER_FILTERS.stage);
+    expect(STAGE_TABS[0].value).toBe(QueueFilter.Scheduled);
   });
 
   it('follows the state machine, so the strip is the path an order takes', () => {
     // Each tab but the last holds exactly one status, and that status's only
     // move forward is the status behind the next tab. A stage inserted in the
     // wrong place, or one that quietly widened, fails here.
-    const working = STAGE_TABS.slice(0, -1);
+    //
+    // `scheduled` is dropped from the run rather than exempted inside it: it is
+    // the one stage that is a moment in time as well as a set of statuses (it
+    // admits both `paid` and `confirmed`), so it has no single status to be the
+    // next step of anything.
+    const working = STAGE_TABS.filter((tab) => tab.value !== QueueFilter.Scheduled).slice(0, -1);
 
     for (const [index, tab] of working.entries()) {
       const statuses = QUEUE_FILTER_STATUSES[tab.value];
@@ -48,6 +61,17 @@ describe('the stage tabs', () => {
         expect(ORDER_STATUS_FLOW[statuses[0]]).toContain(QUEUE_FILTER_STATUSES[next.value][0]);
       }
     }
+  });
+
+  it('keeps the booked tab a question about time, not about status', () => {
+    // It shares its statuses with Paid and Confirmed on purpose — a pre-order is
+    // `paid` exactly like an order at the counter, and the difference is a
+    // timestamp. Which is why the API cannot answer it by grouping on status,
+    // and why this tab is not a step in the run above.
+    expect(QUEUE_FILTER_STATUSES[QueueFilter.Scheduled]).toEqual([
+      OrderStatus.Paid,
+      OrderStatus.Confirmed,
+    ]);
   });
 
   it('ends on the one stage that is not work', () => {

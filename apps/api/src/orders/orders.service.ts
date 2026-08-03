@@ -11,7 +11,6 @@ import {
   ACTIVE_ORDER_STATUSES,
   ACTIVE_RESERVATION_STATUSES,
   Language,
-  ORDER_MAX_LEAD_DAYS,
   OrderEventType,
   OrderStatus,
   type PaymentMethod,
@@ -34,15 +33,8 @@ import { OrderEventsService, countdown, toStatusEvent } from './order-events.ser
 import { customerActor, orderEventData, type OrderActor } from './order-history';
 import { generateOrderCode, pickupCodeFrom } from './order-code';
 import { estimatePrepMinutes, priceLine, priceOrder, type PricedLine } from './pricing';
+import { resolveSchedule, type Schedule, type ScheduleRefusal } from './scheduling';
 import { BasketDto, CreateOrderDto, ListOrdersDto, OrderListFilter } from './dto';
-
-/**
- * Tolerance when checking a client-supplied `readyAt` against the earliest the
- * kitchen could manage. The client picks a time from the `earliestReadyAt` a
- * quote gave it seconds earlier; without slack, clock skew or the round trip
- * would reject a time the server itself had just offered.
- */
-const READY_AT_SLACK_MS = 60_000;
 
 /** Attempts to find a free order code before giving up. Collisions are rare
  *  (1 in 10^8 per attempt), so anything beyond this means something is wrong. */
@@ -111,6 +103,12 @@ export interface OrderDetail {
   totalAmd: number;
   readyAt: string | null;
   secondsLeft: number | null;
+  /** True when the customer chose a time rather than taking the earliest —
+   *  the tracking screen counts down to a promise instead of showing a timer
+   *  that has not started. */
+  scheduled: boolean;
+  /** When the kitchen starts. Shown to staff, not to the diner. */
+  prepStartAt: string | null;
   tableNo: string | null;
   reservationId: string | null;
   notes: string | null;
@@ -129,6 +127,9 @@ export interface OrderListItem {
   status: OrderStatus;
   readyAt: string | null;
   secondsLeft: number | null;
+  /** So the list can read "for Tue 13:00" instead of a countdown that would
+   *  otherwise say "ready in 4,320 minutes". */
+  scheduled: boolean;
 }
 
 type BranchWithRestaurant = Prisma.RestaurantBranchGetPayload<{ include: { restaurant: true } }>;
@@ -167,7 +168,7 @@ export class OrdersService {
   // `userId` is required, not optional: an optional caller would let a dine-in
   // quote skip the reservation check entirely by omitting it.
   async quote(dto: BasketDto, language: Language, userId: string): Promise<QuoteResult> {
-    const reservation = await this.resolveReservation(userId, dto);
+    const reservation = await this.resolveReservation(userId, dto, { required: false });
 
     const { branch, lines, unavailable } = await this.loadBasket(dto, language);
 
@@ -208,7 +209,7 @@ export class OrdersService {
   }
 
   async create(userId: string, dto: CreateOrderDto, language: Language): Promise<OrderDetail> {
-    const reservation = await this.resolveReservation(userId, dto);
+    const reservation = await this.resolveReservation(userId, dto, { required: true });
 
     const { branch, lines, unavailable } = await this.loadBasket(dto, language);
 
@@ -223,7 +224,7 @@ export class OrdersService {
     }
 
     const prepMin = estimatePrepMinutes(lines, branch.avgPrepMin);
-    const readyAt = this.resolveReadyAt(dto.readyAt, prepMin);
+    const schedule = this.resolveSchedule(dto.readyAt, prepMin, branch.openHours);
 
     const subtotal = lines.reduce((sum, line) => sum + line.lineTotalAmd, 0);
     // Claimed now, so two orders submitted at once cannot both spend it. If
@@ -250,7 +251,19 @@ export class OrdersService {
         discountAmd: totals.discountAmd,
         couponId: applied?.coupon.id ?? null,
         totalAmd: totals.totalAmd,
-        readyAt,
+        readyAt: schedule.readyAt,
+        // The estimate this order was scheduled against, kept because the dish's
+        // own `prep_min` may change and the board still has to say how long this
+        // order was promised.
+        prepMin,
+        prepStartAt: schedule.prepStartAt,
+        // Null for an order wanted as soon as possible — which is what makes
+        // this column the flag for having been pre-ordered at all.
+        reminderAt: schedule.reminderAt,
+        // The notice the branch starts with. Defaulted from the prep estimate
+        // and movable afterwards by whoever works the pass — see
+        // `RestaurantOrdersService.setReminderLead`.
+        reminderLeadMin: schedule.reminderLeadMin,
         reservationId: reservation?.id ?? null,
         notes: dto.notes ?? null,
         items: {
@@ -275,7 +288,10 @@ export class OrdersService {
               serviceMode: dto.serviceMode,
               itemsCount: lines.reduce((sum, line) => sum + line.qty, 0),
               totalAmd: totals.totalAmd,
-              readyAt: readyAt.toISOString(),
+              readyAt: schedule.readyAt.toISOString(),
+              // So the timeline says an order was placed for later, rather than
+              // leaving somebody to work it out from two timestamps.
+              scheduled: schedule.reminderAt !== null,
             },
           }),
         },
@@ -335,6 +351,7 @@ export class OrdersService {
         status: row.status as OrderStatus,
         readyAt: row.readyAt?.toISOString() ?? null,
         secondsLeft: countdown(row.readyAt, row.status as OrderStatus),
+        scheduled: row.reminderAt != null,
       })),
       total,
       page: query.page,
@@ -557,15 +574,33 @@ export class OrdersService {
    * means a booking. Requiring one here is what keeps `orders.reservation_id`
    * meaningful instead of usually-null, and it is why the table number on the
    * order can be trusted.
+   *
+   * `required` splits pricing from committing, the same way coupons split
+   * `preview` from `claim`. Choosing "dine in" and booking the table are two
+   * steps, so between them there is a real basket, on a real screen, that is
+   * dine-in and has no reservation yet — and the customer is looking at it.
+   * Refusing to *price* that basket takes down every screen in the flow, and
+   * the basket cookie outlives the page, so the customer cannot even get back
+   * to the basket to empty it. Creating the order still requires the booking.
+   *
+   * What must not relax is the checking of an id that *is* supplied: ownership,
+   * branch, status and single-use are all still enforced below, for a quote
+   * exactly as for an order. Otherwise a quote could price against somebody
+   * else's table.
    */
   private async resolveReservation(
     userId: string,
     dto: BasketDto,
+    { required }: { required: boolean },
   ): Promise<ReservationForOrder | null> {
     if (dto.serviceMode !== ServiceMode.DineIn) {
       return null;
     }
     if (!dto.reservationId) {
+      if (!required) {
+        // No table yet, so no deposit yet: the quote prices the food alone.
+        return null;
+      }
       throw new UnprocessableEntityException(
         'A dine-in order needs the reservation it belongs to',
       );
@@ -595,30 +630,22 @@ export class OrdersService {
     return reservation;
   }
 
-  private resolveReadyAt(requested: string | undefined, prepMin: number): Date {
-    const now = Date.now();
-    const earliest = now + prepMin * 60_000;
-
-    if (!requested) {
-      return new Date(earliest);
+  /**
+   * The order's timings, or the reason it cannot have them.
+   *
+   * The rules themselves live in `scheduling.ts` and are shared with the quote;
+   * what happens here is only the translation from a refusal into a status code.
+   */
+  private resolveSchedule(
+    requestedReadyAt: string | undefined,
+    prepMin: number,
+    openHours: unknown,
+  ): Schedule {
+    const result = resolveSchedule({ requestedReadyAt, prepMin, openHours });
+    if (result.ok) {
+      return result.schedule;
     }
-
-    const readyAt = new Date(requested);
-    if (Number.isNaN(readyAt.getTime())) {
-      throw new BadRequestException('readyAt is not a valid date');
-    }
-    if (readyAt.getTime() < earliest - READY_AT_SLACK_MS) {
-      throw new UnprocessableEntityException({
-        message: `The kitchen needs about ${prepMin} minutes for this order`,
-        earliestReadyAt: new Date(earliest).toISOString(),
-      });
-    }
-    if (readyAt.getTime() > now + ORDER_MAX_LEAD_DAYS * 24 * 60 * 60_000) {
-      throw new UnprocessableEntityException(
-        `Orders can be scheduled at most ${ORDER_MAX_LEAD_DAYS} days ahead`,
-      );
-    }
-    return readyAt;
+    throw scheduleException(result.refusal);
   }
 
   /**
@@ -712,6 +739,8 @@ export class OrdersService {
       totalAmd: order.totalAmd,
       readyAt: order.readyAt?.toISOString() ?? null,
       secondsLeft: countdown(order.readyAt, order.status as OrderStatus),
+      scheduled: order.reminderAt != null,
+      prepStartAt: order.prepStartAt?.toISOString() ?? null,
       tableNo: order.reservation?.table?.tableNo ?? null,
       reservationId: order.reservationId,
       notes: order.notes,
@@ -720,6 +749,34 @@ export class OrdersService {
         : null,
       createdAt: order.createdAt.toISOString(),
     };
+  }
+}
+
+/**
+ * Turns a scheduling refusal into the answer the client gets.
+ *
+ * `too_soon` carries the earliest time back rather than only saying no: the
+ * basket screen redraws its picker from it, so a customer who asked for an
+ * impossible time is shown the possible ones instead of a dead end.
+ */
+function scheduleException(refusal: ScheduleRefusal): Error {
+  switch (refusal.kind) {
+    case 'invalid_date':
+      return new BadRequestException('readyAt is not a valid date');
+    case 'too_soon':
+      return new UnprocessableEntityException({
+        message: `The kitchen needs about ${refusal.prepMin} minutes for this order`,
+        earliestReadyAt: refusal.earliestReadyAt.toISOString(),
+      });
+    case 'too_far':
+      return new UnprocessableEntityException(
+        `Orders can be scheduled at most ${refusal.maxLeadDays} days ahead`,
+      );
+    case 'closed':
+      return new UnprocessableEntityException({
+        message: 'This restaurant is closed at that time',
+        readyAt: refusal.readyAt.toISOString(),
+      });
   }
 }
 

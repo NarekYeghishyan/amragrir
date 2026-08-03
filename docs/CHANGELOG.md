@@ -7,6 +7,420 @@
 
 ## [Unreleased]
 
+### 2026-08-03 — The refreshed design artifact, re-read against the code
+
+`docs/design/web-landing.html` was re-exported. Rather than trust a glance, the
+new file was diffed against `globals.css` declaration by declaration: **117 of
+its 144 distinct measurements already matched verbatim** — header, hero,
+category rail, filter chips, restaurant cards, banner, rating card, menu tabs
+and dish cards were all still accurate and were not touched. Three things had
+actually moved. Updated: `docs/design/README.md` (what the refresh changed and
+what was deliberately not taken), `docs/COMPONENTS.md` (`Brand`, `Footer`).
+
+**The logo changed.** The pin now holds a fork *and* a knife, and carries a
+clock badge — the product in one glyph, since this is order-ahead rather than
+delivery. It lived inline in `layout.tsx`; it is now `components/Brand.tsx`,
+because the footer draws the same logo and two copies of a logo is how they
+stop being the same logo.
+
+**The wordmark is a logotype, not a string.** `amragrir.am`, Latin and
+lowercase in all three languages with only `.am` in the accent colour. The
+artifact hardcodes it outside its `L` dictionary while everything around it
+comes from inside one, which is how it says so. The translated brand name
+(`Ամրագրիր`, `Амрагрир`) is not lost — it is now the home link's `aria-label`,
+so a screen reader still announces it where the eye reads the domain.
+
+**The footer was rebuilt** to the new drawing: logo and wordmark open the brand
+column, three social marks close it, the copyright moved inside the container
+as a rule-separated bottom bar, `🇦🇲` joined "Made in Armenia", headings went
+from `--ink3` to `--ink` — at `--ink3` they carried the same weight as the
+items beneath them and the three lists read as one grey wash — and the grid
+went `2fr` → `1.6fr` with a 40px gap, because the brand column's blurb is
+capped at 300px and the extra width was empty.
+
+**Two things the audit caught that the refresh did not cause.** The dish add
+button was a pale `--accent-soft` chip at 34px where the artifact draws a solid
+`--accent` disc at 38px with a shadow — it did not read as a button. And the
+860px breakpoint still sized `.foot-inner`, which no longer owns the footer
+grid; it would have silently stopped collapsing. `.muted` and `.faint` went
+with the rewrite, having lost their last callers.
+
+**Not transcribed, deliberately: the sticky order panel** the artifact draws
+beside the menu. It cannot be built as drawn without breaking two decisions
+this app rests on — reading the basket on the server would opt every restaurant
+page out of pre-rendering, and pricing it in the browser would need a
+client-side API call and a client-computed total. `StickyBasket` plus the
+header basket stays the adaptation, and `docs/design/README.md` records the gap
+rather than quietly closing it.
+
+### 2026-08-03 — Sign-in asks which country the number is from
+
+The sign-in screen now has a country select in front of the number, Armenia
+selected by default, and the number is validated against the country before
+anything is sent. Sign-in also stops being Armenia-only: `POST /auth/send-code`
+accepts Russia `+7`, Georgia `+995`, USA `+1`, France `+33`, Germany `+49`,
+Iran `+98` and UAE `+971` alongside `+374`. Updated:
+`docs/API_DOCUMENTATION.md` (`POST /auth/send-code`), `docs/COMPONENTS.md`
+(`PhoneField`). Two new i18n keys in each of hy/ru/en.
+
+**One list, in `packages/shared`.** `PHONE_COUNTRIES` holds each country's dial
+code, valid subscriber lengths, trunk prefix and example. The form is built
+from it and the API's `normalizePhone` validates against it, so the field
+cannot offer a country the API would refuse — which is the only bug this
+screen can really have.
+
+**The country is a field, not a guess.** The form posts `country` and `phone`
+separately, because a leading `0` means different things in different places:
+`099123456` is Armenian, `89123456789` is Russian, and both are just "0…" to a
+parser. Choosing removes the ambiguity before the number is ever built.
+
+**Every existing Armenian spelling still works, unchanged.** `normalizePhone`
+tries two readings in order — a whole international number first, then a bare
+national one read as Armenian — so `99123456`, `099123456` and
+`+374 99 123 456` all still collapse to `+37499123456`. Dial codes are matched
+longest-first, or `+971 50…` would be read as Russia's `+7`. The existing
+nine-case table passes untouched; twelve international cases join it.
+
+**Country names come from `Intl.DisplayNames`, not the dictionaries.** ICU
+already has every country in every language, correctly declined; copying eight
+of them into three JSON files would have added twenty-four strings whose only
+future is to drift. The dictionaries gained the two strings that are actually
+ours to write — `countryLabel` and `phoneInvalid`.
+
+**A fix found on the way:** the sign-in error banner rendered `phoneLabel`,
+so a refused number was explained with the words "Phone number". It now shows
+`phoneInvalid`, which says what is wrong with it.
+
+### 2026-08-03 — Pricing a dine-in basket is no longer an error
+
+`POST /cart/quote` refused any `dine_in` basket that had no `reservationId`,
+with a 422. But choosing "dine in" and booking the table are **two steps**, so
+between them there is an ordinary basket, on a screen the customer is looking
+at, in exactly that state. Every screen that prices a basket — `/cart`,
+`/preorder`, `/checkout` — therefore crashed, and because the basket lives in a
+cookie that outlives the page, the customer could not get back to the basket to
+empty it either. Choosing "dine in" bricked the flow. Updated:
+`docs/API_DOCUMENTATION.md` ("Dine-in orders").
+
+**The split is pricing vs committing**, which this codebase already had a shape
+for: coupons `preview` (returns null) for a quote and `claim` (throws) for an
+order. `resolveReservation` never got that split, so it enforced an
+order-time rule at pricing time. It now takes `{ required }` — false for
+`quote`, true for `create`. `POST /orders` still 422s without a booking.
+
+**What deliberately did not change.** A `reservationId` that *is* supplied is
+still checked in full on both endpoints — owner, branch, active status, not
+already used — so quoting is not a way around any of it. Three tests cover
+that, because the relaxation is only about *not having* a booking.
+
+**`canOrder` stays as it is,** reporting on the basket's contents rather than
+on the flow. Making it `false` for an unbooked dine-in basket looks right and
+is a trap: `/cart` hides its CTA when `canOrder` is false, so it would strand
+the customer on a basket whose only route to the booking form had just been
+removed. The block belongs on `/preorder`, the screen that books the table,
+where it already is.
+
+### 2026-08-03 — Armenian moves to the bare domain
+
+Armenian is the default language and no longer carries a URL prefix. The site's
+Armenian pages are now `amragrir.am/` and `amragrir.am/r/sunny-table`; Russian
+and English keep an address of their own (`/ru`, `/en/r/sunny-table`) so each
+language is still indexed separately with `hreflang`. Armenian is the market's
+language and the overwhelming majority of the traffic, and it was the only one
+paying for a prefix it did not need. Updated: `docs/DEVELOPMENT_GUIDE.md`
+(§ localised columns, and the "how each app decides which language to show"
+table), `apps/web/README.md`.
+
+**One page, one address.** `middleware.ts` *rewrites* an unprefixed path onto
+the `[lang]` tree rather than redirecting, so the visitor keeps the short URL,
+and `/hy/…` now 308s to the unprefixed form. Serving a page at both addresses
+would split its ranking between them, so the old URLs redirect instead of
+staying alive. Every URL in the app is built by `lib/site.ts`, so the change is
+one `prefix()` helper — and a test asserts no helper can emit a `/hy` URL.
+
+**`Accept-Language` is no longer read by the web app** (`negotiate()` is gone).
+It used to pick where a visitor landing on `/` was sent. That cannot survive an
+unprefixed default: a Russian-speaking visitor who deliberately clicks "HY" is
+sent to `/`, and a header redirect would bounce them straight back to `/ru` —
+leaving no way to ask for Armenian at all. The bare domain now always serves
+Armenian and the language switcher is the way to change it. Keeping the old
+behaviour would have needed a preference cookie to override the header, which
+is machinery for a redirect Google discourages anyway.
+
+**Links and routes are not the same string any more, and that distinction is
+now load-bearing.** A link is the published URL (`/cart`); a *route* is what
+Next actually rendered, which is always `/[lang]/…` (`/hy/cart`), because the
+unprefixed URL is a middleware rewrite rather than a route of its own. So
+`revalidatePath` — which keys on the route — goes through `routePath()`, while
+`redirect()` keeps using the public path. Getting this backwards revalidates
+nothing at all, in the language that is most of the traffic, and reports no
+error: the customer just sees a basket missing the dish they added. Two tests
+hold it: one on `routePath()`, and one that reads `actions.ts` and fails if any
+`revalidatePath` call is not wrapped.
+
+**A `robots.txt` gap fixed on the way.** The private screens were disallowed as
+`/*/cart`, `/*/checkout` and so on, but search was listed only as `/search` —
+which never matched the real `/hy/search`, `/ru/search`. Each screen is now
+named in both shapes, unprefixed and prefixed, generated from one list.
+
+### 2026-08-03 — A customer can order from the web
+
+The web stops being a shop window. The whole chain works in a browser now — add
+dishes → basket → when & how → sign in → pay → pickup code and tracking — for
+**pickup and dine-in**, with a ready time up to a week out. This reverses the
+Phase 9 deferral recorded in `apps/web/README.md`; that decision is now history
+rather than policy. Updated: `docs/SCREENS.md` (§14, the web's screens and how
+they differ), `docs/USER_FLOW.md` (§12, the web ordering flow),
+`docs/COMPONENTS.md`, `docs/DEVELOPMENT_GUIDE.md` (the frontend rules the web
+follows instead of the app's), `docs/design/README.md`, `apps/web/README.md`.
+84 new i18n keys in each of hy/ru/en.
+
+**No backend work.** Every endpoint already existed and was tested; `apps/web`
+was simply the one client that never called them. `docs/API_DOCUMENTATION.md` is
+unchanged for that reason.
+
+**The architecture, which is the actual decision.** The browser never talks to
+the API. Reads stay in server components, writes are Server Actions driven by
+`<form action={…}>`, and the Next server holds the tokens. So there is still no
+`NEXT_PUBLIC_API_URL`, no API address in the bundle and no CORS — and now also
+no token in reach of a script, because the session lives in an httpOnly cookie.
+The consequence worth stating: **the entire flow works with JavaScript
+disabled**, including stepping quantities, booking a table, signing in and
+paying.
+
+The basket is a cookie of ids and quantities and *never* money — every total on
+every screen comes from `POST /cart/quote`, re-priced on each render, because a
+price in a cookie is a price the customer can edit. It is re-validated on read
+against `ORDER_MAX_LINES` and `ORDER_MAX_ITEM_QTY`, so a hand-edited basket is
+refused immediately rather than at checkout. A guest account is minted on the
+first deliberate act — adding a dish — not on a page view, so crawling the
+catalogue creates nothing. `POST /orders` and `POST /payments` carry an
+idempotency key derived from the basket, so a double-submitted form joins the
+first attempt instead of charging twice.
+
+**Following the refreshed artifact.** `docs/design/web-landing.html` was updated
+with a checkout slide-over and an order-confirmed modal, and both are
+transcribed — the 440px panel, the 24px quantity chips, the uppercase section
+labels, the ready-time pills, the payment rows, the confirmation card. Both
+became *routes* rather than states: checkout is an intercepting route, so
+clicking gives the drawer and loading the URL directly gives the same component
+as a full page, and the confirmation is `/[lang]/orders/{id}` because it carries
+the pickup code, which has to survive a reload.
+
+**Where it departs from the artifact, on purpose.** Its fourth payment method,
+*cash at the counter*, is not built — every order is paid online before the
+kitchen sees it (`BUSINESS_LOGIC.md §5`), and the design has been wrong about
+this since the first reconciliation. Apple Pay and Google Pay are drawn but
+disabled, labelled "available in the app": they need a browser payment SDK this
+app does not have, and a live button that cannot pay is the dead end the
+previous design pass existed to remove.
+
+**Two things that cost a decision.** The basket badge is drawn in the browser
+from a second, deliberately readable cookie holding only the item count —
+reading the basket on the server would opt every restaurant page out of
+pre-rendering, undoing the reason this app exists. And the order pages are
+`noindex` *and* disallowed in `robots.txt`, because `noindex` is only read after
+a fetch and these pages do real work per request for a client that can never
+have a basket; the orders screens send a session-less visitor to sign in rather
+than through the guest-minting route, which would otherwise loop forever for
+anything that keeps no cookies.
+
+### 2026-08-03 — The web wears the design
+
+`apps/web` is now the artifact rather than a rough likeness of it. Updated:
+`docs/COMPONENTS.md` (a note on what the web implements and what it deliberately
+does not), `apps/web/README.md`. New i18n keys: `svcPickup`, `svcDineIn`,
+`svcReserve`, `kcal` — the first three taken verbatim from the artifact's own
+short forms rather than translated afresh.
+
+**What changed.** A sticky 72px glass header with the logo mark, the search
+field as one rounded control, the language switch as a segmented pill. The hero
+is the artifact's gradient panel with its two translucent discs, not page text
+on a background. Cuisines became a scrolling rail of tiles instead of a wrap of
+pills. Restaurant cards gained the thing that made them cards: a 180px media
+band with the open/closed and rating badges floating on it, the prep time as an
+accent chip, and — new — the services the restaurant advertises, which the API
+had been returning all along and nothing rendered. The restaurant page gained a
+280px banner, a rating box, and a two-up dish grid where each dish finally shows
+its photograph, calories and prep time; the seed has carried those photos since
+Phase 2 and the page never asked for them.
+
+**Where it departs from the artifact, on purpose.** The `+` on every dish, the
+cart button and the sticky order panel are the ordering flow Phase 9 deferred —
+drawing the buttons without the flow behind them is the dead end this app was
+just criticised for. The location selector needs coordinates and the avatar
+needs an account; neither exists here. And the artifact's menu **tabs** render
+as anchors that scroll, because a tab that hides three quarters of the menu
+defeats the single rule this app is built on: the HTML that leaves the server
+already contains the content. Verified, as before, by stripping every `<script>`
+from both pages and finding the names, prices and menu still there.
+
+Two of the artifact's six filter chips stayed out for the reason already
+recorded against "Near me": they map to no API parameter. The remaining four
+kept their glyphs; pickup/reserve/dine-in were already there.
+
+Responsive behaviour is this repository's, not the artifact's — it is drawn at
+1280×860 and says nothing about a phone. Three breakpoints: the three-up grid
+steps to two and then one, the hero's padding and headline shrink, and the
+header wraps its search field rather than crushing it.
+
+### 2026-08-03 — The design source is in the repository now, and it disagrees with the code
+
+`docs/design/` holds the design artifacts as HTML. Added:
+`docs/design/README.md`, `docs/design/web-landing.html`. Updated:
+`docs/README.md` (index), `docs/DESIGN_SYSTEM.md` (§"Two design artifacts").
+
+**Why it is worth the 156 KB.** The artifacts were previously opened once,
+distilled into DESIGN_SYSTEM/SCREENS/COMPONENTS, and lost. The cost was already
+visible in this repository: the note that the two artifacts disagree about four
+opacity values had to be written as prose, because nothing remained to re-read.
+A design source that cannot be diffed is a design source that has to be trusted.
+The web artifact can now be checked; the **mobile** one — the authoritative one,
+and the one behind the eight unbuilt screens in SCREENS.md — is still missing.
+
+**Two places where the web artifact contradicts implemented business logic**,
+found by reading it against the code rather than against the earlier summary:
+
+- **It offers cash.** `payNames` ends in `Cash` / `Наличные` / `Կանխիկ`, in all
+  three languages. `PaymentMethod` has no such value, deliberately: an order is
+  paid for before the kitchen sees it, so nothing can owe money at the counter
+  (§5). The design is wrong here, not the code.
+- **"Reserve Table" leads nowhere.** The filter chip and the per-restaurant
+  badge are drawn; no booking flow exists in the artifact — no date, guests,
+  slots or deposit — while the API implements all of it.
+
+**And what it has no concept of at all**, recorded so the next person does not
+rediscover it: order tracking (it stops at the confirmation modal, against eight
+statuses); a failed payment and the unpaid order it strands; cancellation, and
+that paying ends it; deposit and referral lines in the totals; basket limits;
+one restaurant per basket; sold-out dishes; **branches** — it treats a
+restaurant as a single place, where one has up to ten, each with its own
+address, hours and menu; and **authentication**, though placing an order
+requires an identity. Two of its six filter chips map to no API parameter.
+
+None of this is a defect report against the code. The artifact's ordering flow
+is the one Phase 9 deferred, so it reads as a proposal that was never accepted —
+which is exactly why it needed writing down rather than quietly fixing.
+
+### 2026-08-03 — One row per restaurant, for a caller whose pages are per restaurant
+
+The public site drew Green Bean five times, Black Angus five times, and headed
+the list "Restaurants in Yerevan (78)" over 23 restaurants. Updated:
+docs/API_DOCUMENTATION.md (`GET /restaurants` gains `groupByRestaurant` and
+states the ordering tie-break; `GET /search`), apps/web/README.md.
+
+**Why it looked like that.** A row from `/restaurants` is a *branch* — that is
+what a guest travels to, and what carries hours, coordinates and prep time. The
+mobile home feed sends coordinates, so its branches are told apart by distance.
+The web sends none and has exactly one page per restaurant, so every branch of a
+chain rendered as an identical card, all of them linking to the same URL. The
+sitemap and `generateStaticParams` already collapsed the list by slug for this
+very reason; the listing that visitors see did not.
+
+**`groupByRestaurant`.** Opt-in, off by default, so the app's feed is untouched.
+Collapsing runs **after** filtering and ordering, so the branch kept is the best
+one under the active query — the fastest under `sort=fastest`, an open one under
+`openNow` — and `total` counts restaurants (23) rather than branches (78).
+
+**Every ordering now ends in a tie-break** (`created_at`, then `id`). A chain's
+branches share one rating, so `ORDER BY rating` was a tie across all of them and
+Postgres could return tied rows in any order — which quietly makes `skip`/`take`
+paging drop and repeat rows between pages. It is also the tie-break
+`GET /restaurants/{id}` uses to pick a branch, so the branch that represents a
+restaurant in the list is now the same one the page behind it opens: a card
+reading "open · 8 min" no longer leads to a page that says otherwise.
+
+**Search had the same defect** and is fixed without a flag, because nobody wants
+a restaurant listed once per branch: the query matches on name and cuisine, both
+restaurant columns, so five branches of one chain filled five of the twenty
+result slots. It now reads a wider window and returns one row per restaurant.
+
+**Menu section headings were the raw wire values.** The Armenian restaurant page
+printed `mains`, `sides` and `drinks`. `MenuTab` is an enum, not a word; the
+headings are now translated (hy/ru/en), typed so a new section without a
+translation is a compile error.
+
+**The "order in the app" block was two lines of inert text.** Ordering itself
+stays the app's job — Phase 9's call is unchanged, and nothing here duplicates
+checkout or payment — but a visitor who read the whole page arrived at the point
+of wanting the food and found nothing to press. It now carries the branch's
+phone as a real action (`callRestaurant`, hy/ru/en). App-store links belong in
+the same block once there are URLs to point at; there are none in the repo.
+
+**Branches had no phone number to show.** `restaurant_branches.phone` has always
+existed and the page has always had markup for it, but no seeded row filled it,
+so both the contact line and the new action were invisible to everyone. The seed
+now gives every branch its own `+374 10 555 0xx` — derived from the index like
+the rest of it, so a reseed is reproducible — and backfills databases seeded
+before today, filling only nulls so a number corrected in the back office
+survives. `tel:` hrefs are stripped to digits (RFC 3966 does not allow the
+spaces the display format uses).
+
+### 2026-08-03 — Ordering for later: booked orders, and the warning a branch gives itself
+
+A customer picking a time rather than taking the earliest now means something all
+the way through. Updated: docs/BUSINESS_LOGIC.md §4 (new *Ordering for later*
+section, two constants), docs/DATABASE.md (`orders`, §8a, new §8b, indexes),
+docs/API_DOCUMENTATION.md (`POST /orders`, `POST /payments`, `GET /orders`,
+`GET /restaurant/orders`, its history route, the new
+`PATCH /restaurant/orders/{id}/reminder`, the new *Back-office notifications*
+section), docs/ROLES_AND_PERMISSIONS.md, docs/SCREENS.md §5 and §7,
+apps/admin/README.md.
+
+**What was already there and is now documented.** `orders.prep_min`,
+`prep_start_at`, `reminder_at` and `reminder_sent_at`; the pure scheduling rules
+shared by the basket quote and order creation; opening hours checked for a
+genuine pre-order only; `staff_notifications` addressed to a branch rather than
+to a person; the once-a-minute Redis-locked sweep that is the API's only
+scheduled job; and the board's split between orders that are due and orders that
+are not. None of it had reached `/docs`, which is why this entry covers the whole
+feature rather than only what moved today.
+
+**What is new.**
+
+*Paying for a pre-order accepts it.* `paid` means "waiting for the restaurant to
+say yes", and nobody presses Confirm on Monday for a Saturday order — so until
+somebody did, the diner watched a screen saying the restaurant had not looked at
+it, on no board anybody opens. The payment transaction now also moves it to
+`confirmed`, recorded with a **`system`** actor: a diner cannot accept an order
+on a restaurant's behalf, and no member of staff was there. Both moves are
+announced, so no watcher sees a jump the state machine has no edge for. Ordinary
+orders are untouched.
+
+*The warning is a number somebody can move.* `reminder_at` was arithmetic nobody
+could see: ready time, less the prep estimate, less a constant. That is a fine
+default and a poor rule — the estimate is the slowest dish on the ticket, and the
+person at the pass knows things a menu column does not. `orders.reminder_lead_min`
+holds it as **minutes before the food is due** (the number as a shift says it),
+defaulted to exactly the old arithmetic so nothing already placed moved, and
+`PATCH /restaurant/orders/{id}/reminder` lets `orders:advance` change it between
+5 minutes and 24 hours. Nothing the customer was promised moves. A `reminder_set`
+row in `order_events` records who did it and what it was before, because the
+column is overwritten in place; `reminder_sent_at` is re-armed when the new
+moment is still ahead, so lengthening a notice cannot silently mean it never
+fires again.
+
+*The back office can see any of this.* A **Booked** tab, first in the strip and
+deliberately not the landing tab, holding the pre-orders whose hour has not come
+— the one stage that is a question about time rather than status. Each of its
+cards says when the order is due and when the kitchen must start, drops the
+countdown and the late warning (both meaningless on work nobody was meant to have
+begun), and carries a button reading its own notice — *Warn 40 min ahead* — that
+opens a dialog previewing the moment a new notice would land. The board now sorts
+by `prep_start_at` rather than `created_at`, which is the same ordering for
+ordinary orders and the right one for a pre-order.
+
+*And a bell in the shell*, because a reminder has to reach somebody looking at
+something else: an order due at eight is announced at ten past seven, and nobody
+is watching the Booked tab at ten past seven. `GET /staff/notifications`,
+`POST /staff/notifications/read` and the socket's `watchBranches`, all on
+`orders:read`. Read-marks are per person — the first colleague to open the bell
+must not clear it for the shift.
+
+**Still a default rather than a setting:** nothing writes `branches.open_hours`,
+so every branch is treated as open 10:00–23:00 and the times a customer may pick
+are the same everywhere. Making that a branch admin's to set is the next piece.
+
 ### 2026-08-03 — A cooking order can go straight to the pass
 
 A card on the *Preparing* tab now offers two moves: **Almost ready**, and
@@ -2530,7 +2944,7 @@ progressively enhanced: `action`/`method` still work with JavaScript off, and
 the HTML still carries real `href`s, that content survives with every `<script>`
 stripped, and that canonical, `hreflang` and JSON-LD are untouched.
 
-### Reconciled with the Claude Design artifacts
+### Reconciled with the design artifacts
 
 Unpacked both artifacts and diffed them against the code. Findings, in order of
 how much they matter:
@@ -2652,6 +3066,6 @@ decorative.
 - Added the full `/docs` set derived from the app design: PROJECT_OVERVIEW,
   BUSINESS_LOGIC, USER_FLOW, ROLES_AND_PERMISSIONS, DESIGN_SYSTEM, SCREENS,
   COMPONENTS, DATABASE, API_DOCUMENTATION, DEVELOPMENT_GUIDE, AI_CONTEXT.
-- Added `.cursor/rules/project-rules.md` and root `CLAUDE.md` so both Cursor
-  and Claude Code keep docs synchronized with the implementation on every
+- Added `.cursor/rules/project-rules.md` and a root agent-instructions file so
+  every AI assistant keeps docs synchronized with the implementation on every
   change, plus this CHANGELOG to track what changed and why.

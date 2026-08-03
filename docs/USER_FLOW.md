@@ -332,3 +332,54 @@ Password reset follows the same shape: `Forgot password` → email →
 `/reset-password?token=…` → new password → **every other session is signed
 out**, since whoever reset it may have done so because somebody else knows the
 old one.
+
+---
+
+## 12. Ordering on the web
+
+The same flow as §4 and §5, on `apps/web`. It is written separately because the
+mechanics differ: there is no client state anywhere in it.
+
+```
+Restaurant (＋ per dish) → Basket → Pre-order → [Sign in] → Checkout → Order → Home
+                                        ↑                                  ↓
+                                   dine-in only:                       Orders list
+                                   book a table
+```
+
+1. **＋ on a dish** posts to a Server Action. That first deliberate act is what
+   creates the guest account — not the page view before it. A dish from a
+   different restaurant does not join the basket; the basket page asks whether
+   to start a new one, because two kitchens in one order is never allowed.
+2. **Basket** re-prices through `POST /cart/quote` on every render. Quantity,
+   removal and coupon are each a form post. The server's `canOrder` decides
+   whether the flow may continue, so the web never offers a step the API will
+   refuse.
+3. **Pre-order** picks Pickup or Dine-in and a ready time. Switching away from
+   dine-in drops any table booking, since a pickup order attached to a table is
+   an order nobody is sitting for. Dine-in must book first: date, guests and
+   slot come from `GET /restaurants/{id}/availability`, and `POST /reservations`
+   takes the deposit.
+4. **Sign in** happens at the first step that needs a verified phone — booking a
+   table, or paying. The guest's own token is presented to `verify-code`, so the
+   account they already have is upgraded and the basket survives; without it the
+   API would create a second account and orphan everything collected.
+5. **Checkout** is card-only on the web, and paying is final: an order can be
+   cancelled only while unpaid. `POST /orders` then `POST /payments`, both with
+   an idempotency key derived from the basket, so a double-submitted form joins
+   the first attempt rather than starting a second.
+6. **The order page** is both the confirmation and the tracker: pickup code,
+   status steps and a countdown, refreshing itself every ten seconds.
+
+**Transition map:**
+
+```
+Restaurant → Basket → Pre-order → Checkout → Order
+                ↑         ↓  (dine-in)         ↓
+             Restaurant  Reservation        Orders → Order
+                          ↓
+                       Sign in → back to wherever it was needed
+```
+
+Every arrow is a form post and a redirect, so all of it works with JavaScript
+switched off.
