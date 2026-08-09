@@ -78,7 +78,8 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | city | varchar(80) DEFAULT 'Yerevan' | |
 | lat / lng | numeric(9,6) | geolocation |
 | phone | varchar(20) | |
-| open_hours | jsonb | schedule by day |
+| open_hours | jsonb | When food is served, by day. Shape: `{ "mon": { "open": "10:00", "close": "23:00" }, "sun": { "closed": true } }`, plus an optional `default` entry. **A closing time at or before the opening one runs past midnight** — `12:00`–`02:00` reads as minutes 720–1560 — which is what makes a late-night branch expressible; it used to produce zero bookable times and no explanation. |
+| booking_hours | jsonb NULL | When **tables may be held**, or NULL to take bookings whenever the kitchen is open. Same shape as `open_hours`. A second document rather than a reinterpretation of the first, because they answer different questions: a kitchen serving from 10:00 that only books its dining room for dinner previously had to misstate the opening hours that appear on the public card. The fall-through only skips a level that said *nothing* — a `booking_hours` marking Monday `closed` closes Monday, whatever `open_hours` says. |
 | is_open | boolean DEFAULT true | current status |
 | avg_prep_min | smallint | average prep time |
 | created_at / updated_at | timestamptz | |
@@ -95,6 +96,77 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | seats | smallint | capacity |
 | zone | varchar(40) NULL | hall/terrace |
 | is_active | boolean DEFAULT true | |
+
+`UNIQUE (branch_id, table_no)`. Two tables numbered 5 in one room is not a
+configuration, it is a typo — and the moment it is discovered is the moment
+somebody is standing with a guest looking for table 5. Scoped to the branch,
+because table 5 exists at every address a chain has. The migration that added
+it refuses to run against existing duplicates and names them, rather than
+guessing which is the one on the terrace.
+
+**A "table" is a bookable unit, not a piece of furniture.** A branch that takes
+an event for a hundred people enters a row with `seats = 100` — a banquet hall —
+and every existing mechanism (smallest-fit assignment, exclusivity, deposit)
+applies unchanged. What is deliberately *not* supported is seating one party
+across several rows; see BUSINESS_LOGIC.md §3.
+
+---
+
+## 4a. booking_policies
+
+Booking rules for one restaurant **or** for one branch. Every column is
+nullable, and NULL means *inherit*: the chain is platform constants → restaurant
+→ branch, resolved field by field in exactly one place (`resolveBookingPolicy`
+in `@amragrir/shared`).
+
+| Field | Type | Description |
+|---|---|---|
+| id | uuid PK | |
+| restaurant_id | uuid FK→restaurants.id NULL UNIQUE | |
+| branch_id | uuid FK→restaurant_branches.id NULL UNIQUE | |
+| seating_minutes | smallint NULL | How long one booking holds its table. This is what makes 19:00 and 19:30 collide. |
+| slot_minutes | smallint NULL | Spacing of the times offered — the grain of the offer, not the length of the booking. |
+| max_guests | smallint NULL | Largest party one booking may ask for. Not derived from the biggest table: a branch may cap parties below what it could physically seat. |
+| max_lead_days | smallint NULL | How far ahead the calendar runs. |
+| min_lead_minutes | smallint NULL | How close to the sitting a booking may still be made. |
+| deposit_per_guest_amd | integer NULL | Held, never charged as an extra — BUSINESS_LOGIC.md §3. |
+| free_cancel_hours | smallint NULL | Cancel this far ahead and the deposit comes back. |
+| auto_confirm | boolean NULL | Whether a paid booking confirms itself. |
+| created_at / updated_at | timestamptz | |
+
+`CHECK ((restaurant_id IS NULL) <> (branch_id IS NULL))` — a policy belongs to
+exactly one owner. Without it the table admits an orphan row no resolution path
+can ever read, and a row belonging to both, which would be two inheritance
+levels claiming the same values. **One table for both levels**, the same shape
+`payments` uses for order-or-reservation: two tables with identical columns
+would be the same schema written twice, and every future field added twice.
+
+A row is created lazily, on the first save. Its absence and a row of all NULLs
+mean the same thing, and neither is a state anything special-cases.
+
+---
+
+## 4b. branch_closures
+
+One day a branch does not run on its usual hours — a holiday, a private hire, a
+short day before New Year. Read **before** `booking_hours` and `open_hours`.
+
+| Field | Type | Description |
+|---|---|---|
+| id | uuid PK | |
+| branch_id | uuid FK→restaurant_branches.id | |
+| date | date | The local calendar date in Yerevan. A day off has no timezone — it is whatever the people unlocking the door call today. |
+| kind | enum(`closed`,`custom_hours`) | |
+| opens_minutes / closes_minutes | smallint NULL | Minutes from local midnight, set exactly when `kind = custom_hours`. `closes_minutes` may exceed 1440 for a night ending after midnight. |
+| reason | varchar(200) NULL | Shown back in the panel — "closed" with no reason attached is a row nobody dares delete. |
+| created_by_staff_id | uuid NULL | Nullable: a closure written by a seed has no staff member behind it, and inventing one is worse than admitting there was none. |
+| created_at | timestamptz | |
+
+`UNIQUE (branch_id, date)` — one answer per day; a second edit replaces the
+first rather than sitting beside it where only the query plan decides which
+wins. `CHECK` ties the two minute columns to `kind`, so a `closed` row cannot
+carry times that would read, to anyone opening the table by hand, as a day that
+is open.
 
 ---
 
@@ -410,6 +482,7 @@ Indexed as `(branch_id, created_at)` — one branch's bell, newest first.
 | table_id | uuid FK→tables.id NULL | assigned table |
 | reserved_for | timestamptz | booking date+time |
 | guests | smallint NOT NULL | guest count |
+| seating_minutes | smallint NULL | **How long this booking holds its table, snapshotted when it was made** — the same reason `orders.prep_min` is a snapshot. A branch that lengthens its seating from 90 to 120 has changed what it offers from now on; it has not changed what it already promised four people for Friday. Read live instead, a longer seating would stretch every accepted booking backwards and two that sat comfortably an hour apart would begin to overlap on one table — an overlap nothing would catch, because the unique index below guards the *start instant* and the serializable transaction that checks intervals committed weeks ago. NULL on rows written before the column existed; readers fall back to the resolved policy, exactly as they did when there was nothing else to read. |
 | deposit_amd | integer | deposit |
 | deposit_credited | boolean DEFAULT false | credited to bill |
 | status | enum(`pending`,`confirmed`,`seated`,`completed`,`cancelled`,`no_show`) | |

@@ -2,7 +2,7 @@ import {
   ORDER_MAX_ITEM_QTY,
   ORDER_MAX_LINES,
   PickupOption,
-  RESERVATION_MAX_GUESTS,
+  BOOKING_POLICY_LIMITS,
   ServiceMode,
 } from '@amragrir/shared';
 
@@ -166,13 +166,15 @@ export function parseCart(raw: string | undefined): Cart | null {
       ? { reservationId: candidate.reservationId }
       : {}),
     ...(typeof candidate.reservedFor === 'string' ? { reservedFor: candidate.reservedFor } : {}),
-    // Bounded like every other number here: the picker stops at
-    // `RESERVATION_MAX_GUESTS`, so a cookie naming a party of forty is an
-    // edited one, and `POST /reservations` would refuse it anyway.
+    // Bounded like every other number here, but by the **platform ceiling**
+    // rather than by a party size: how many people a branch seats is the
+    // branch's answer and this cookie does not know which branch it will be
+    // spent at. A number past the ceiling is an edited cookie; anything under
+    // it is a question `POST /reservations` will answer for itself.
     ...(typeof candidate.guests === 'number' &&
     Number.isInteger(candidate.guests) &&
     candidate.guests >= 1 &&
-    candidate.guests <= RESERVATION_MAX_GUESTS
+    candidate.guests <= BOOKING_POLICY_LIMITS.maxGuests.max
       ? { guests: candidate.guests }
       : {}),
     ...(typeof candidate.couponCode === 'string' ? { couponCode: candidate.couponCode } : {}),

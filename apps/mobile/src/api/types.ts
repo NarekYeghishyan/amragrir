@@ -192,6 +192,10 @@ export interface Availability {
   /** Largest party any single table at this branch seats — the guest picker
    *  stops here rather than offering a size no table can take. */
   maxSeats: number;
+  /** The largest party this branch accepts. Separate from `maxSeats`, which is
+   *  what the furniture allows: a branch may cap parties below what it could
+   *  physically seat, and the two want different words in front of a guest. */
+  maxGuests: number;
   reservationsEnabled: boolean;
 }
 

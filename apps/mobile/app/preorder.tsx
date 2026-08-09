@@ -184,7 +184,13 @@ export default function PreorderScreen() {
       return { year: next.getUTCFullYear(), month: next.getUTCMonth() };
     });
 
-  const maxGuests = Math.min(RESERVATION_MAX_GUESTS, availability?.maxSeats || RESERVATION_MAX_GUESTS);
+  // What this branch says it takes, capped by what it can physically seat —
+  // both from the availability answer rather than from a constant, so a branch
+  // that runs a hall counts past twelve.
+  const maxGuests = Math.min(
+    availability?.maxGuests || RESERVATION_MAX_GUESTS,
+    availability?.maxSeats || RESERVATION_MAX_GUESTS,
+  );
   const readyTimes = quote === null ? [] : readyTimeOptions(quote.earliestReadyAt);
   // Dine-in without a table is the one combination `POST /orders` refuses
   // outright, so the step is blocked here rather than at the payment.

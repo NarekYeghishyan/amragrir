@@ -436,6 +436,8 @@ export interface Availability {
   slots: Slot[];
   depositAmd: number;
   maxSeats: number;
+  /** The largest party this branch accepts — its policy, not its furniture. */
+  maxGuests: number;
   reservationsEnabled: boolean;
 }
 

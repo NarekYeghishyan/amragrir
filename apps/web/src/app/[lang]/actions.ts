@@ -8,7 +8,7 @@ import {
   ORDER_MAX_LINES,
   PaymentMethod,
   PickupOption,
-  RESERVATION_MAX_GUESTS,
+  BOOKING_POLICY_LIMITS,
   ServiceMode,
   phoneCountry,
   toE164,
@@ -464,7 +464,7 @@ function rememberTiming(cart: Cart, formData: FormData): Cart {
     const guests = Number(formData.get('guests'));
     const { guests: _dropped, ...rest } = next;
     next =
-      Number.isInteger(guests) && guests >= 1 && guests <= RESERVATION_MAX_GUESTS
+      Number.isInteger(guests) && guests >= 1 && guests <= BOOKING_POLICY_LIMITS.maxGuests.max
         ? { ...rest, guests }
         : rest;
   }

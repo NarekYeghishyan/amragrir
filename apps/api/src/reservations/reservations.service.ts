@@ -10,27 +10,30 @@ import {
   ACTIVE_RESERVATION_STATUSES,
   DepositOutcome,
   PaymentStatus,
-  RESERVATION_FREE_CANCEL_HOURS,
-  RESERVATION_MAX_LEAD_DAYS,
-  RESERVATION_SEATING_MINUTES,
   RestaurantService,
   ReservationStatus,
   TERMINAL_RESERVATION_STATUSES,
+  type ResolvedBookingPolicy,
   depositOutcomeFor,
   isReservationCancellable,
+  resolveBookingPolicy,
   resolveBranchOffering,
 } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { DepositsService } from '../payments/deposits.service';
 import {
+  addLocalDays,
+  bookingWindowFor,
   depositFor,
+  instantOf,
   isSlotBoundary,
   localDateOf,
   localTimeLabel,
-  openWindowFor,
   seatingRange,
   seatingsOverlap,
+  serviceDateOf,
   slotsFor,
+  type DatedClosure,
 } from './slots';
 import {
   AvailabilityQueryDto,
@@ -46,6 +49,37 @@ import {
  */
 const BOOKING_ATTEMPTS = 3;
 
+/**
+ * Midday, used only to name a calendar date to the weekday lookup.
+ *
+ * Any hour inside the day would do; noon is the one furthest from either edge,
+ * so no amount of arithmetic around it can slip into a neighbouring date.
+ */
+const NOON_MINUTES = 12 * 60;
+
+/**
+ * Everything a booking decision needs about a branch, in one include.
+ *
+ * Both policy levels travel with it, because resolving them is not optional:
+ * a branch loaded without its restaurant's policy would resolve to the
+ * platform's defaults and quietly ignore what the chain decided.
+ */
+const BRANCH_FOR_BOOKING = {
+  restaurant: { include: { bookingPolicy: true } },
+  bookingPolicy: true,
+  tables: { where: { isActive: true } },
+} satisfies Prisma.RestaurantBranchInclude;
+
+type BranchForBooking = Prisma.RestaurantBranchGetPayload<{ include: typeof BRANCH_FOR_BOOKING }>;
+
+/** The rules in force at one branch — the chain resolved in one place. */
+function policyOf(branch: {
+  bookingPolicy: Prisma.BookingPolicyGetPayload<object> | null;
+  restaurant: { bookingPolicy: Prisma.BookingPolicyGetPayload<object> | null };
+}): ResolvedBookingPolicy {
+  return resolveBookingPolicy(branch.bookingPolicy, branch.restaurant.bookingPolicy);
+}
+
 export interface SlotDto {
   time: string;
   at: string;
@@ -60,6 +94,15 @@ export interface AvailabilityResult {
   depositAmd: number;
   /** Largest party any single table at this branch can seat. */
   maxSeats: number;
+  /**
+   * Largest party this branch accepts, from its policy.
+   *
+   * Separate from `maxSeats`, which is what the furniture allows. A branch may
+   * cap parties below what it could physically seat, and the two answers want
+   * different words in front of a guest: "no table here seats nine" is about
+   * the room, "we take parties up to eight" is about the house.
+   */
+  maxGuests: number;
   reservationsEnabled: boolean;
 }
 
@@ -115,16 +158,21 @@ export class ReservationsService {
       // without an order returns whichever row the database yields — the same
       // URL could otherwise offer a different branch's tables each request.
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      include: { restaurant: true, tables: { where: { isActive: true } } },
+      include: BRANCH_FOR_BOOKING,
     });
     if (!branch) {
       throw new NotFoundException('Restaurant not found');
     }
 
+    const policy = policyOf(branch);
     const fitting = branch.tables.filter((table) => table.seats >= query.guests);
     const maxSeats = branch.tables.reduce((max, table) => Math.max(max, table.seats), 0);
 
-    const window = openWindowFor(branch.openHours, new Date(`${query.date}T12:00:00Z`));
+    const window = bookingWindowFor(
+      branch,
+      instantOf(query.date, NOON_MINUTES),
+      await this.closureFor(branch.id, query.date),
+    );
     // Both halves resolved for this branch: a chain can take bookings at the
     // restaurant with a dining room and not at the counter in the mall, and
     // the two settings have to agree per address or a guest is offered times
@@ -133,32 +181,32 @@ export class ReservationsService {
     const reservationsEnabled =
       offering.reservationsEnabled && offering.services.includes(RestaurantService.Reserve);
 
-    // A closed day, a restaurant that does not take bookings, or no table big
-    // enough — all mean "no times", and each is a real answer rather than an
-    // empty list that looks like a bug.
-    if (!window || !reservationsEnabled || fitting.length === 0) {
-      return {
-        branchId: branch.id,
-        date: query.date,
-        guests: query.guests,
-        slots: [],
-        depositAmd: depositFor(query.guests),
-        maxSeats,
-        reservationsEnabled,
-      };
+    const empty = (): AvailabilityResult => ({
+      branchId: branch.id,
+      date: query.date,
+      guests: query.guests,
+      slots: [],
+      depositAmd: depositFor(query.guests, policy),
+      maxSeats,
+      maxGuests: policy.maxGuests,
+      reservationsEnabled,
+    });
+
+    // A closed day, a restaurant that does not take bookings, a party over the
+    // branch's cap, or no table big enough — all mean "no times", and each is a
+    // real answer rather than an empty list that looks like a bug.
+    if (
+      !window ||
+      !reservationsEnabled ||
+      query.guests > policy.maxGuests ||
+      fitting.length === 0
+    ) {
+      return empty();
     }
 
-    const slots = slotsFor(query.date, window);
+    const slots = slotsFor(query.date, window, policy);
     if (slots.length === 0) {
-      return {
-        branchId: branch.id,
-        date: query.date,
-        guests: query.guests,
-        slots: [],
-        depositAmd: depositFor(query.guests),
-        maxSeats,
-        reservationsEnabled,
-      };
+      return empty();
     }
 
     // One query for the whole day, widened by a seating on each side so a
@@ -171,10 +219,12 @@ export class ReservationsService {
         status: { in: [...ACTIVE_RESERVATION_STATUSES] },
         reservedFor: { gte: first.from, lte: last.to },
       },
-      select: { tableId: true, reservedFor: true },
+      select: { tableId: true, reservedFor: true, seatingMinutes: true },
     });
 
-    const now = Date.now();
+    // The earliest a booking may still be made — the branch's notice period,
+    // which is at least "not in the past" and usually rather more.
+    const earliest = Date.now() + policy.minLeadMinutes * 60_000;
     return {
       branchId: branch.id,
       date: query.date,
@@ -182,13 +232,15 @@ export class ReservationsService {
       slots: slots.map((slot) => ({
         time: localTimeLabel(slot),
         at: slot.toISOString(),
-        // A slot in the past is not bookable however free the table is.
+        // A slot too soon to give the kitchen notice is not bookable however
+        // free the table is.
         available:
-          slot.getTime() > now &&
-          fitting.some((table) => this.isTableFree(table.id, slot, taken)),
+          slot.getTime() > earliest &&
+          fitting.some((table) => this.isTableFree(table.id, slot, taken, policy)),
       })),
-      depositAmd: depositFor(query.guests),
+      depositAmd: depositFor(query.guests, policy),
       maxSeats,
+      maxGuests: policy.maxGuests,
       reservationsEnabled,
     };
   }
@@ -208,15 +260,16 @@ export class ReservationsService {
 
     const branch = await this.prisma.restaurantBranch.findUnique({
       where: { id: dto.branchId },
-      include: { restaurant: true, tables: { where: { isActive: true } } },
+      include: BRANCH_FOR_BOOKING,
     });
     if (!branch) {
       throw new NotFoundException('Restaurant not found');
     }
 
-    this.assertBookable(branch, reservedFor, dto.guests);
+    const policy = policyOf(branch);
+    await this.assertBookable(branch, policy, reservedFor, dto.guests);
 
-    const depositAmd = depositFor(dto.guests);
+    const depositAmd = depositFor(dto.guests, policy);
 
     // Hold the money first. A booking that exists without its deposit is a
     // table given away for nothing; a hold with no booking is released below.
@@ -232,6 +285,7 @@ export class ReservationsService {
       reservation = await this.claimTable({
         userId,
         branch,
+        policy,
         reservedFor,
         guests: dto.guests,
         depositAmd,
@@ -310,7 +364,9 @@ export class ReservationsService {
       );
     }
 
-    const inFreeWindow = freeCancellationUntil(reservation.reservedFor).getTime() > Date.now();
+    const inFreeWindow =
+      freeCancellationUntil(reservation.reservedFor, policyForReservation(reservation)).getTime() >
+      Date.now();
     const outcome = depositOutcomeFor(ReservationStatus.Cancelled, inFreeWindow);
 
     return this.settle(reservation, ReservationStatus.Cancelled, outcome);
@@ -403,7 +459,7 @@ export class ReservationsService {
   }
 
   toDetail(row: ReservationRow): ReservationDetail {
-    const freeUntil = freeCancellationUntil(row.reservedFor);
+    const freeUntil = freeCancellationUntil(row.reservedFor, policyForReservation(row));
 
     return {
       id: row.id,
@@ -428,28 +484,58 @@ export class ReservationsService {
 
   // ── internals ─────────────────────────────────────────────────────────────
 
-  private assertBookable(
-    branch: Prisma.RestaurantBranchGetPayload<{ include: { restaurant: true; tables: true } }>,
+  private async assertBookable(
+    branch: BranchForBooking,
+    policy: ResolvedBookingPolicy,
     reservedFor: Date,
     guests: number,
-  ): void {
+  ): Promise<void> {
     // The same resolution the slot list above uses, so what is offered and what
     // is accepted cannot disagree for a branch that answers for itself.
     const offering = resolveBranchOffering(branch, branch.restaurant);
     if (!offering.reservationsEnabled || !offering.services.includes(RestaurantService.Reserve)) {
       throw new UnprocessableEntityException('This restaurant does not take table bookings');
     }
-    if (reservedFor.getTime() <= Date.now()) {
-      throw new UnprocessableEntityException('That time has already passed');
+    if (reservedFor.getTime() <= Date.now() + policy.minLeadMinutes * 60_000) {
+      // One refusal for "already gone" and "too soon to be any use", because to
+      // the guest they are the same disappointment and the branch decides where
+      // the line is. A branch that takes walk-up bookings sets the notice to
+      // zero, and this reads as "that time has passed" again.
+      throw new UnprocessableEntityException({
+        message:
+          policy.minLeadMinutes > 0
+            ? `Tables must be booked at least ${policy.minLeadMinutes} minutes ahead`
+            : 'That time has already passed',
+        minLeadMinutes: policy.minLeadMinutes,
+      });
     }
-    if (reservedFor.getTime() > Date.now() + RESERVATION_MAX_LEAD_DAYS * 86_400_000) {
+    if (reservedFor.getTime() > Date.now() + policy.maxLeadDays * 86_400_000) {
       throw new UnprocessableEntityException(
-        `Tables can be booked at most ${RESERVATION_MAX_LEAD_DAYS} days ahead`,
+        `Tables can be booked at most ${policy.maxLeadDays} days ahead`,
       );
     }
+    if (guests > policy.maxGuests) {
+      throw new UnprocessableEntityException({
+        message: 'That is a larger party than this restaurant takes',
+        maxGuests: policy.maxGuests,
+      });
+    }
 
-    const window = openWindowFor(branch.openHours, reservedFor);
-    if (!window || !isSlotBoundary(reservedFor, window)) {
+    // Which day's booking sheet this instant belongs to. Only ever different
+    // from its own calendar date at a branch whose night runs past midnight —
+    // where 01:00 is the tail of yesterday's service and must be gated against
+    // yesterday's hours, not against a Tuesday the kitchen may be shut for.
+    const serviceDate = serviceDateOf(
+      branch,
+      reservedFor,
+      await this.closureFor(branch.id, addLocalDays(localDateOf(reservedFor), -1)),
+    );
+    const window = bookingWindowFor(
+      branch,
+      instantOf(serviceDate, NOON_MINUTES),
+      await this.closureFor(branch.id, serviceDate),
+    );
+    if (!window || !isSlotBoundary(reservedFor, window, policy, serviceDate)) {
       // Rejecting an off-grid time keeps availability and booking answering
       // the same question — a client cannot book 19:07 and skip the check.
       throw new UnprocessableEntityException({
@@ -467,6 +553,26 @@ export class ReservationsService {
   }
 
   /**
+   * The dated exception for one branch and one local date, if there is one.
+   *
+   * Returned in the shape `open-hours.ts` reads rather than Prisma's, so that
+   * module stays free of database types and testable without one.
+   */
+  private async closureFor(branchId: string, date: string): Promise<DatedClosure | null> {
+    const row = await this.prisma.branchClosure.findUnique({
+      where: { branchId_date: { branchId, date: new Date(`${date}T00:00:00.000Z`) } },
+      select: { kind: true, opensMinutes: true, closesMinutes: true },
+    });
+    return row === null
+      ? null
+      : {
+          kind: row.kind as DatedClosure['kind'],
+          opensMinutes: row.opensMinutes,
+          closesMinutes: row.closesMinutes,
+        };
+  }
+
+  /**
    * Picks a free table and inserts the booking, or fails.
    *
    * Serializable isolation is the point: the check "is this table free" and
@@ -476,7 +582,8 @@ export class ReservationsService {
    */
   private async claimTable(input: {
     userId: string;
-    branch: Prisma.RestaurantBranchGetPayload<{ include: { restaurant: true; tables: true } }>;
+    branch: BranchForBooking;
+    policy: ResolvedBookingPolicy;
     reservedFor: Date;
     guests: number;
     depositAmd: number;
@@ -499,11 +606,11 @@ export class ReservationsService {
                 status: { in: [...ACTIVE_RESERVATION_STATUSES] },
                 reservedFor: { gte: range.from, lte: range.to },
               },
-              select: { tableId: true, reservedFor: true },
+              select: { tableId: true, reservedFor: true, seatingMinutes: true },
             });
 
             const free = candidates.find((table) =>
-              this.isTableFree(table.id, input.reservedFor, taken),
+              this.isTableFree(table.id, input.reservedFor, taken, input.policy),
             );
             if (!free) {
               throw new ConflictException('No table is free at that time');
@@ -517,8 +624,16 @@ export class ReservationsService {
                 reservedFor: input.reservedFor,
                 activeSlot: input.reservedFor,
                 guests: input.guests,
+                // Snapshotted, so a branch that later lengthens its seating has
+                // not retrospectively changed what this guest was promised.
+                seatingMinutes: input.policy.seatingMinutes,
                 depositAmd: input.depositAmd,
-                status: ReservationStatus.Pending,
+                // A booking whose deposit is held and whose table is chosen has
+                // nothing left to decide, so it confirms itself unless the
+                // branch has asked to read every one first.
+                status: input.policy.autoConfirm
+                  ? ReservationStatus.Confirmed
+                  : ReservationStatus.Pending,
               },
               include: RESERVATION_INCLUDE,
             });
@@ -544,10 +659,22 @@ export class ReservationsService {
   private isTableFree(
     tableId: string,
     slot: Date,
-    taken: { tableId: string | null; reservedFor: Date }[],
+    taken: { tableId: string | null; reservedFor: Date; seatingMinutes: number | null }[],
+    policy: ResolvedBookingPolicy,
   ): boolean {
     return !taken.some(
-      (booking) => booking.tableId === tableId && seatingsOverlap(booking.reservedFor, slot),
+      (booking) =>
+        booking.tableId === tableId &&
+        seatingsOverlap(
+          booking.reservedFor,
+          slot,
+          // Each existing booking holds its table for the seating it was made
+          // under; only the one being considered uses today's policy. Null is a
+          // row from before the column existed, and the resolved policy is
+          // exactly what it was measured by at the time.
+          booking.seatingMinutes ?? policy.seatingMinutes,
+          policy.seatingMinutes,
+        ),
     );
   }
 
@@ -566,15 +693,32 @@ export class ReservationsService {
 }
 
 export const RESERVATION_INCLUDE = {
-  branch: { include: { restaurant: true } },
+  // Both policy levels come along, because every read that shows a booking also
+  // has to say when its deposit stops being refundable — and that number is now
+  // the branch's rather than the platform's.
+  branch: {
+    include: { restaurant: { include: { bookingPolicy: true } }, bookingPolicy: true },
+  },
   table: true,
   payment: true,
   order: { select: { id: true } },
 } satisfies Prisma.ReservationInclude;
 
-/** The moment after which cancelling stops returning the deposit. */
-export function freeCancellationUntil(reservedFor: Date): Date {
-  return new Date(reservedFor.getTime() - RESERVATION_FREE_CANCEL_HOURS * 3_600_000);
+/**
+ * The moment after which cancelling stops returning the deposit.
+ *
+ * Takes the policy rather than reading a constant, because the window is the
+ * branch's to set: a place that turns tables over all evening wants more notice
+ * than one that seats twelve people a night.
+ */
+export function freeCancellationUntil(reservedFor: Date, policy: ResolvedBookingPolicy): Date {
+  return new Date(reservedFor.getTime() - policy.freeCancelHours * 3_600_000);
+}
+
+/** The rules a stored booking's branch runs under — what the read paths need in
+ *  order to say anything about its deposit. */
+export function policyForReservation(row: ReservationRow): ResolvedBookingPolicy {
+  return resolveBookingPolicy(row.branch.bookingPolicy, row.branch.restaurant.bookingPolicy);
 }
 
 /** Serialization failures and deadlocks are contention, not bugs — retry them. */
@@ -585,9 +729,7 @@ function isRetryableBookingError(err: unknown): boolean {
   );
 }
 
-export const SEATING_MINUTES = RESERVATION_SEATING_MINUTES;
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Accepts a branch id, a restaurant id, or a restaurant slug — clients hold

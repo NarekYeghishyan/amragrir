@@ -7,6 +7,62 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — Every number behind a booking becomes the restaurant's
+
+Stage one of the table-booking admin module: the foundation, with no screen
+attached to it yet.
+
+Until now every booking rule was a constant in `packages/shared` — a 90-minute
+seating, a 10-minute grid, 2000֏ a head, 30 days ahead, 12 guests at most — the
+same for a wine bar with four tables and a hall that seats a hundred, and
+changeable by nobody but a deploy. They are now defaults at the bottom of a
+three-level chain: **platform → restaurant → branch**, resolved field by field
+in one function, `resolveBookingPolicy`.
+
+**Nothing answers differently today.** Every column added is nullable and every
+NULL means "inherit", so a database that has just migrated resolves to exactly
+the constants it resolved to before. The existing suite is what proves it: its
+assertions are untouched. Its *call sites* did change — `slotsFor`,
+`isSlotBoundary`, `seatingsOverlap`, `depositFor` and `freeCancellationUntil`
+now take their numbers as **required** arguments. Deliberately required: an
+optional parameter defaulting to the platform's value would compile at every
+call site that forgot a branch's policy, and a calendar offering times the
+endpoint then refuses is the one failure this whole design exists to prevent.
+
+Five migrations, none of which touches an existing row: `booking_policies` (one
+table for both levels, two nullable owners and a CHECK that exactly one is set —
+the shape `payments` already uses), `branch_closures` for dated exceptions,
+`restaurant_branches.booking_hours` for a kitchen that serves longer than it
+books, `UNIQUE (branch_id, table_no)`, and `reservations.seating_minutes`.
+
+That last one is what makes changing a seating length *safe*. Read live, a
+branch lengthening its seating would stretch every accepted booking backwards,
+and two that sat comfortably an hour apart would start overlapping on one table
+— an overlap nothing would catch, because the unique index guards the start
+instant and the transaction that checks intervals committed weeks ago. Snapshot,
+and the new setting applies only forwards.
+
+**A night may now run past midnight.** A closing time at or before the opening
+one is read onto the opening day's number line, so 12:00–02:00 becomes minutes
+720–1560. Before this a late-night branch was offered zero bookable times and
+nothing on screen said why. It also means a booking's service date can differ
+from its calendar date — 01:00 on Tuesday belongs to Monday's shift — which
+`serviceDateOf` now answers, so such a booking is gated against the right day's
+hours and filed under the right day's sheet.
+
+Two new settings that had no previous answer: `minLeadMinutes` (an hour by
+default — a table could previously be claimed a minute before the guest walked
+in) and `autoConfirm` (`true`, because by the time a booking exists the money is
+held and the table is chosen, and `pending` would mean "we have your money and
+have not said yes").
+
+`maxGuests` stops being a ceiling and becomes a default. The platform limit is
+200 and guards a slipped finger rather than a business decision; the clients now
+read the branch's answer off `GET /availability` instead of clamping at twelve,
+so a branch that enters a banquet hall as one 100-seat table can actually be
+booked for one. Seating a single party across several tables stays out of
+scope — it would move exclusivity off `UNIQUE (table_id, active_slot)`.
+
 ### 2026-08-09 — The working tree is LF, so the token guard tests colours again
 
 `packages/ui/src/tokens.spec.ts` compares the generated `tokens.css` in

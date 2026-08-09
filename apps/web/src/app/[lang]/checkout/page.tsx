@@ -187,11 +187,14 @@ export default async function CheckoutPage({ params, searchParams }: Props) {
         ]
       : []),
   ];
-  // The largest party the stepper will count to: the platform's own ceiling, or
-  // this branch's biggest table when that is smaller. `submitCheckout` clamps to
-  // `RESERVATION_MAX_GUESTS` regardless — this only keeps `+` from offering a
-  // party the branch has nowhere to seat.
-  const maxGuests = Math.min(RESERVATION_MAX_GUESTS, availability?.maxSeats || 8);
+  // The largest party the stepper will count to: what this branch says it
+  // takes, or its biggest table when that is smaller. Both come from the
+  // availability answer rather than from a constant, so a branch that runs a
+  // hall counts to a hundred and a wine bar with four tables counts to six.
+  const maxGuests = Math.min(
+    availability?.maxGuests || RESERVATION_MAX_GUESTS,
+    availability?.maxSeats || 8,
+  );
   const error = typeof sp.error === 'string' ? sp.error : undefined;
 
   // The floor and the grain of each field. `min` is rounded onto the clock
@@ -613,7 +616,10 @@ async function BookingOnly({
     notFound();
   }
   const canBook = availability.reservationsEnabled;
-  const maxGuests = Math.min(RESERVATION_MAX_GUESTS, availability.maxSeats || 8);
+  const maxGuests = Math.min(
+    availability.maxGuests || RESERVATION_MAX_GUESTS,
+    availability.maxSeats || 8,
+  );
   const tableFloor = yerevanDateTime(yerevanStepUp(now.toISOString(), RESERVATION_SLOT_MINUTES));
   const tableCeiling = yerevanDateTime(
     new Date(now.getTime() + ORDER_MAX_LEAD_DAYS * 86_400_000).toISOString(),

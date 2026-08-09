@@ -3,7 +3,7 @@ import {
   ORDER_MAX_ITEM_QTY,
   ORDER_MAX_LINES,
   PickupOption,
-  RESERVATION_MAX_GUESTS,
+  BOOKING_POLICY_LIMITS,
   ServiceMode,
 } from '@amragrir/shared';
 import {
@@ -203,13 +203,26 @@ describe('the booking being asked for', () => {
 
   // Same reasoning as the quantity bounds above: devtools can write this cookie,
   // and `POST /reservations` would refuse the party anyway.
+  //
+  // Bounded by the **platform ceiling**, not by a party size. How many people a
+  // branch seats is that branch's setting, and this cookie does not know which
+  // branch it will be spent at — clamping it at twelve here would have quietly
+  // dropped the party for a hall that takes eighty.
   it('drops a party size the API would not seat', () => {
-    for (const guests of [0, 2.5, RESERVATION_MAX_GUESTS + 1]) {
+    for (const guests of [0, 2.5, BOOKING_POLICY_LIMITS.maxGuests.max + 1]) {
       expect(parseCart(JSON.stringify({ ...asking, guests }))?.guests).toBeUndefined();
     }
     // …and keeps the rest of the basket rather than dropping it whole: the
     // party is a detail of one screen, the dishes are the order.
-    expect(parseCart(JSON.stringify({ ...asking, guests: 99 }))?.items).toEqual(BASE.items);
+    expect(
+      parseCart(JSON.stringify({ ...asking, guests: 10_000 }))?.items,
+    ).toEqual(BASE.items);
+  });
+
+  it('keeps a party that only a large branch could seat', () => {
+    // Eighty is not a mistake in a cookie — it is an event at a branch whose
+    // admin raised the cap, and the booking endpoint is what decides.
+    expect(parseCart(JSON.stringify({ ...asking, guests: 80 }))?.guests).toBe(80);
   });
 
   it('goes with the booking when the mode changes', () => {

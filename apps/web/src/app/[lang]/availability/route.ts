@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { RESERVATION_MAX_GUESTS } from '@amragrir/shared';
+// The platform ceiling rather than the old flat maximum of twelve: how large a
+// party a branch takes is the branch's answer, and this route only forwards the
+// question. Refusing 40 here would mean a hall that seats a hundred could never
+// be asked about.
+import { BOOKING_POLICY_LIMITS } from '@amragrir/shared';
 import { api, ApiError, type Slot } from '@/lib/api';
 import { parseLanguage } from '@/lib/language';
 
@@ -27,11 +31,18 @@ export const dynamic = 'force-dynamic';
 export interface DayAvailability {
   slots: Slot[];
   maxSeats: number;
+  /** The branch's own cap on party size — see `Availability.maxGuests`. */
+  maxGuests: number;
   reservationsEnabled: boolean;
 }
 
 /** An answer the picker can draw: no slots, rather than an error to handle. */
-const NOTHING: DayAvailability = { slots: [], maxSeats: 0, reservationsEnabled: false };
+const NOTHING: DayAvailability = {
+  slots: [],
+  maxSeats: 0,
+  maxGuests: 0,
+  reservationsEnabled: false,
+};
 
 export async function GET(
   request: NextRequest,
@@ -53,14 +64,18 @@ export async function GET(
     /^\d{4}-\d{2}-\d{2}$/.test(date) &&
     Number.isInteger(guests) &&
     guests >= 1 &&
-    guests <= RESERVATION_MAX_GUESTS;
+    guests <= BOOKING_POLICY_LIMITS.maxGuests.max;
   if (!usable) {
     return NextResponse.json<DayAvailability>(NOTHING);
   }
 
   try {
-    const { slots, maxSeats, reservationsEnabled } = await api.availability(branch, date, guests);
-    return NextResponse.json<DayAvailability>({ slots, maxSeats, reservationsEnabled });
+    const { slots, maxSeats, maxGuests, reservationsEnabled } = await api.availability(
+      branch,
+      date,
+      guests,
+    );
+    return NextResponse.json<DayAvailability>({ slots, maxSeats, maxGuests, reservationsEnabled });
   } catch (error) {
     // A day with no answer is drawn as a day with no times. Onto the server's
     // terminal, never onto the page — which branch or which date failed is a

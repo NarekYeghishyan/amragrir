@@ -158,25 +158,105 @@ order is dine-in** — a CHECK constraint holds it to that (DATABASE.md §5).
 
 ## 3. Table booking (Reservation)
 
-Rules **[proposed based on design]**:
+### Every number here belongs to the restaurant (implemented)
+
+The rules below used to be constants in `packages/shared`, identical for a wine
+bar with four tables and a hall that seats a hundred, and changeable by nobody
+but a deploy. They are now **defaults at the bottom of a three-level chain**:
+
+```
+platform constants  →  restaurant  →  branch
+```
+
+Each level answers field by field, and `NULL` means *inherit*. Not row by row:
+a branch that overrides only its seating length goes on inheriting the chain's
+deposit, and a chain that raises its deposit moves that branch with it.
+Whole-row precedence would mean touching one field silently froze the other
+seven at whatever they happened to be that day.
+
+| Setting | Default | What it decides |
+|---|---|---|
+| `seatingMinutes` | 90 | How long one booking holds its table — why 19:00 and 19:30 collide |
+| `slotMinutes` | 10 | Spacing of the times offered |
+| `maxGuests` | 12 | Largest party one booking may ask for |
+| `maxLeadDays` | 30 | How far ahead the calendar runs |
+| `minLeadMinutes` | 60 | How close to the sitting a booking may still be made |
+| `depositPerGuestAmd` | 2000 | The deposit, per guest |
+| `freeCancelHours` | 2 | How far ahead cancelling still returns the deposit |
+| `autoConfirm` | `true` | Whether a paid booking confirms itself |
+
+**The resolution happens in exactly one function** — `resolveBookingPolicy` in
+`@amragrir/shared` — asked by the availability calendar, by the endpoint that
+accepts a booking, by the back office and by the tests. The functions in
+`reservations/slots.ts` take the resolved policy as a **required** argument
+rather than reading a constant: an optional parameter defaulting to the
+platform's value would compile at every call site that forgot a branch's
+policy, and the symptom — a calendar offering times the endpoint then refuses —
+is the one thing that module exists to prevent.
+
+Two of these are new rather than moved. `minLeadMinutes` had no previous
+answer at all: a table could be claimed a minute before the guest walked in.
+`autoConfirm` is `true` because by the time a booking exists the guest has had
+money held and the server has already picked their table — `pending` would be a
+status meaning "we have your money and have not said yes". A restaurant that
+wants to read every booking first turns it off.
+
+**`maxGuests` is a default, not a ceiling.** The platform's limit is 200, and it
+guards against a slipped finger in a number field rather than against a business
+decision. A branch that takes an event for a hundred raises its cap and enters
+one `tables` row seating a hundred — a banquet hall. Seating a single party
+across several tables is deliberately **not** supported: it would move
+exclusivity off `UNIQUE (table_id, active_slot)` and onto a join table, which is
+its own piece of work.
+
+### When bookings are taken (implemented)
+
+Three sources, most specific first — resolved by `bookingWindowFor`, the one
+function both the calendar and the booking endpoint ask:
+
+1. **A dated closure** (`branch_closures`) — a holiday, a private hire, a short
+   day. The most specific thing anybody said, said about this exact date.
+2. **`booking_hours`** — when tables may be *held*, for a kitchen that serves
+   longer than it books.
+3. **`open_hours`** — most kitchens book every hour they are open and should not
+   have to restate their week to say so.
+
+The fall-through only skips a level that said *nothing*: `booking_hours` marking
+Monday closed closes Monday, rather than deferring to an `open_hours` that has
+the kitchen working.
+
+**A night may run past midnight.** A closing time at or before the opening one
+is read onto the opening day's number line — 12:00–02:00 becomes minutes
+720–1560 — so every piece of arithmetic downstream keeps working by ordinary
+comparison. Before this, such a branch was offered **zero** bookable times and
+nothing said why. It also means a booking's *service date* can differ from its
+calendar date: 01:00 on Tuesday belongs to Monday's shift, and `serviceDateOf`
+is what stops it being filed under the wrong day's sheet and gated against a
+Tuesday the kitchen may be shut for. `00:00–00:00` reads as the whole day.
+
+### Rules **[proposed based on design]**
 
 - The restaurant can **enable/disable** booking (`reservations_enabled`). **[from design: `reserve` field]**
-- **Deposit:** `deposit = guests × depositPerGuest`, where `depositPerGuest = 5 units` ≈ **2000֏**. **[from design]**
+- **Deposit:** `deposit = guests × depositPerGuest`, where `depositPerGuest` defaults to **2000֏** and is set per restaurant or per branch. **[from design]**
 - The deposit is **fully credited** toward the final bill ("credited to bill"), it is **not** an extra fee. **[from design]**
 - A booking cannot be made for a **past date/time** (past days are `disabled` in the calendar). **[from design]**
 - A booking cannot be made **outside business hours** / when `open=false`. **[proposed]**
 - Seats are **capacity-limited** — the booking passes an availability check. **[proposed]**
-- Guest count: minimum 1; step ±1; suggested chips + stepper. **[from design]**
+- Guest count: minimum 1; step ±1; suggested chips + stepper. The stepper stops at the **smaller** of the branch's `maxGuests` and its largest table, both of which come back on the availability answer rather than from a constant. **[from design]**
 - Defaults: `guests = 2`, `reserveTime = '12:30'`. **[from design]**
 
 ### How a table is held (implemented)
 
-- **A booking is a seating, not an instant.** It occupies
-  `RESERVATION_SEATING_MINUTES` (90), which is why 19:00 and 19:30 conflict on
-  the same table. Slots are offered every `RESERVATION_SLOT_MINUTES` (**10**
-  since 2026-08-08; it was 30), and the last one is a full seating before
-  closing — offering 22:30 when the kitchen shuts at 23:00 sells a table nobody
-  can use.
+- **A booking is a seating, not an instant.** It occupies the branch's
+  `seatingMinutes` (90 by default), which is why 19:00 and 19:30 conflict on
+  the same table. Slots are offered every `slotMinutes` (**10** since
+  2026-08-08; it was 30), and the last one is a full seating before closing —
+  offering 22:30 when the kitchen shuts at 23:00 sells a table nobody can use.
+  - **Each booking is measured by the seating it was made under**, stored in
+    `reservations.seating_minutes`. A branch that has since changed its seating
+    has bookings of both lengths on the books, and measuring them against one
+    number would either free a table that is still occupied or hold one that is
+    not.
   - **The spacing is the grain of the offer, not the length of the booking.**
     Only the first number moved: a party still keeps the table 90 minutes, so
     19:00 and 19:10 collide exactly as 19:00 and 19:30 did. What changed is that

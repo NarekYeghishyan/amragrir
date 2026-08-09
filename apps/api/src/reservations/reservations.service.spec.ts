@@ -29,11 +29,17 @@ function branch(over: Record<string, unknown> = {}) {
     name: 'Northern Ave',
     address: 'Northern Ave 5',
     openHours: null,
+    bookingHours: null,
     tables: TABLES,
+    // No stored policy at either level, which is the state every branch is in
+    // until somebody opens the settings — so these tests go on describing the
+    // platform's numbers, and say so by resolving from nothing.
+    bookingPolicy: null,
     restaurant: {
       name: 'Sunny Table',
       reservationsEnabled: true,
       services: ['pickup', 'dinein', 'reserve'],
+      bookingPolicy: null,
     },
     ...over,
   };
@@ -61,7 +67,14 @@ function reservationRow(over: Record<string, unknown> = {}) {
   };
 }
 
-function build(options: { branch?: unknown; taken?: unknown[]; reservation?: unknown } = {}) {
+function build(
+  options: {
+    branch?: unknown;
+    taken?: unknown[];
+    reservation?: unknown;
+    closure?: unknown;
+  } = {},
+) {
   const created = jest.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) =>
     Promise.resolve(reservationRow({ ...data, status: ReservationStatus.Pending })),
   );
@@ -91,6 +104,9 @@ function build(options: { branch?: unknown; taken?: unknown[]; reservation?: unk
       update: updated,
     },
     payment: { update: paymentUpdate },
+    // No dated exception on the day being asked about — the ordinary case, and
+    // the one that leaves the weekly hours in charge.
+    branchClosure: { findUnique: jest.fn().mockResolvedValue(options.closure ?? null) },
     $transaction: jest.fn((fn: (tx: unknown) => unknown) =>
       Promise.resolve(
         fn({
@@ -285,6 +301,88 @@ describe('create', () => {
   it('404s for an unknown branch', async () => {
     const { service } = build({ branch: null });
     await expect(service.create('user-1', createDto())).rejects.toThrow(NotFoundException);
+  });
+
+  it('snapshots the seating it was made under', async () => {
+    // So that lengthening the branch's seating tomorrow cannot retrospectively
+    // stretch a booking somebody already has, and cannot make two that fitted
+    // an hour apart start overlapping on the same table.
+    const { service, created } = build({
+      branch: branch({ bookingPolicy: { seatingMinutes: 120 } }),
+    });
+    await service.create('user-1', createDto());
+
+    expect(created.mock.calls[0][0].data.seatingMinutes).toBe(120);
+  });
+
+  it('confirms itself once the deposit is held', async () => {
+    // The guest has had money held and the server has already picked their
+    // table; `pending` would mean "we have your money and have not said yes".
+    const { service, created } = build();
+    await service.create('user-1', createDto());
+
+    expect(created.mock.calls[0][0].data.status).toBe(ReservationStatus.Confirmed);
+  });
+
+  it('waits for a human where the branch asked to read every booking', async () => {
+    const { service, created } = build({
+      branch: branch({ bookingPolicy: { autoConfirm: false } }),
+    });
+    await service.create('user-1', createDto());
+
+    expect(created.mock.calls[0][0].data.status).toBe(ReservationStatus.Pending);
+  });
+
+  it('honours the branch’s party cap, which is not the size of its tables', async () => {
+    // Six people fit the six-seater, so the furniture is not the objection —
+    // the house is. The two refusals say different things for that reason.
+    const { service } = build({ branch: branch({ bookingPolicy: { maxGuests: 4 } }) });
+
+    await expect(service.create('user-1', createDto({ guests: 6 }))).rejects.toThrow(
+      UnprocessableEntityException,
+    );
+  });
+
+  it('lets a branch take a party far larger than the platform’s default', async () => {
+    // The banquet hall: one "table" seating a hundred, and a cap raised to
+    // match. Nothing else about the booking path changes.
+    const { service, created } = build({
+      branch: branch({
+        bookingPolicy: { maxGuests: 120 },
+        tables: [...TABLES, { id: 'table-hall', tableNo: 'Hall', seats: 100, isActive: true }],
+      }),
+    });
+
+    await service.create('user-1', createDto({ guests: 80 }));
+    expect(created.mock.calls[0][0].data.tableId).toBe('table-hall');
+  });
+
+  it('refuses a booking made with less notice than the branch asks for', async () => {
+    // A table claimed a minute before the guest walks in is not a booking, it
+    // is a surprise for whoever is on the door. The notice is expressed as ten
+    // days here purely so the test is about the rule rather than about what
+    // time of day it happens to run — `DATE` is five days out, and otherwise a
+    // perfectly ordinary 19:00 slot.
+    const { service, deposits } = build({
+      branch: branch({ bookingPolicy: { minLeadMinutes: 10 * 24 * 60 } }),
+    });
+
+    await expect(service.create('user-1', createDto())).rejects.toThrow(
+      UnprocessableEntityException,
+    );
+    // Nothing was held for a booking that was never legal.
+    expect(deposits.authorize).not.toHaveBeenCalled();
+  });
+
+  it('lets a branch take walk-up bookings by asking for no notice at all', async () => {
+    // Zero has to be a real answer rather than reading as "inherit the hour",
+    // which is the whole reason the resolver uses `??` and not `||`.
+    const { service, created } = build({
+      branch: branch({ bookingPolicy: { minLeadMinutes: 0 } }),
+    });
+
+    await service.create('user-1', createDto());
+    expect(created).toHaveBeenCalled();
   });
 });
 

@@ -2,6 +2,7 @@ export * from './enums';
 export * from './staff-roles';
 export * from './activity';
 export * from './booking-calendar';
+export * from './booking-policy';
 export * from './constants';
 export * from './order-status';
 export * from './phone';

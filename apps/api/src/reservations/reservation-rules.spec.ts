@@ -1,12 +1,14 @@
 import {
   ACTIVE_RESERVATION_STATUSES,
   DepositOutcome,
+  PLATFORM_BOOKING_POLICY,
   RESERVATION_STATUS_FLOW,
   ReservationStatus,
   TERMINAL_RESERVATION_STATUSES,
   canTransitionReservation,
   depositOutcomeFor,
   isReservationCancellable,
+  resolveBookingPolicy,
 } from '@amragrir/shared';
 import { freeCancellationUntil } from './reservations.service';
 import { instantOf } from './slots';
@@ -103,7 +105,16 @@ describe('depositOutcomeFor', () => {
 describe('freeCancellationUntil', () => {
   it('is two hours before the booking', () => {
     const reservedFor = instantOf('2026-08-01', 19 * 60);
-    const cutoff = freeCancellationUntil(reservedFor);
+    const cutoff = freeCancellationUntil(reservedFor, PLATFORM_BOOKING_POLICY);
     expect(reservedFor.getTime() - cutoff.getTime()).toBe(2 * 3_600_000);
+  });
+
+  it('follows the branch when the branch has its own answer', () => {
+    // The whole point of the policy chain: a place that turns tables over all
+    // evening wants more notice than the platform's default two hours.
+    const reservedFor = instantOf('2026-08-01', 19 * 60);
+    const policy = resolveBookingPolicy({ freeCancelHours: 24 }, null);
+    const cutoff = freeCancellationUntil(reservedFor, policy);
+    expect(reservedFor.getTime() - cutoff.getTime()).toBe(24 * 3_600_000);
   });
 });

@@ -135,8 +135,38 @@ export const RESERVATION_FREE_CANCEL_HOURS = 2;
 /** How far ahead a table may be booked (days). */
 export const RESERVATION_MAX_LEAD_DAYS = 30;
 
-/** Largest party a single table booking may request. */
+/**
+ * Largest party a single table booking may request.
+ *
+ * **A default now, not a ceiling.** A branch that runs a hall raises it — see
+ * `BOOKING_POLICY_LIMITS.maxGuests`, which is where the number a *typo* cannot
+ * exceed lives. Twelve remains what a restaurant gets without saying anything,
+ * because twelve is what a room full of ordinary tables can seat.
+ */
 export const RESERVATION_MAX_GUESTS = 12;
+
+/**
+ * How close to the sitting a booking may still be made (minutes).
+ *
+ * New with the configurable policy, and the only one of these numbers that had
+ * no previous answer: a table could be claimed a minute before the guest walked
+ * in, which is not a booking so much as a surprise for whoever is on the door.
+ * An hour is the default because it is roughly the notice a kitchen needs to
+ * mean anything, and a branch that wants walk-up bookings sets it to zero.
+ */
+export const RESERVATION_MIN_LEAD_MINUTES = 60;
+
+/**
+ * Whether a booking confirms itself once its deposit is held.
+ *
+ * True, and deliberately. By the time a booking exists the guest has been
+ * charged nothing but has had money held, the server has already picked their
+ * table, and nothing about the restaurant's day is waiting on a human decision
+ * — so `pending` would be a status that means "we have your money and have not
+ * said yes", which is the worst sentence in the flow. A restaurant that wants
+ * to read every booking before promising it turns this off per branch.
+ */
+export const RESERVATION_AUTO_CONFIRM = true;
 
 /**
  * Armenia is UTC+4 all year — it has not observed daylight saving since 2012.

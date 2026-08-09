@@ -221,21 +221,34 @@ Tables (for dine-in). Inactive tables are omitted.
 
 ### GET /restaurants/{id}/availability · *implemented, public*
 Bookable times for a local date, **answered per party size**.
-- **Query:** `date=YYYY-MM-DD` (Yerevan local calendar), `guests` (1–12, default 2)
+- **Query:** `date=YYYY-MM-DD` (Yerevan local calendar), `guests` (1–200, default 2)
 - **Response 200:**
 ```json
 { "branchId","date":"2026-07-28","guests":2,
   "slots":[ { "time":"19:00","at":"2026-07-28T15:00:00.000Z","available":true } ],
-  "depositAmd":4000,"maxSeats":6,"reservationsEnabled":true }
+  "depositAmd":4000,"maxSeats":6,"maxGuests":12,"reservationsEnabled":true }
 ```
 - `time` is Yerevan local (what the picker shows); `at` is the instant to send
   back when booking.
 - A slot is available when **at least one table big enough is free for the
-  whole 90-minute seating** — which is why booking 19:00 also closes 19:30.
-- Slots in the past are never `available`.
+  whole seating** — which is why booking 19:00 also closes 19:30. The seating
+  length, the spacing of the times, the deposit and the two caps below all come
+  from the branch's booking policy (BUSINESS_LOGIC.md §3), not from a platform
+  constant.
+- **`maxSeats` and `maxGuests` are different refusals.** The first is what the
+  furniture allows — the largest single table here. The second is what the house
+  accepts, and a branch may cap parties below what it could seat. Clients stop
+  their stepper at the smaller of the two; "no table here seats nine" and "we
+  take parties up to eight" want different words in front of a guest.
+- The `guests` query is bounded by the **platform ceiling** of 200, not by any
+  restaurant's answer — a branch that runs a banquet hall has to be askable
+  about eighty. Whether *this* branch takes that party is what `maxGuests` says.
+- Slots too soon to give the branch its notice (`minLeadMinutes`, an hour by
+  default) are never `available`, and neither are slots in the past.
 - An empty `slots` array is a real answer, not an error: the restaurant does
-  not take bookings (`reservationsEnabled: false`), the day is closed, or no
-  table seats that party (compare `guests` with `maxSeats`).
+  not take bookings (`reservationsEnabled: false`), the day is closed — by its
+  weekly hours or by a dated closure — the party is over `maxGuests`, or no
+  table seats it (compare `guests` with `maxSeats`).
 
 ---
 

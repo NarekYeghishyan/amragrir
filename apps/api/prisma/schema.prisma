@@ -90,6 +90,17 @@ enum ReservationStatus {
   no_show
 }
 
+/// What one dated exception does to a branch's booking day — see
+/// `branch_closures`. Two kinds rather than a nullable pair of times, so a row
+/// with no hours on it is a shut day by construction rather than by convention.
+enum ClosureKind {
+  /// No bookings that day at all: a holiday, a private hire, a burst pipe.
+  closed
+  /// Open, but not on the usual hours — the short day before a holiday, the
+  /// late night after a match.
+  custom_hours
+}
+
 /// Every method is online. `cash` was removed once an order stopped being
 /// placeable without paying for it — see BUSINESS_LOGIC.md §5.
 enum PaymentMethod {
@@ -201,13 +212,14 @@ model Restaurant {
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  owner        User?              @relation("OwnedRestaurants", fields: [ownerId], references: [id])
-  branches     RestaurantBranch[]
-  reviews      Review[]
-  favorites    Favorite[]
-  assignments  StaffAssignment[]
-  invites      StaffInvite[]
-  auditEntries AuditLog[]
+  owner         User?              @relation("OwnedRestaurants", fields: [ownerId], references: [id])
+  branches      RestaurantBranch[]
+  reviews       Review[]
+  favorites     Favorite[]
+  assignments   StaffAssignment[]
+  invites       StaffInvite[]
+  auditEntries  AuditLog[]
+  bookingPolicy BookingPolicy?
 
   @@index([ownerId])
   @@map("restaurants")
@@ -259,6 +271,20 @@ model RestaurantBranch {
   /// flag said otherwise would be two answers to "can I book a table here".
   reservationsEnabled Boolean? @map("reservations_enabled")
 
+  /// When this branch takes bookings, or NULL to take them whenever the kitchen
+  /// is open (`open_hours`). Same shape as that column.
+  ///
+  /// A second set of hours rather than a reinterpretation of the first, because
+  /// they answer different questions: `open_hours` is when food is served, this
+  /// is when a table may be *held*. A place that serves from 10:00 but only
+  /// books the dining room for dinner had no way to say so — it had to lie
+  /// about its opening time, and the lie showed up on the public card.
+  ///
+  /// NULL is the common case and stays the default: most kitchens book every
+  /// hour they are open, and a branch should not have to restate its hours to
+  /// mean "the same".
+  bookingHours Json? @map("booking_hours")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -271,10 +297,109 @@ model RestaurantBranch {
   invites       StaffInvite[]
   auditEntries  AuditLog[]
   notifications StaffNotification[]
+  closures      BranchClosure[]
+  bookingPolicy BookingPolicy?
 
   @@index([restaurantId])
   @@index([lat, lng])
   @@map("restaurant_branches")
+}
+
+/// One day this branch does not run on its usual hours.
+///
+/// Dated exceptions to the weekly grid, and the reason the grid can stay a
+/// weekly grid: a holiday, a private hire, a short day before New Year. Read
+/// *before* `booking_hours` and `open_hours` — see `bookingWindowFor`.
+///
+/// A table rather than more JSON on the branch, because these rows are queried
+/// by date ("what is closed this month"), deleted individually, and attributed
+/// to whoever added them. None of that is comfortable inside a JSON column.
+model BranchClosure {
+  id       String      @id @default(uuid()) @db.Uuid
+  branchId String      @map("branch_id") @db.Uuid
+  /// The **local calendar date in Yerevan**, not an instant. A closure is a day
+  /// off, and a day off does not have a timezone — it is whatever the people
+  /// unlocking the door call today.
+  date     DateTime    @db.Date
+  kind     ClosureKind
+  /// Minutes from local midnight, set exactly when `kind` is `custom_hours` and
+  /// NULL otherwise. A CHECK constraint holds them to that; Prisma cannot
+  /// express it, so it lives in the migration and in DATABASE.md §5.
+  ///
+  /// `closes_minutes` may exceed 1440, which is how a night that ends after
+  /// midnight is written — see `openWindowFor`.
+  opensMinutes  Int?    @map("opens_minutes") @db.SmallInt
+  closesMinutes Int?    @map("closes_minutes") @db.SmallInt
+  /// Why, in whatever words the person typed. Shown back in the panel, because
+  /// "closed" with no reason attached is a row nobody dares delete.
+  reason        String? @db.VarChar(200)
+  /// Who added it. Nullable rather than required: a closure written by a
+  /// migration or a seed has no staff member behind it, and inventing one would
+  /// be worse than admitting there was none.
+  createdByStaffId String? @map("created_by_staff_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  branch RestaurantBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  /// One answer per day. A branch that is both shut and on short hours the same
+  /// day is two people having edited the same date, and the second edit should
+  /// replace the first rather than sit beside it.
+  @@unique([branchId, date])
+  @@map("branch_closures")
+}
+
+/// Booking rules for one restaurant, or for one branch.
+///
+/// **Every column is nullable, and NULL means "inherit".** The chain is
+/// platform constants → restaurant → branch, resolved in exactly one place:
+/// `resolveBookingPolicy` in `@amragrir/shared`. A chain sets its deposit once;
+/// the one branch with a two-hour seating overrides that field and no other.
+/// Changing a platform constant then still moves every restaurant that never
+/// disagreed with it, which is what makes the defaults worth having.
+///
+/// **One table for both levels**, with two nullable owners and a CHECK that
+/// exactly one is set — the same shape `payments` uses for order-or-reservation.
+/// Two tables with identical columns would be the same schema written twice,
+/// and the resolver would have to know which was which.
+///
+/// A row is created lazily, on the first save. Its absence and a row of all
+/// NULLs mean the same thing, and neither is a state anything has to special-case.
+model BookingPolicy {
+  id           String  @id @default(uuid()) @db.Uuid
+  restaurantId String? @unique @map("restaurant_id") @db.Uuid
+  branchId     String? @unique @map("branch_id") @db.Uuid
+
+  /// How long one booking holds its table. This is what makes 19:00 and 19:30
+  /// collide; the slot spacing below does not.
+  seatingMinutes Int? @map("seating_minutes") @db.SmallInt
+  /// The spacing of the times offered — the grain of the offer, not the length
+  /// of the booking.
+  slotMinutes    Int? @map("slot_minutes") @db.SmallInt
+  /// The largest party one booking may ask for. Not derived from the biggest
+  /// table: a branch may cap parties below what it could physically seat.
+  maxGuests      Int? @map("max_guests") @db.SmallInt
+  /// How far ahead the calendar runs, in days.
+  maxLeadDays    Int? @map("max_lead_days") @db.SmallInt
+  /// How close to the sitting a booking may still be made, in minutes. Without
+  /// it a table can be claimed a minute before the guest walks in, which is not
+  /// a booking — it is a surprise.
+  minLeadMinutes Int? @map("min_lead_minutes") @db.SmallInt
+  /// The deposit per guest, in AMD. Held, never charged as an extra — see
+  /// BUSINESS_LOGIC.md §3.
+  depositPerGuestAmd Int? @map("deposit_per_guest_amd")
+  /// Cancel this many hours ahead and the deposit comes back.
+  freeCancelHours    Int? @map("free_cancel_hours") @db.SmallInt
+  /// Whether a paid booking confirms itself, or waits for somebody to say yes.
+  autoConfirm        Boolean? @map("auto_confirm")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  restaurant Restaurant?       @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  branch     RestaurantBranch? @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@map("booking_policies")
 }
 
 model Table {
@@ -288,6 +413,11 @@ model Table {
   branch       RestaurantBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
   reservations Reservation[]
 
+  /// Two tables numbered 5 in one room is not a configuration, it is a typo —
+  /// and the moment it is discovered is the moment somebody is standing with a
+  /// guest looking for table 5. Scoped to the branch, because table 5 exists at
+  /// every address a chain has.
+  @@unique([branchId, tableNo])
   @@index([branchId])
   @@map("tables")
 }
@@ -529,6 +659,21 @@ model Reservation {
   tableId         String?           @map("table_id") @db.Uuid
   reservedFor     DateTime          @map("reserved_for") @db.Timestamptz(6)
   guests          Int               @db.SmallInt
+  /// How long this booking holds its table, snapshotted when it was made — the
+  /// same reason `orders.prep_min` is a snapshot rather than a lookup.
+  ///
+  /// A branch that lengthens its seating from 90 minutes to 120 has changed
+  /// what it offers from now on; it has not changed what it already promised
+  /// four people for Friday. Reading the live policy instead would silently
+  /// stretch every accepted booking, and two of them that fitted an hour apart
+  /// would begin to overlap on the same table — an overlap no constraint would
+  /// catch, because the unique index guards the start instant and the
+  /// serializable transaction that checks intervals has long since committed.
+  ///
+  /// NULL on rows written before this column existed, which is the honest
+  /// answer for them: nothing recorded it. Readers fall back to the resolved
+  /// policy, exactly as they did when there was nothing else to read.
+  seatingMinutes  Int?              @map("seating_minutes") @db.SmallInt
   depositAmd      Int               @map("deposit_amd")
   depositCredited Boolean           @default(false) @map("deposit_credited")
   status          ReservationStatus @default(pending)

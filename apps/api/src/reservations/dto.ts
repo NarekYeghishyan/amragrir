@@ -13,10 +13,20 @@ import {
 } from 'class-validator';
 import {
   ACTIVE_RESERVATION_STATUSES,
+  BOOKING_POLICY_LIMITS,
   PaymentMethod,
-  RESERVATION_MAX_GUESTS,
   ReservationStatus,
 } from '@amragrir/shared';
+
+/**
+ * The party-size cap here is the **platform ceiling**, not the restaurant's
+ * answer — that one lives in the branch's policy and is checked by the service,
+ * which is the only place that knows which branch is being asked about.
+ *
+ * It used to be `RESERVATION_MAX_GUESTS` (12), which made a validator the thing
+ * that decided no restaurant on the platform could take an event. What is left
+ * here is a guard against a slipped finger in a number field.
+ */
 
 export class AvailabilityQueryDto {
   /** Local calendar date in Yerevan, `YYYY-MM-DD`. */
@@ -25,7 +35,7 @@ export class AvailabilityQueryDto {
 
   @IsInt()
   @Min(1)
-  @Max(RESERVATION_MAX_GUESTS)
+  @Max(BOOKING_POLICY_LIMITS.maxGuests.max)
   @Type(() => Number)
   guests = 2;
 }
@@ -40,7 +50,7 @@ export class CreateReservationDto {
 
   @IsInt()
   @Min(1)
-  @Max(RESERVATION_MAX_GUESTS)
+  @Max(BOOKING_POLICY_LIMITS.maxGuests.max)
   @Type(() => Number)
   guests!: number;
 

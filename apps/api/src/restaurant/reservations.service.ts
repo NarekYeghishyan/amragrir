@@ -14,6 +14,7 @@ import {
   RESERVATION_INCLUDE,
   ReservationsService,
   freeCancellationUntil,
+  policyForReservation,
   type ReservationDetail,
 } from '../reservations/reservations.service';
 import { instantOf } from '../reservations/slots';
@@ -115,7 +116,10 @@ export class RestaurantReservationsService {
         ? null
         : depositOutcomeFor(
             dto.status,
-            freeCancellationUntil(reservation.reservedFor).getTime() > Date.now(),
+            freeCancellationUntil(
+              reservation.reservedFor,
+              policyForReservation(reservation),
+            ).getTime() > Date.now(),
           );
 
     return this.reservations.settle(reservation, dto.status, outcome, (tx) =>
