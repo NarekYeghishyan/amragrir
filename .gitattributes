@@ -1,0 +1,12 @@
+# Line endings are LF everywhere — in the repository *and* in the working tree.
+#
+# Not merely tidiness. `packages/ui/src/tokens.spec.ts` compares the generated
+# stylesheets to `renderTokensCss()` **byte for byte**, and that generator emits
+# `\n`. Without this file, a Windows clone with `core.autocrlf=true` gets CRLF
+# in its working tree, and the guard that keeps the web, admin and phone
+# palettes in step fails on invisible characters rather than on a real
+# divergence — on every checkout, for a reason nothing on screen explains.
+#
+# `text=auto` still lets git detect binaries (images, fonts, lockfile-adjacent
+# blobs) and leave them alone; `eol=lf` is what pins the checkout.
+* text=auto eol=lf
