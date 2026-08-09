@@ -1189,6 +1189,143 @@ Whether this branch takes table bookings.
   agree per address, or a guest is offered slots the booking endpoint refuses.
 - Recorded as `branch.bookings`.
 
+---
+
+## How a branch takes bookings
+
+The settings behind the booking calendar — the room's tables, the hours it holds
+them, the days it does not, and the numbers behind the offer. See
+BUSINESS_LOGIC.md §3 for what each one means.
+
+**Three permissions, because they are three jobs.** The furniture and the
+numbers are `branch:write` (a manager's decision); when the doors are open and
+which days they are not is `branch:hours`, which a shift holds — closing
+tomorrow because the freezer died has to be possible at 6pm without ringing
+anybody; the chain's defaults are `restaurant:write`.
+
+**Anything that narrows what the branch offers is checked against the bookings
+that already exist.** It answers `409`:
+
+```json
+{ "error": { "code": "CONFLICT",
+  "message": "This change leaves bookings the branch could not honour",
+  "details": {
+    "conflicts": [ { "reservationId","reservedFor","localDate","localTime",
+                     "guests","tableNo","customerName","reason":"table_gone" } ],
+    "resolution": "Repeat the request with ?force=true to save it anyway." } } }
+```
+
+`reason` is one of `table_gone` · `table_too_small` · `day_closed` ·
+`outside_hours`. Repeating the request with **`?force=true`** saves it and
+**cancels nothing** — somebody still has to ring these people. A conflict is
+deliberately "we could not seat them", never "we would not sell that now": a
+booking that no longer lands on a narrowed slot grid, sits past a shortened
+horizon, or exceeds a lowered party cap is *not* reported, because the table is
+still there and the door is still open at the promised hour. Warning about those
+would put a warning on every save, and a warning that is always there is one
+nobody reads.
+
+### GET /restaurant/branches/{id}/tables · *implemented* — `branch:read`
+- **Response 200:** `{ "items": [ { "id","tableNo","seats","zone","isActive","upcomingBookings" } ] }`
+- Inactive tables are listed too: they are the room's history, and hiding them
+  makes "why can nobody book table 7" unanswerable.
+- `upcomingBookings` is what makes switching one off a decision rather than a
+  click.
+
+### POST /restaurant/branches/{id}/tables · *implemented* — `branch:write`
+- **Body:** `{ "tableNo","seats", "zone"? }`
+- `409` when the branch already has that number — `UNIQUE (branch_id, table_no)`.
+- **A table is a bookable unit, not a piece of furniture.** A branch that takes
+  an event for a hundred enters one row with `seats: 100`; every existing
+  mechanism then applies unchanged.
+- Recorded as `table.create`.
+
+### PATCH /restaurant/tables/{id} · *implemented* — `branch:write`
+- **Body:** `{ "tableNo"?, "seats"?, "zone"?: string | null, "isActive"? }`
+- Shrinking a table or switching it off can strand a booking, so those two are
+  conflict-checked; a rename or a re-zone is not.
+- Recorded as `table.update`, or `table.delete` when it is being switched off.
+
+### DELETE /restaurant/tables/{id} · *implemented* — `branch:write`
+A soft delete: `is_active` goes false and the row survives, because the bookings
+that name it — including the ones already eaten — still have to resolve it.
+
+### PATCH /restaurant/branches/{id}/booking-hours · *implemented* — `branch:hours`
+- **Body:** `{ "bookingHours": { "mon": { "open":"18:00","close":"23:00" }, "sun": { "closed": true } } | null }`
+- `null` takes bookings whenever the kitchen is open, which is what every branch
+  means until it says otherwise.
+- **Validated, unlike `open_hours`.** That column is parsed forgivingly because
+  nothing validates it; a form is a different matter, and somebody who types
+  `10:0` is told rather than silently given the platform default at dinner time.
+- Recorded as `branch.booking_hours`.
+
+### GET · POST /restaurant/branches/{id}/closures · *implemented* — `branch:read` · `branch:hours`
+Dated exceptions: a holiday, a private hire, a short day.
+- **Body:** `{ "date":"2026-12-31", "kind":"closed" | "custom_hours", "open"?, "close"?, "reason"? }`
+- The list runs from today forward — a closure that has been and gone is history
+  nobody acts on.
+- `409` when that date already has an exception: a second edit replaces the
+  first rather than sitting beside it.
+- Recorded as `branch.closure_create`.
+
+### DELETE /restaurant/closures/{id} · *implemented* — `branch:hours`
+No force flag: giving a day back to the ordinary week cannot strand a booking
+made while it was shut. Recorded as `branch.closure_delete`.
+
+### GET /restaurant/branches/{id}/booking-policy · *implemented* — `branch:read`
+### GET /restaurant/restaurants/{id}/booking-policy · *implemented* — `branch:read`
+- **Response 200:** `{ "own","inherited","effective","sources","limits" }`
+- **Three sets, not one number.** `own` is what this level decided (nulls are
+  inheritance, not zeroes), `inherited` what it would follow if it decided
+  nothing, `effective` what is in force, and `sources` names `branch` /
+  `restaurant` / `platform` per field. A form given only the resolved number
+  cannot show a deliberate 90 apart from an inherited one — so a manager sets it
+  again to be sure, the branch acquires an override nobody wanted, and it stops
+  following the chain forever.
+- `limits` ships the bounds each field accepts, so the form and the API cannot
+  come to disagree about them.
+
+### PATCH /restaurant/branches/{id}/booking-policy · *implemented* — `branch:write`
+### PATCH /restaurant/restaurants/{id}/booking-policy · *implemented* — `restaurant:write`
+- **Body:** any of `seatingMinutes`, `slotMinutes`, `maxGuests`, `maxLeadDays`,
+  `minLeadMinutes`, `depositPerGuestAmd`, `freeCancelHours`, `autoConfirm`.
+- **An omitted field is left alone; an explicit `null` gives that question back
+  to the level above.** A form that could only send numbers would be one from
+  which inheritance, once broken, could never be restored.
+- **No conflict check, deliberately.** None of these can strand a booking: the
+  seating, the deposit and the cancellation window are snapshotted onto each
+  booking when it is made, and the rest describe what will be offered next.
+- The restaurant-level route is `restaurant:write` because it answers for every
+  address the chain has, and the manager of one does not get to decide for the
+  others.
+- Recorded as `booking_policy.update`, with `scope` naming which level.
+
+### GET /restaurant/branches/{id}/booking-preview · *implemented* — `branch:read`
+- **Query:** `date=YYYY-MM-DD`, `guests` (default 2)
+- **Response 200:** `{ "date","guests","reservationsEnabled","opens","closes",
+  "closureReason","slotCount","firstSlot","lastSlot","depositAmd","maxSeats","maxGuests" }`
+- What the settings would actually produce. A form full of numbers is not
+  something a person can check, and the mistakes here — hours that close before
+  they open, a seating longer than the evening — show up as an empty calendar
+  rather than as an error. This is where they get noticed by whoever caused
+  them.
+
+### PATCH /restaurant/reservations/{id}/table · *implemented* — `reservations:advance`
+- **Body:** `{ "tableId" }`
+- The one place a person overrides the automatic assignment, which picks the
+  smallest table that fits — right for filling a room and wrong about once an
+  evening.
+- The guest, the time, the deposit and its terms are left exactly alone. This is
+  furniture, not a renegotiation.
+- `409` when the table is taken for this booking's own seating. The check and
+  the move run in one **serializable** transaction, so two people reseating two
+  parties onto one table cannot both succeed.
+- Each existing booking is measured by **its own** snapshotted seating, so a
+  branch that has changed its seating length does not accidentally double-book.
+- Recorded as `reservation.table`, with the table **numbers** in
+  `before`/`after` — a year later "moved from 4 to 11" is readable and a pair of
+  UUIDs is not.
+
 ### GET /restaurant/restaurants/{id}/people · *implemented* — `staff:read`
 Who holds a role over the restaurant **itself** — its admins.
 - **Query:** `page` (default 1), `limit` (default 50, **max 50**)

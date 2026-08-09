@@ -209,6 +209,28 @@ across several tables is deliberately **not** supported: it would move
 exclusivity off `UNIQUE (table_id, active_slot)` and onto a join table, which is
 its own piece of work.
 
+### Changing any of this, once bookings exist (implemented)
+
+Every setting that **narrows** what a branch offers is checked against the
+bookings already on the books before it is saved — removing a table, shrinking
+one, moving the booking hours, marking a day shut. The save answers `409` with
+the list; repeating it with `?force=true` goes through and **cancels nothing**.
+Behind each of those bookings is a guest with plans and a deposit already taken,
+so a person rings them; a panel that quietly undid them is not one worth having.
+
+**A conflict is "we could not seat them", never "we would not sell that now".**
+Getting that line wrong in the generous direction puts a warning on every save,
+and a warning that is always there is a warning nobody reads. So a table that
+has gone or shrunk below the party, and a day or an hour the branch would be
+shut, are conflicts — while a booking that no longer lands on a narrowed slot
+grid, sits past a shortened horizon, or exceeds a lowered party cap is not: the
+table is still there, still big enough, on a day the branch is still open.
+
+The policy numbers therefore produce **no** conflicts at all, and that follows
+from the snapshots rather than from leniency: the seating, the deposit and the
+cancellation window are frozen onto each booking, and the rest describe what is
+offered next.
+
 ### When bookings are taken (implemented)
 
 Three sources, most specific first — resolved by `bookingWindowFor`, the one
@@ -296,6 +318,12 @@ product promise: a guest who cancels in time never had money taken.
 | Cancelled < 2h before | **captured** | It could not be resold; that is what the deposit compensates. |
 | No-show | **captured** | Same, without even the warning. |
 | Completed | **captured and credited** | The guest ate; it comes off the bill rather than being an extra charge. |
+
+**The terms travel with the booking, not with the branch.** Both `deposit_amd`
+and `free_cancel_hours` are snapshotted onto the row when it is made, so a
+restaurant that later raises its deposit or lengthens its cancellation window
+has made an offer to whoever books next — never an edit to an agreement somebody
+has already paid on.
 
 `depositOutcomeFor` in `packages/shared` answers this, and both the guest's
 cancel path and the owner panel call it — so the two cannot disagree about who

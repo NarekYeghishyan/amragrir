@@ -7,6 +7,7 @@ import { RestaurantOrdersService } from './orders.service';
 import { MenuService } from './menu.service';
 import { MenuHistoryService } from './menu-history.service';
 import { RestaurantReservationsService } from './reservations.service';
+import { BookingSettingsService } from './booking-settings.service';
 
 /** Reuses `OrdersService.transition` and `ReservationsService.settle` rather
  *  than writing its own status updates, so the refund rules, the deposit
@@ -22,6 +23,7 @@ import { RestaurantReservationsService } from './reservations.service';
     MenuService,
     MenuHistoryService,
     RestaurantReservationsService,
+    BookingSettingsService,
   ],
 })
 export class RestaurantModule {}

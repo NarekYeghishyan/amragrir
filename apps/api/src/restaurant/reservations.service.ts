@@ -1,10 +1,16 @@
-import { Injectable, UnprocessableEntityException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   ACTIVE_RESERVATION_STATUSES,
   AuditAction,
   Permission,
   ReservationStatus,
+  TERMINAL_RESERVATION_STATUSES,
   canTransitionReservation,
   depositOutcomeFor,
 } from '@amragrir/shared';
@@ -17,10 +23,11 @@ import {
   policyForReservation,
   type ReservationDetail,
 } from '../reservations/reservations.service';
-import { instantOf } from '../reservations/slots';
+import { instantOf, seatingRange, seatingsOverlap } from '../reservations/slots';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
 import { branchScope } from '../staff/scope';
 import { ListStaffReservationsDto, SetReservationStatusDto } from '../reservations/dto';
+import type { SetReservationTableDto } from './booking-settings.dto';
 
 export interface StaffReservationItem extends ReservationDetail {
   customerName: string | null;
@@ -86,6 +93,126 @@ export class RestaurantReservationsService {
   }
 
   /**
+   * Puts a booking at a different table.
+   *
+   * The one place a person overrides the server's choice. Assignment is
+   * automatic and picks the smallest table that fits, which is right for
+   * filling a room and wrong roughly once an evening — the party with a
+   * pushchair, the couple who asked for the window, the four who turned up as
+   * six and can be squeezed onto the big table nobody booked.
+   *
+   * Everything else about the booking is left exactly as it is: the guest, the
+   * time, the deposit and its terms. This is furniture, not a renegotiation.
+   *
+   * The new table has to be free for this booking's own seating, and the check
+   * runs in the same **serializable** transaction as the move — otherwise two
+   * people reseating two parties onto one table at once would both succeed. The
+   * unique index on `(table_id, active_slot)` is the second line, and catches
+   * the exact-same-start case even if that isolation level is ever relaxed.
+   */
+  async setTable(
+    staff: StaffJwtPayload,
+    id: string,
+    dto: SetReservationTableDto,
+  ): Promise<ReservationDetail> {
+    const reservation = await this.reservations.loadForStaff({
+      id,
+      branch: branchScope(staff.scopes, Permission.ReservationsAdvance),
+    });
+
+    if (TERMINAL_RESERVATION_STATUSES.includes(reservation.status as ReservationStatus)) {
+      throw new UnprocessableEntityException(
+        `A booking that is ${reservation.status} is not sitting anywhere to be moved`,
+      );
+    }
+    if (reservation.tableId === dto.tableId) {
+      // Not an error, and not a write either: re-saving the table somebody is
+      // already at would put a line in the audit feed saying nothing happened.
+      return this.reservations.toDetail(reservation);
+    }
+
+    const table = await this.prisma.table.findFirst({
+      where: { id: dto.tableId, branchId: reservation.branchId, isActive: true },
+    });
+    if (!table) {
+      // Scoped to this booking's own branch, so a table id from another
+      // restaurant reads as "no such table" rather than as a permission error.
+      throw new NotFoundException('Table not found at this branch');
+    }
+    if (table.seats < reservation.guests) {
+      throw new UnprocessableEntityException({
+        message: 'That table does not seat this party',
+        seats: table.seats,
+        guests: reservation.guests,
+      });
+    }
+
+    const policy = policyForReservation(reservation);
+    const seating = reservation.seatingMinutes ?? policy.seatingMinutes;
+    const range = seatingRange(reservation.reservedFor);
+    const from = reservation.table?.tableNo ?? null;
+
+    const moved = await this.prisma
+      .$transaction(
+        async (tx) => {
+          const taken = await tx.reservation.findMany({
+            where: {
+              tableId: table.id,
+              id: { not: reservation.id },
+              status: { in: [...ACTIVE_RESERVATION_STATUSES] },
+              reservedFor: { gte: range.from, lte: range.to },
+            },
+            select: { reservedFor: true, seatingMinutes: true },
+          });
+
+          const clash = taken.some((booking) =>
+            seatingsOverlap(
+              booking.reservedFor,
+              reservation.reservedFor,
+              booking.seatingMinutes ?? policy.seatingMinutes,
+              seating,
+            ),
+          );
+          if (clash) {
+            throw new ConflictException('That table is taken at this time');
+          }
+
+          const updated = await tx.reservation.update({
+            where: { id: reservation.id },
+            data: { tableId: table.id },
+            include: RESERVATION_INCLUDE,
+          });
+
+          await this.audit.record(tx, staff, {
+            action: AuditAction.ReservationTable,
+            entityId: id,
+            scope: {
+              restaurantId: reservation.branch.restaurantId,
+              branchId: reservation.branchId,
+            },
+            // Numbers rather than ids: a year later "moved from 4 to 11" is
+            // readable and a pair of UUIDs is not.
+            before: { tableNo: from },
+            after: { tableNo: table.tableNo },
+          });
+
+          return updated;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+      .catch((err: unknown) => {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+          // The unique index fired: somebody took this table for this exact
+          // start while the check above was running.
+          throw new ConflictException('That table is taken at this time');
+        }
+        throw err;
+      });
+
+    return this.reservations.toDetail(moved);
+  }
+
+  /**
    * Moves a booking through its lifecycle, applying the deposit rule.
    *
    * The rule itself lives in `shared` — a no-show keeps the deposit, a
@@ -116,10 +243,8 @@ export class RestaurantReservationsService {
         ? null
         : depositOutcomeFor(
             dto.status,
-            freeCancellationUntil(
-              reservation.reservedFor,
-              policyForReservation(reservation),
-            ).getTime() > Date.now(),
+            freeCancellationUntil(reservation, policyForReservation(reservation)).getTime() >
+              Date.now(),
           );
 
     return this.reservations.settle(reservation, dto.status, outcome, (tx) =>

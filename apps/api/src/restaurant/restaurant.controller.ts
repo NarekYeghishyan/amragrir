@@ -19,6 +19,18 @@ import { RestaurantOrdersService } from './orders.service';
 import { MenuService } from './menu.service';
 import { MenuHistoryService } from './menu-history.service';
 import { RestaurantReservationsService } from './reservations.service';
+import { BookingSettingsService } from './booking-settings.service';
+import {
+  BookingPreviewDto,
+  CreateClosureDto,
+  ForceDto,
+  SetBookingHoursDto,
+  SetReservationTableDto,
+  TableDto,
+  UpdateBookingPolicyDto,
+  UpdateTableDto,
+  isForced,
+} from './booking-settings.dto';
 import { ListStaffReservationsDto, SetReservationStatusDto } from '../reservations/dto';
 import { ListQueueDto, SetOrderReminderDto, SetOrderStatusDto } from './dto';
 import {
@@ -54,6 +66,7 @@ export class RestaurantController {
     private readonly menu: MenuService,
     private readonly menuHistory: MenuHistoryService,
     private readonly reservations: RestaurantReservationsService,
+    private readonly bookingSettings: BookingSettingsService,
     // The people query lives with the rest of the reach-scoped people queries
     // rather than being reimplemented here: "you only see your own reach" is
     // that service's whole job, and a second copy of it is a second place for
@@ -115,6 +128,24 @@ export class RestaurantController {
     @Query() query: ListStaffReservationsDto,
   ) {
     return this.reservations.list(staff, query);
+  }
+
+  /**
+   * Puts a booking at a different table.
+   *
+   * `reservations:advance`, the same permission as moving it through its
+   * statuses, because it is the same job: the guest is still coming and the
+   * deposit is untouched, somebody on the floor has just decided they are
+   * better off by the window.
+   */
+  @Patch('reservations/:id/table')
+  @RequiresPermission(Permission.ReservationsAdvance)
+  setReservationTable(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetReservationTableDto,
+  ) {
+    return this.reservations.setTable(staff, id, dto);
   }
 
   @Patch('reservations/:id/status')
@@ -314,6 +345,158 @@ export class RestaurantController {
     @Body() dto: SetBranchServicesDto,
   ) {
     return this.menu.setBranchServices(staff, id, dto);
+  }
+
+  // ── how a branch takes bookings ───────────────────────────────────────────
+  //
+  // Four things on three permissions, because they are three different jobs.
+  // The room's furniture and the numbers behind the offer are `branch:write` —
+  // a manager's decision. When the doors are open, and which days they are not,
+  // is `branch:hours`, which a shift holds: closing tomorrow because the
+  // freezer died is exactly the sort of thing the person on the floor has to be
+  // able to do at 6pm without ringing anybody.
+  //
+  // Every one of these that *narrows* what the branch offers answers `409` with
+  // the bookings it would strand, and goes through on a repeat carrying
+  // `?force=true`. None of them cancels a booking.
+
+  @Get('branches/:id/tables')
+  @RequiresPermission(Permission.BranchRead)
+  listTables(@CurrentStaff() staff: StaffJwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.bookingSettings.listTables(staff, id);
+  }
+
+  @Post('branches/:id/tables')
+  @RequiresPermission(Permission.BranchWrite)
+  createTable(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: TableDto,
+  ) {
+    return this.bookingSettings.createTable(staff, id, dto);
+  }
+
+  @Patch('tables/:id')
+  @RequiresPermission(Permission.BranchWrite)
+  updateTable(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateTableDto,
+    @Query() query: ForceDto,
+  ) {
+    return this.bookingSettings.updateTable(staff, id, dto, isForced(query));
+  }
+
+  /** Out of use, not out of the database — the bookings that name this table,
+   *  including the ones already eaten, still have to resolve it. */
+  @Delete('tables/:id')
+  @RequiresPermission(Permission.BranchWrite)
+  deleteTable(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ForceDto,
+  ) {
+    return this.bookingSettings.deleteTable(staff, id, isForced(query));
+  }
+
+  /** When tables may be held, or `null` to hold them whenever the kitchen is
+   *  open. On `branch:hours`, beside the open/closed switch it belongs with. */
+  @Patch('branches/:id/booking-hours')
+  @RequiresPermission(Permission.BranchHours)
+  setBookingHours(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetBookingHoursDto,
+    @Query() query: ForceDto,
+  ) {
+    return this.bookingSettings.setBookingHours(staff, id, dto.bookingHours, isForced(query));
+  }
+
+  @Get('branches/:id/closures')
+  @RequiresPermission(Permission.BranchRead)
+  listClosures(@CurrentStaff() staff: StaffJwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.bookingSettings.listClosures(staff, id);
+  }
+
+  @Post('branches/:id/closures')
+  @RequiresPermission(Permission.BranchHours)
+  createClosure(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateClosureDto,
+    @Query() query: ForceDto,
+  ) {
+    return this.bookingSettings.createClosure(staff, id, dto, isForced(query));
+  }
+
+  /** No force flag: giving a day back to the ordinary week cannot strand a
+   *  booking made while it was shut. */
+  @Delete('closures/:id')
+  @RequiresPermission(Permission.BranchHours)
+  deleteClosure(@CurrentStaff() staff: StaffJwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.bookingSettings.deleteClosure(staff, id);
+  }
+
+  /** Answers with three sets — what this branch decided, what it would inherit,
+   *  and what is therefore in force — so a form can tell a deliberate 90 from
+   *  an inherited one. */
+  @Get('branches/:id/booking-policy')
+  @RequiresPermission(Permission.BranchRead)
+  branchPolicy(@CurrentStaff() staff: StaffJwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.bookingSettings.branchPolicy(staff, id);
+  }
+
+  /** An explicit `null` in a field is this branch handing that question back to
+   *  its restaurant — the only way an override is ever undone, and why the DTO
+   *  accepts nulls rather than only numbers. */
+  @Patch('branches/:id/booking-policy')
+  @RequiresPermission(Permission.BranchWrite)
+  setBranchPolicy(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateBookingPolicyDto,
+  ) {
+    return this.bookingSettings.setBranchPolicy(staff, id, dto);
+  }
+
+  @Get('restaurants/:id/booking-policy')
+  @RequiresPermission(Permission.BranchRead)
+  restaurantPolicy(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.bookingSettings.restaurantPolicy(staff, id);
+  }
+
+  /** `restaurant:write`, unlike the branch one: this is the chain's answer for
+   *  every address it has, and the manager of one of them does not get to make
+   *  it for the others. */
+  @Patch('restaurants/:id/booking-policy')
+  @RequiresPermission(Permission.RestaurantWrite)
+  setRestaurantPolicy(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateBookingPolicyDto,
+  ) {
+    return this.bookingSettings.setRestaurantPolicy(staff, id, dto);
+  }
+
+  /**
+   * The day these settings would actually produce.
+   *
+   * A form full of numbers is not something a person can check, and the
+   * mistakes here — hours that close before they open, a seating longer than
+   * the evening — show up as an empty calendar rather than as an error. This is
+   * where they get noticed by whoever caused them.
+   */
+  @Get('branches/:id/booking-preview')
+  @RequiresPermission(Permission.BranchRead)
+  bookingPreview(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: BookingPreviewDto,
+  ) {
+    return this.bookingSettings.preview(staff, id, query);
   }
 
   /** Whether this branch takes table bookings, or `null` to follow the

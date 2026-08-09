@@ -110,6 +110,51 @@ export const AuditAction = {
 
   /** Seated, completed, no-showed. */
   ReservationStatus: 'reservation.status',
+
+  /**
+   * A booking moved to a different table by hand.
+   *
+   * Apart from `reservation.status` because it is a different decision: the
+   * guest is still coming and the deposit is untouched, somebody has just put
+   * them somewhere else. `before`/`after` carry the table numbers rather than
+   * the ids — a year later "moved from 4 to 11" is readable and a pair of UUIDs
+   * is not.
+   */
+  ReservationTable: 'reservation.table',
+
+  /** A table added to a branch's room. */
+  TableCreate: 'table.create',
+  /** Its number, seats or zone changed. */
+  TableUpdate: 'table.update',
+  /**
+   * A table taken out of use. A soft delete — `is_active` goes false and the
+   * row survives, so bookings that already name it still resolve.
+   */
+  TableDelete: 'table.delete',
+
+  /**
+   * When this branch takes bookings, as opposed to when it serves food.
+   *
+   * `after.bookingHours: null` is the branch handing the question back to its
+   * opening hours, which is a different event from writing hours that happen to
+   * match them — and the null is what keeps the two readable apart later.
+   */
+  BranchBookingHours: 'branch.booking_hours',
+
+  /** A day marked shut, or put on different hours. */
+  BranchClosureCreate: 'branch.closure_create',
+  /** That day handed back to the ordinary week. */
+  BranchClosureDelete: 'branch.closure_delete',
+
+  /**
+   * Booking rules changed, at a branch or across a restaurant.
+   *
+   * One action for both levels, with `scope` saying which — the fields are the
+   * same fields and the decision is the same decision. `after` carrying `null`
+   * for a field is that level giving the question back up the chain, which is
+   * emphatically not the same as setting it to the value it would inherit.
+   */
+  BookingPolicy: 'booking_policy.update',
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 
@@ -132,6 +177,9 @@ export const AuditEntity = {
    *  number is a thing staff do *to* a customer record. */
   Customer: 'customer',
   Reservation: 'reservation',
+  Table: 'table',
+  BranchClosure: 'branch_closure',
+  BookingPolicy: 'booking_policy',
 } as const;
 export type AuditEntity = (typeof AuditEntity)[keyof typeof AuditEntity];
 
@@ -158,6 +206,16 @@ export const AUDIT_ACTION_ENTITY: Readonly<Record<AuditAction, AuditEntity>> = {
   [AuditAction.StaffImpersonate]: AuditEntity.StaffUser,
   [AuditAction.CustomerPhoneView]: AuditEntity.Customer,
   [AuditAction.ReservationStatus]: AuditEntity.Reservation,
+  [AuditAction.ReservationTable]: AuditEntity.Reservation,
+  [AuditAction.TableCreate]: AuditEntity.Table,
+  [AuditAction.TableUpdate]: AuditEntity.Table,
+  [AuditAction.TableDelete]: AuditEntity.Table,
+  // The hours belong to the branch row, so the entry points at the branch —
+  // there is no separate thing to name.
+  [AuditAction.BranchBookingHours]: AuditEntity.Branch,
+  [AuditAction.BranchClosureCreate]: AuditEntity.BranchClosure,
+  [AuditAction.BranchClosureDelete]: AuditEntity.BranchClosure,
+  [AuditAction.BookingPolicy]: AuditEntity.BookingPolicy,
 } as const;
 
 /**

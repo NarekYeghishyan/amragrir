@@ -365,8 +365,7 @@ export class ReservationsService {
     }
 
     const inFreeWindow =
-      freeCancellationUntil(reservation.reservedFor, policyForReservation(reservation)).getTime() >
-      Date.now();
+      freeCancellationUntil(reservation, policyForReservation(reservation)).getTime() > Date.now();
     const outcome = depositOutcomeFor(ReservationStatus.Cancelled, inFreeWindow);
 
     return this.settle(reservation, ReservationStatus.Cancelled, outcome);
@@ -459,7 +458,7 @@ export class ReservationsService {
   }
 
   toDetail(row: ReservationRow): ReservationDetail {
-    const freeUntil = freeCancellationUntil(row.reservedFor, policyForReservation(row));
+    const freeUntil = freeCancellationUntil(row, policyForReservation(row));
 
     return {
       id: row.id,
@@ -628,6 +627,11 @@ export class ReservationsService {
                 // not retrospectively changed what this guest was promised.
                 seatingMinutes: input.policy.seatingMinutes,
                 depositAmd: input.depositAmd,
+                // The other half of the same promise: this much money, and
+                // returnable until this long before. Both frozen together, so a
+                // branch that later moves its cancellation window moves it for
+                // whoever books next and for nobody who has already paid.
+                freeCancelHours: input.policy.freeCancelHours,
                 // A booking whose deposit is held and whose table is chosen has
                 // nothing left to decide, so it confirms itself unless the
                 // branch has asked to read every one first.
@@ -707,12 +711,21 @@ export const RESERVATION_INCLUDE = {
 /**
  * The moment after which cancelling stops returning the deposit.
  *
- * Takes the policy rather than reading a constant, because the window is the
- * branch's to set: a place that turns tables over all evening wants more notice
- * than one that seats twelve people a night.
+ * Read off **the booking**, not off the branch's current policy. The window is
+ * part of what the guest agreed to when they paid, alongside the amount — and
+ * `deposit_amd` was already frozen while this was still being looked up live,
+ * so a branch moving its cancellation window from two hours to twenty-four
+ * moved it for people who had already handed over money.
+ *
+ * The policy is still passed, for rows written before the column existed:
+ * nothing recorded their terms, and the resolved policy is what decided them.
  */
-export function freeCancellationUntil(reservedFor: Date, policy: ResolvedBookingPolicy): Date {
-  return new Date(reservedFor.getTime() - policy.freeCancelHours * 3_600_000);
+export function freeCancellationUntil(
+  reservation: { reservedFor: Date; freeCancelHours: number | null },
+  policy: ResolvedBookingPolicy,
+): Date {
+  const hours = reservation.freeCancelHours ?? policy.freeCancelHours;
+  return new Date(reservation.reservedFor.getTime() - hours * 3_600_000);
 }
 
 /** The rules a stored booking's branch runs under — what the read paths need in

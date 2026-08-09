@@ -98,7 +98,7 @@ screens from the same map the API enforces.
 | `menu:read` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `menu:availability` (sold out) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `branch:read` / `branch:hours` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `branch:write` (address, phone) | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `branch:write` (address, phone, tables, booking policy) | ❌ | ✅ | ✅ | ✅ | ✅ |
 | `tables:write` | ❌ | ✅ | ✅ | ✅ | ✅ |
 | `menu:write` (prices, dishes) | ❌ | ❌ | ✅ | ✅ | ✅ |
 | `branch:create` | ❌ | ❌ | ✅ | ✅ | ✅ |
@@ -149,6 +149,11 @@ is reading a column.
 | `branch.create` | `MenuService` | `branch:create` |
 | `branch.update` | `MenuService` | `branch:write` |
 | `branch.status` | `MenuService` | `branch:hours` |
+| `table.create` / `table.update` / `table.delete` | `BookingSettingsService` | `branch:write` |
+| `branch.booking_hours` | `BookingSettingsService` | `branch:hours` |
+| `branch.closure_create` / `branch.closure_delete` | `BookingSettingsService` | `branch:hours` |
+| `booking_policy.update` | `BookingSettingsService` | `branch:write` · `restaurant:write` |
+| `reservation.table` | `RestaurantReservationsService` | `reservations:advance` |
 | `staff.invite` | `InvitesService` | `staff:invite` |
 | `staff.invite_revoke` / `staff.assignment_revoke` | `StaffDirectoryService` | `staff:invite` / `staff:revoke` |
 | `staff.impersonate` | `ImpersonationService` | `staff:impersonate` |
@@ -325,6 +330,9 @@ Both levels now exist, and the split is the permission:
 |---|---|---|---|
 | `restaurants.*` | `restaurant_admin`+ | `restaurant:write` | The **default** every branch inherits |
 | `restaurant_branches.*` | `restaurant_manager`+ | `branch:write` | What **this address** offers |
+| `tables` · `booking_policies` (branch) | `restaurant_manager`+ | `branch:write` | The room, and the numbers behind the offer |
+| `restaurant_branches.booking_hours` · `branch_closures` | `branch_staff`+ | `branch:hours` | When the doors are open, and which days they are not |
+| `booking_policies` (restaurant) | `restaurant_admin`+ | `restaurant:write` | The chain's defaults, for every address it has |
 
 A manager already holds `branch:write` for their branch's address and phone, so
 a photograph and a service list for that same address fit it exactly — they

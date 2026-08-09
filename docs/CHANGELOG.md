@@ -7,6 +7,60 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — The back office can finally write those numbers
+
+Stage two: fourteen endpoints under `/restaurant` for the room's tables, the
+hours a branch holds them, the days it does not, and the booking policy at both
+levels — plus moving a booking to a different table by hand. Stage one taught
+the booking path to *read* these settings; nothing could write them.
+
+**Zero new permissions.** Tables and the policy are `branch:write` (a manager's
+decision), the hours and the closed days are `branch:hours` (a shift's — closing
+tomorrow because the freezer died has to be possible at 6pm without ringing
+anybody), and the chain's defaults are `restaurant:write`. The split fell out of
+the existing roles rather than being designed onto them.
+
+**Every narrowing change is checked against the bookings that already exist**,
+answers `409` with the list — table, time, party, who to ring — and goes through
+on a repeat carrying `?force=true`. It cancels nothing either way: behind each
+booking is a guest with plans and a deposit already taken.
+
+The line that took the most care is what *counts* as a conflict. It is "we could
+not seat them", never "we would not sell that now". A table that has gone or
+shrunk below the party, a day or an hour the branch would be shut — those break
+a booking. A booking that no longer lands on a narrowed slot grid, sits past a
+shortened horizon, or exceeds a lowered party cap does not: the table is still
+there, still big enough, on a day the branch is still open. Reporting those
+would put a warning on every save, and a warning that is always there is a
+warning nobody reads. It follows that the policy numbers produce no conflicts at
+all — not from leniency, but because the seating, the deposit and the
+cancellation window are snapshotted onto each booking.
+
+Which is why this stage also carries **`reservations.free_cancel_hours`**.
+`deposit_amd` was already frozen while the cancellation window was still read
+live — half a promise fixed and half floating, so a branch moving its window
+from two hours to twenty-four moved it for people who had already paid. The two
+are one sentence, *this much money, returnable until then*, and they are now
+frozen together.
+
+Reading a policy answers with **three** sets: what this level decided, what it
+would inherit if it decided nothing, and what is therefore in force, plus which
+level each answer came from. A form given only the resolved number cannot show a
+deliberate 90 apart from an inherited one — so a manager sets it again to be
+sure, the branch acquires an override nobody wanted, and it stops following the
+chain forever. An explicit `null` in a PATCH is how an override is undone.
+
+`GET /booking-preview` answers what the settings would actually produce — "41
+slots, 12:00 to 21:30, largest party 100". A form full of numbers is not
+something a person can check, and the mistakes here (hours that close before
+they open, a seating longer than the evening) surface as an empty calendar
+rather than as an error.
+
+Verified against the running API, not only in tests: a 100-seat banquet hall
+entered as one table, the branch cap raised to 120, and `GET /availability`
+then offering 23 slots for a party of eighty at a 160 000֏ deposit — the whole
+chain from the back office to the public calendar.
+
 ### 2026-08-10 — Every number behind a booking becomes the restaurant's
 
 Stage one of the table-booking admin module: the foundation, with no screen

@@ -103,18 +103,30 @@ describe('depositOutcomeFor', () => {
 });
 
 describe('freeCancellationUntil', () => {
+  const reservedFor = instantOf('2026-08-01', 19 * 60);
+
   it('is two hours before the booking', () => {
-    const reservedFor = instantOf('2026-08-01', 19 * 60);
-    const cutoff = freeCancellationUntil(reservedFor, PLATFORM_BOOKING_POLICY);
+    const cutoff = freeCancellationUntil(
+      { reservedFor, freeCancelHours: null },
+      PLATFORM_BOOKING_POLICY,
+    );
     expect(reservedFor.getTime() - cutoff.getTime()).toBe(2 * 3_600_000);
   });
 
-  it('follows the branch when the branch has its own answer', () => {
-    // The whole point of the policy chain: a place that turns tables over all
-    // evening wants more notice than the platform's default two hours.
-    const reservedFor = instantOf('2026-08-01', 19 * 60);
+  it('falls back to the branch’s policy for a booking that recorded no terms', () => {
+    // Rows written before `free_cancel_hours` existed. Nothing recorded their
+    // terms, and the resolved policy is what decided them at the time.
     const policy = resolveBookingPolicy({ freeCancelHours: 24 }, null);
-    const cutoff = freeCancellationUntil(reservedFor, policy);
+    const cutoff = freeCancellationUntil({ reservedFor, freeCancelHours: null }, policy);
     expect(reservedFor.getTime() - cutoff.getTime()).toBe(24 * 3_600_000);
+  });
+
+  it('holds the branch to the terms the guest actually agreed to', () => {
+    // The booking was taken under a two-hour window; the branch has since moved
+    // to twenty-four. The guest keeps the two — a policy change is an offer to
+    // whoever books next, not an edit to an agreement somebody already paid on.
+    const policy = resolveBookingPolicy({ freeCancelHours: 24 }, null);
+    const cutoff = freeCancellationUntil({ reservedFor, freeCancelHours: 2 }, policy);
+    expect(reservedFor.getTime() - cutoff.getTime()).toBe(2 * 3_600_000);
   });
 });

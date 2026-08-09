@@ -675,6 +675,19 @@ model Reservation {
   /// policy, exactly as they did when there was nothing else to read.
   seatingMinutes  Int?              @map("seating_minutes") @db.SmallInt
   depositAmd      Int               @map("deposit_amd")
+  /// How many hours before the sitting this booking's deposit stops being
+  /// refundable — snapshotted for the same reason `deposit_amd` is.
+  ///
+  /// The two are one promise: *this much money, returnable until then*. Half of
+  /// it was already frozen and the other half was read live, so a branch that
+  /// moved its cancellation window from two hours to twenty-four moved it for
+  /// people who had already paid — changing the terms of an agreement after the
+  /// guest accepted them. Refunds are decided from this column, so a policy
+  /// change now applies to bookings made after it and no others.
+  ///
+  /// NULL on rows written before it existed; readers fall back to the resolved
+  /// policy, which is what decided them at the time.
+  freeCancelHours Int?              @map("free_cancel_hours") @db.SmallInt
   depositCredited Boolean           @default(false) @map("deposit_credited")
   status          ReservationStatus @default(pending)
   // Mirrors `reservedFor` while this booking holds the table, and is set to
