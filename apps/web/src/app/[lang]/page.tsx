@@ -1,10 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { api } from '@/lib/api';
 import { LANGUAGES, parseLanguage, t } from '@/lib/language';
 import { SITE_URL, homePath, hreflangFor, searchPath } from '@/lib/site';
-import { parseFilters, toApiQuery, hasAnyFilter } from '@/lib/filters';
+import { LOCATION_COOKIE, parsePlace, placeQuery } from '@/lib/locations';
+import { forOrigin, homeHref, parseFilters, toApiQuery, hasAnyFilter } from '@/lib/filters';
+import { favoriteIds } from '@/lib/favorites';
 import { RestaurantCard } from '@/components/RestaurantCard';
 import { FilterChips } from '@/components/FilterChips';
 import { Hero } from '@/components/Hero';
@@ -42,10 +45,20 @@ export default async function HomePage({ params, searchParams }: Props) {
     notFound();
   }
   const label = t(language);
-  const filters = parseFilters(sp);
 
-  // In parallel: two independent reads should not cost two round trips.
-  const [restaurants, categories] = await Promise.all([
+  // Where the visitor said they are, from the header's picker. Reading a cookie
+  // here costs nothing this page had not already spent: it takes a query string,
+  // so it renders per request either way. It would cost the whole catalogue if
+  // it were read in the layout, which is why the header control reads it in the
+  // browser instead (see `lib/locations.ts`).
+  const place = parsePlace((await cookies()).get(LOCATION_COOKIE)?.value);
+  const filters = forOrigin(parseFilters(sp), place !== null);
+
+  // In parallel: three independent reads should not cost three round trips.
+  // The favourites go in here rather than beside the cards for that reason —
+  // they are what fills in the hearts, and for a visitor who is not signed in
+  // the call is skipped entirely and the set comes back empty.
+  const [restaurants, categories, favorites] = await Promise.all([
     // One row per restaurant, not one per branch. A row from `/restaurants` is
     // normally a branch, which is right for the app — it sends coordinates and
     // shows how far each one is. This app has no coordinates and one page per
@@ -53,9 +66,20 @@ export default async function HomePage({ params, searchParams }: Props) {
     // cards that all linked to the same page, and counted branches in the
     // heading. Grouping also picks the branch that page resolves to, so a card
     // reading "open · 12 min" agrees with what opens behind it.
-    api.restaurants(language, { limit: 24, groupByRestaurant: 1, ...toApiQuery(filters) }),
+    // Coordinates go with it when there are any: they are what makes each card
+    // able to say how far away it is, and what `sort=nearest` sorts by.
+    api.restaurants(language, {
+      limit: 24,
+      groupByRestaurant: 1,
+      ...placeQuery(place),
+      ...toApiQuery(filters),
+    }),
     api.categories(language),
+    favoriteIds(language),
   ]);
+
+  // Where a heart returns to: this listing with its filters still on.
+  const returnTo = homeHref(filters, language);
 
   return (
     <>
@@ -79,7 +103,7 @@ export default async function HomePage({ params, searchParams }: Props) {
         </ul>
       )}
 
-      <FilterChips state={filters} language={language} />
+      <FilterChips state={filters} language={language} hasOrigin={place !== null} />
 
       {/* The hero CTA anchors here. */}
       <div className="section-head">
@@ -94,7 +118,13 @@ export default async function HomePage({ params, searchParams }: Props) {
       ) : (
         <div className="grid">
           {restaurants.items.map((restaurant) => (
-            <RestaurantCard key={restaurant.id} restaurant={restaurant} language={language} />
+            <RestaurantCard
+              key={restaurant.id}
+              restaurant={restaurant}
+              language={language}
+              isFavorite={favorites.has(restaurant.restaurantId)}
+              returnTo={returnTo}
+            />
           ))}
         </div>
       )}

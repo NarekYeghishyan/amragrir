@@ -7,6 +7,3130 @@
 
 ## [Unreleased]
 
+### 2026-08-09 — A press is answered on the frame it happens
+
+The complaint: pages take a moment to load, nothing on screen says so, and it
+looks like the click did not register — so people click again.
+
+They were right about the cause. Every screen here is rendered by the server,
+which is what makes the catalogue indexable; the cost is that a press is
+answered by a round trip and not by a frame, and until the answer lands the
+browser holds the *old* page unchanged. An unchanged page honestly reads as
+"nothing happened".
+
+**Every segment under `[lang]` now has a `loading.tsx`** — home, search,
+restaurant, basket, checkout, orders and one order, favourites, reservations and
+one booking, profile, sign-in, plus the two that render nothing of their own
+(`/preorder` redirects, the catch-all 404s). With one in place the router swaps
+the skeleton in on the frame the link is pressed and the visitor is on the next
+screen while its data is fetched. Even the redirect has one: a segment with no
+`loading.tsx` borrows its parent's, so a bounce through `/preorder` was
+flashing a catalogue that was never coming.
+
+**The skeletons are the screens' own layouts, not generic bars.** They are
+assembled from the page's real classes — `.grid`, `.card`, `.dishes`,
+`.order-row`, `.line`, `.banner` — so the blocks sit where the words will sit
+and the arriving page settles into the shape already on screen instead of
+shoving it around. There is also only one set of measurements to keep in step
+with the design rather than two. The home hero and the profile banner are drawn
+**for real**: their gradients need no data, and only the words on top of them
+are worth waiting for.
+
+**`RouteProgress`**, mounted once in the layout, covers the gap before the
+skeleton is there. A 3px accent thread across the top of the window, plus two
+things the bar alone cannot say: `is-pending` on the control that was pressed,
+so the answer is attached to the thing pressed rather than floating at the top
+of the screen, and `data-navigating` on `<html>` for the cursor.
+
+Three decisions in it worth recording:
+
+- **Silent for the first 140ms.** Most moves here are already in the router's
+  cache. A bar that flashes on every one of them is noise, and noise is what
+  teaches people to stop reading a progress indicator.
+- **It never reaches the end.** There is no way to know how far a server render
+  has got, so it approaches 90% and slows. Arriving at 100% and then sitting
+  there is a lie the next second exposes.
+- **It watches the query string, not only the path.** The home page's filter
+  chips and a new search change nothing else, and both are slow enough to be
+  the reason this exists. That means `useSearchParams()`, which is why the
+  component wraps itself in `<Suspense>` — without a boundary it would drag
+  every page out of static rendering, and the restaurant pages are the ones
+  that must stay prerendered.
+
+The rules and the arithmetic live in `lib/navigation-progress.ts`, away from the
+DOM and unit-tested: which presses actually load a page (not a middle click, not
+`target=_blank`, not `mailto:`, not another origin, not a hash on the page you
+are already reading), and where a GET form's fields put it — resolved rather
+than guessed, so resubmitting an identical search does not raise a bar with no
+navigation behind it. Every other form here posts a Server Action, mutates in
+place and is deliberately left alone.
+
+Reduced motion keeps the blocks and drops the movement: the layout is the point,
+the shimmer is decoration.
+
+New i18n key: `loading` (hy/ru/en). It is announced once, by `RouteProgress`, in
+a `role="status"` region — a `loading.tsx` is handed no route params and so has
+no language to translate with, which is also why the skeletons are `aria-hidden`.
+
+Docs: COMPONENTS.md (`RouteProgress (web)`, `Skeleton (web)`), DESIGN_SYSTEM.md
+§8 (loading, navigating) and its keyframes list, SCREENS.md §14d.
+
+### 2026-08-09 — Notifications can be thrown away
+
+A cross on every line and a "clear all" beside the title, on both clients. New:
+**`DELETE /notifications/{id}`** → 204 and **`DELETE /notifications`** →
+`{ deleted }`.
+
+**A hard delete, and it is the exception in this schema.** Everywhere else a
+removal is soft, because the row is a fact somebody may later have to account
+for. A notification is not that — it is a *message about* a fact, and the fact
+is in `orders` and `order_events`, untouched by the cross. A `deleted_at` here
+would keep rows nobody can ever read again, to preserve a second copy of what is
+already preserved properly.
+
+`DELETE` on the collection rather than a `POST /clear`, unlike `read-all`:
+marking read is a state change with no verb of its own, while removing every
+member of a collection is exactly what this verb means. Clearing takes the
+unread ones too — the gesture is "I am done with all of this", and a clear that
+quietly left some behind would look like it had failed.
+
+Both crosses are optimistic: the line goes at once and the server's answer — the
+whole bell — replaces the guess, so a delete that did not go puts the line back
+rather than leaving a gap. **Two things that were easy to get wrong and are
+tested rather than trusted:**
+
+- The badge arithmetic (`withoutItem`, in `notification-watch.ts`). It drops
+  only when the deleted line was unread, and never below zero: the count is the
+  server's and covers everything, while the list is one capped page of it, so
+  the two can legitimately disagree.
+- `sameBell` is **not** used to apply a local delete. It compares the unread
+  count and the newest id — right for "did my poll find anything new", wrong for
+  "I removed a read line from the middle", where neither moves and the cross
+  would have appeared to do nothing.
+
+The cross is a sibling of the line's link, never nested in it: a `<button>`
+inside an `<a>` is invalid HTML and the press would belong to both. It carries
+the order code in its `aria-label`, so a screen reader hears which line is going
+rather than "delete" eight times.
+
+Docs: API_DOCUMENTATION.md (Notifications), DATABASE.md §12, SCREENS.md §15,
+COMPONENTS.md.
+
+### 2026-08-09 — The web bell is pushed, and can raise a browser alert
+
+Two complaints about the entry below, both fair.
+
+**"It only shows after a refresh."** True in effect: the web bell polled every
+30 seconds, so a status change sat invisible for up to half a minute and
+refreshing looked like the thing that fetched it. The app was already instant.
+
+The fix is the upgrade `apps/web/README.md` has described beside the tracking
+poll since that poll was written: **the Next server holds the order socket and
+streams it down as SSE.** The browser cannot hold that socket itself — the
+gateway authenticates in its first message and the session is an httpOnly cookie
+the page cannot read — but a route handler *does* receive the cookie, so
+`GET /[lang]/notifications/stream` reads the session, subscribes with `watchMe`,
+and forwards what arrives. Measured end to end: **53ms** from the kitchen
+pressing a button to the event reaching the browser.
+
+The README worried that this costs "a WebSocket client in the server"; Node 22
+and later ship a global `WebSocket`, so it costs no dependency. The other half
+of that worry stands — **one held connection per open tab** — which is why the
+30-second poll is still there and now serves as the fallback, taking over on its
+own wherever the stream cannot be opened. That deployment is half a minute
+behind rather than broken.
+
+**A bug this surfaced:** the stream answered **500** where the sibling route
+answers 401, when a refresh token had been spent. `EventSource` retries a
+dropped connection forever and gives up permanently on a non-stream response, so
+a 500 there is a reconnect loop against a session that is never coming back. It
+answers 401 now, like its sibling.
+
+**"Alert the browser too."** Added, opt-in. With the site open in any tab —
+including on a phone — an arriving notification raises the browser's own, so it
+reaches somebody who is not looking at this tab. It goes through a new
+`public/notifications-sw.js`, because **Android Chrome refuses
+`new Notification()`** and shows one only through a service worker; that worker
+caches nothing and intercepts nothing, deliberately not a PWA. Permission is
+asked from a press inside the bell panel and never on load.
+
+**This is not Web Push**, and the distinction matters: the alert is raised by the
+open page from the stream it already holds, so a closed site still gets nothing.
+That is `POST /devices`, still unimplemented, still needing FCM/APNs credentials
+from outside this repository. On an iPhone the control is not offered at all —
+Safari has no notification API until the site is installed to the home screen.
+
+The mobile app is unchanged: it was already pushed, and OS-level notifications
+there are the same `POST /devices` piece of work.
+
+Docs: `apps/web/README.md` (new bell section), SCREENS.md §15,
+COMPONENTS.md, API_DOCUMENTATION.md (`watchMe` — both clients now use it).
+
+### 2026-08-09 — The customer gets a bell
+
+`notifications` (DATABASE.md §12) has been in the schema since it was laid out
+and nothing ever wrote to it; `GET /notifications` and
+`PATCH /notifications/{id}/read` have been specified in API_DOCUMENTATION.md
+just as long and never existed. Both are now real, on the web and in the app.
+
+The gap this closes is narrow and was easy to miss: the tracking screen already
+followed an order live, so an order *being watched* was never the problem.
+Somebody browsing for their next meal was the problem — they heard nothing when
+the kitchen marked their food ready, because the only thing listening was a
+screen they had navigated away from.
+
+**Rows are written by a subscriber, not by callers.** Three places move an order
+(`orders.service`, and twice in `payments.service`), and
+`CustomerNotificationsService` listens to the event stream all three already
+publish to. A fourth is announced for free rather than being a thing to
+remember. The events fire after their transaction commits, so a notification can
+never describe a change that was rolled back — and the listener catches its own
+failures, because an unhandled rejection would take the API down over a bell.
+
+**Six of eight statuses earn one** (BUSINESS_LOGIC.md §4): `created` is the
+customer's own act, and `paid` is published back to back with `confirmed` from
+one payment, so announcing both would buzz a phone twice for one tap.
+
+**The row carries facts, not a sentence — and `title`/`body` became nullable to
+say so.** Turning the table on asked a question it had never had to answer: in
+which language is `title` stored? Every answer that fills it freezes the row in
+whatever language the reader preferred that day, so switching language in
+Settings would leave a half-translated bell; and the API cannot render it
+properly anyway, compiling to CommonJS while `@amragrir/i18n` ships TypeScript
+only a bundler reads. So an `order` row carries `{ orderId, code, status }` and
+the clients draw the line from the keys they already ship for their tracking
+screens. **The feature added no copy in any language** — three keys for the
+panel's own chrome, and nothing else. `ORDER_STATUS_COPY` moved into
+`@amragrir/i18n` so the web and the app cannot word one fact two ways.
+The columns now mean "prose the server authored", for `promo` and `system`.
+It is the conclusion `staff_notifications` reached (§8b) from the other
+direction: that table has no known reader, this one has a reader allowed to
+change their mind.
+
+**Live delivery differs by client, and the difference is the client.** The app
+holds its token in memory and subscribes with a new `watchMe` frame on the
+existing order socket — customer tokens only, verified phone only, the same gate
+the REST list sits behind, because "may you call this" and "may you hold this
+open" have to agree. The web's session is an httpOnly cookie the page cannot
+read, so there is no token for that first message: it polls a new
+`/[lang]/notifications` route handler every 30 seconds, the wall `OrderLive`
+already hit. Slower than tracking's five seconds on purpose — somebody on that
+screen is waiting, a bell is glanced at, and a five-second bell is twelve
+requests a minute from every open tab.
+
+**Not included: OS-level push.** `POST /devices` stays unimplemented and is now
+marked so. It needs FCM/APNs credentials, which live outside this repository.
+The bell works whenever the site or the app is open.
+
+Docs: API_DOCUMENTATION.md (Notifications, now *implemented*), DATABASE.md §12,
+BUSINESS_LOGIC.md §4, SCREENS.md §1 and new §15, COMPONENTS.md.
+Migration: `20260809120000_customer_bell_renders_client_side`.
+
+### 2026-08-09 — The heart reaches the restaurant page, on both clients
+
+Follow-up to the entry below, which put the heart on cards only. It is now on
+every surface that shows a restaurant for browsing: the card (home, search,
+favourites) and the **restaurant page's photo header**, opposite the back
+button, where the artifact has always drawn it and where §3 of `SCREENS.md` has
+always listed "favorite" as an action.
+
+**The web's restaurant page could not simply render one.** It is pre-rendered at
+build time, every restaurant in all three languages, which is the single thing
+that page exists to be — and a heart that knows whether *this* account saved
+this restaurant is a read of the session, which would have opted every one of
+those pages into rendering per request to draw one glyph two ways. So it takes
+the trade `OrderPanel` already made on the same page: new `FavoriteButton` is a
+client component that ships hollow in the HTML on disk and asks the new
+**`GET /[lang]/saved?restaurant=`** route handler what it should be once it
+mounts.
+
+It is still a `<form>` posting the same `toggleFavorite`, so a scriptless
+visitor can save from this page. What they cannot do is *un*-save from it —
+a page that cannot know the state cannot offer the other direction — and
+`/favorites` is where that exists for them, rendering per request. The button
+posts **`revalidate=0`**, a new opt-out `toggleFavorite` honours: the listings
+draw their hearts on the server, so revalidating is what redraws one, but here
+it would evict a page built at build time to change nothing on it.
+
+**The app's restaurant screen** got the artifact's second glass circle, filled
+and reverted optimistically like the feed's. It reads its state from
+`GET /favorites` filtered to the one business — the detail endpoint does not
+report it — and keys off the loaded detail's `restaurantId`, never the route's
+`{id}`, which is whatever the previous screen happened to hold: a slug, a branch
+id or a restaurant id.
+
+**The `BranchCard`** — the card naming the restaurant an order belongs to — was
+left without one at first, on the reasoning that it appears in the middle of
+paying. That was right about the checkout and wrong about the basket, and it is
+now split: **`/cart` draws a heart, `/checkout` does not.** The basket is a
+screen somebody is still browsing from — the card is the way back to the menu,
+and saving the place you are ordering from is an ordinary thing to want there.
+The checkout is where money is committed, and a control that quietly writes to
+the account one press from the button that charges the card is not. The `favorite`
+prop is optional and the checkout simply omits it, so one component serves both.
+
+That card is a **row**, not a photo, so the heart is an ordinary flex item
+between the rating and the chevron rather than a disc floating on glass — it
+wears `--chip` for the same reason, since there is no photograph under it to
+need blur. It needed the same restructure `RestaurantCard` did: the row is now
+the container and the link is the item filling it, because a `<form>` may not
+live inside an `<a>`. The chevron moved out of the link with it, so it stays at
+the row's edge.
+
+Verified end to end against a running stack: a verified account, `POST` then
+`GET` then `DELETE /favorites` with the exact id the card posts, and the web
+grid rendering one filled heart for it.
+
+Docs: `SCREENS.md` (§3 restaurant, and the web-parity row), `COMPONENTS.md`
+(`FavoriteButton` among the web-only components), `apps/web/README.md` (the new
+route handler in the tree).
+
+### 2026-08-09 — The heart on a restaurant card actually saves the restaurant
+
+`/favorites` existed on both clients, and on neither could anybody put anything
+into it. The web listed favourites and set none — deliberately, on the reasoning
+that the artifact drew a heart only in the app — so its empty state read "the
+heart in the app adds a restaurant here", which is a website telling somebody to
+go and use something else. The app *did* draw the heart, on every card, and it
+was a `BlurView` with an SVG in it and no press handler: a control that looked
+pressable for as long as anyone cared to press it. Both are wired now, to the
+`POST`/`DELETE /favorites` pair that has been implemented since Phase 8.
+
+**A card is a branch; a favourite is a restaurant.** That is why this was not
+just a button. A row from `GET /restaurants` carried one id, the branch's, and a
+heart posting it would have favourited an address rather than a business —
+looking right until a chain opened its second one. `RestaurantListItem` now
+carries **`restaurantId`** beside `id`, which is what `SearchRestaurant` has
+always done and the reason search needed no change. The two are asserted apart
+in `restaurants.service.spec.ts`, because for a long time either would have
+passed.
+
+**On the web the heart is a `<form>`, like every other write here.** It posts
+`toggleFavorite`, so it works with JavaScript off. Two things are unlike the
+rest of `actions.ts`, and both are deliberate:
+
+- **No redirect.** Every other write ends in Post/Redirect/Get so a reload
+  cannot re-post it. Both directions here are idempotent server-side, so a
+  re-posted heart asks for the state it already asked for — and skipping the
+  navigation stops a press from rebuilding the route and scrolling a long
+  listing back to the top, the same reasoning as `changeGuests`.
+- **A refusal is corrected, not reported.** The revalidation re-reads
+  `GET /favorites`, so a press that failed leaves the heart drawn the way the
+  server actually has it. There is nowhere on a listing to put an error that
+  says more than the heart snapping back already does.
+
+Hearts are drawn for signed-out visitors too, hollow; pressing one goes to
+`/signin` and comes back to the card — including back to the *filtered* listing
+it was pressed on, which is what `homeHref` was factored out of `chipHref` for.
+`favoriteIds` (new, `lib/favorites.ts`) is the one read that fills them in, and
+it joins the home page's existing `Promise.all` rather than costing a fourth
+round trip. It skips the call entirely for anyone not signed in.
+
+**In the app the heart fills before the request lands** and goes back on a
+refusal — a one-bit change the server accepts for any signed-in account, and one
+that reads as broken if it waits for the network. `onToggleFavorite` is optional
+on `RestaurantCard`: where a screen cannot act on a favourite the heart is now
+**not drawn**, which is the honest version of what it was doing before. The
+Favorites tab grew a heart of its own, always filled, that gives a restaurant
+back and takes the row out on the press. The home feed refetches the set on
+focus, since that tab can empty it while the feed is off screen.
+
+The rating badge on the web card moved to `right: 56px` to clear the new
+button, and the card became an `<article>` holding a link and a form as
+siblings — a `<form>` is interactive content and cannot live inside an `<a>`.
+New keys `addFavorite` / `removeFavorite` in all three dictionaries, and
+`noFavoritesHint` no longer sends people to the app.
+
+Docs: `API_DOCUMENTATION.md` (`GET /restaurants` now returns `restaurantId`, and
+what each id is for), `SCREENS.md` (§1 home, §9 favourites, §14b web favourites,
+and the web-parity table, where "Favourites: read-only" is retired),
+`COMPONENTS.md` (`RestaurantCard`, `RestaurantListItem`, and the web note that
+recorded `onToggleFavorite` as deliberately absent), `DESIGN_SYSTEM.md` (§5, the
+favourite button's own measurements and states).
+
+### 2026-08-09 — A pin beside an order's code holds the board on that one order
+
+Answering the phone about **AMR-17117037** meant finding it again on a board of
+fifty cards that reorders itself every twenty seconds, or retyping twelve
+characters read off the screen you are trying not to lose. Every card now
+carries a pin before its code: pressing it puts that code in the search box and
+leaves the one order on the board. Pressed again — on a pinned board, the one
+card on screen — it lets the queue back in.
+
+**It writes `&order=:code`, the address a line in somebody's activity already
+links to**, rather than setting the search term directly. So the board needed
+nothing new to do this: the box fills from the URL, the term is editable exactly
+as a typed one is, and a pinned board has a URL that can be sent to whoever is
+asking about the order. `replace`, like the board's own pickers — narrowing a
+queue is not a place in the browser's history, and nothing is lost by that
+because the control that undoes it is the one card left on screen.
+
+**The restaurant and branch are carried through.** Unpinning is not "clear the
+filters": somebody pinned an order from one branch's board and wants that board
+back, not every branch's at once.
+
+**Only the pin lights the pin.** A code typed into the search box by hand leaves
+it dark — that is somebody looking for an order, and the counts on the tabs are
+already the board telling them where to look. Being *held* on one order is a
+different state, and it is the one the address records. Taking the pin out also
+empties the search box, which is the one thing the address cannot say on its
+own: a URL naming no order is the ordinary board rather than an instruction to
+clear a box somebody is typing in.
+
+No API change — searching a full code was already how the board finds one order.
+New `pin` glyph in the panel's icon set, drawn head-on rather than leaning: at
+17px a tilted pin reads as an arrow, and an arrow among the status buttons looks
+like something that moves the order along. New keys `orderPin` / `orderUnpin` in
+all three admin dictionaries. `pinScope` is exported and tested directly
+(`orders-tabs.spec.ts`), including the round trip through `routePath` /
+`parseRoute` that is the whole mechanism.
+
+Updated: apps/admin/README.md, docs/COMPONENTS.md.
+
+### 2026-08-09 — The order board's tab counts move when an order does
+
+Pressing **Confirmed** on a card under **Paid** took the card off the board at
+once — the socket broadcast does that — and left the number on the tab above it
+reading `3` over two cards. The counts arrive only with a page of orders, and
+nothing fetched a page after a status change, so the twenty-second poll was what
+eventually corrected the strip. The one part of that screen which is a running
+total was the one part that stood still.
+
+The board now re-reads after every move it makes: the status buttons, the cancel
+dialog, and the handover dialog, which is `ready → completed` and therefore
+changes Ready and Past together. Every tab is right by the time the toast is up.
+**Both outcomes are re-read**, not only the successful one — a refused move may
+have been refused because the order had already moved under somebody else's
+hand, in which case the numbers on screen are the stale ones that made the press
+look reasonable in the first place.
+
+**A re-read, and not arithmetic.** The panel could subtract one from the stage
+the order left, add one to the stage it entered, and never make a request. But
+`scheduled` is a stage defined by a timestamp rather than by a status, and a
+pre-order is counted there and in **none** of the others — `countPerStage`
+groups only the orders that are due. Doing the sums here would mean reproducing
+that rule in a second place and drifting from the server exactly where it is
+least obvious, and the symptom of that drift is a tab whose count disagrees with
+the list underneath it.
+
+No API change, and the list itself is still set only from the broadcast. A move
+made by a **colleague** still reaches the counts on the next poll: a socket
+frame carries an order id and a status, which is not enough to say what the
+other tabs now hold.
+
+### 2026-08-08 — The web profile shows the order you are waiting for, above the one you already ate
+
+`/[lang]/profile` opened on **Order history** — the last five orders, all of
+them finished — while an order being cooked at that moment appeared nowhere on
+the screen. The account page could tell you what you ate last week and not that
+something was ready for collection.
+
+Active orders now sit above the history: one row each, order number and ready
+time, status pill and total, linking into the tracker at `/orders/{id}`. The
+page fetches `GET /orders?status=active` alongside the history and the
+favourites, in the same `Promise.all`, so it costs no extra round trip in
+sequence.
+
+**The section is drawn only when there is something in it.** An empty "no active
+orders" row on a summary screen would push the history down to say nothing;
+`/orders` is the page that owes both states a heading. And **all** active orders
+are listed rather than the first few — one waiting at a counter is exactly the
+one that must not be hidden behind a **See all**.
+
+Web only. The mobile app's `(tabs)/orders.tsx` already leads with its active
+list, and the profile tab there is unchanged.
+
+### 2026-08-08 — The pickup code stops being the tail of the order number, and now closes the order
+
+`AMR-24919119` told you `9119`, and `9119` was all the counter ever asked for.
+The pickup code was the last four digits of `orders.code` — derived in the API,
+never stored, on the argument that two stored identifiers can come to disagree.
+True, and beside the point: the order number is printed on the ticket, read out
+over the phone and scanned off the board, so every place it appeared was a place
+the collection code leaked with it. A proof derived from a public name proves
+nothing — and nothing was proved anyway, because marking an order collected was
+one press of a button on a card that had the code printed across its top.
+
+Both halves are fixed. **The code is now its own thing** —
+`orders.pickup_code`, six digits, drawn with `randomInt` over the whole space
+and stored under its own unique constraint, with no arithmetic relating it to
+`orders.code`. **And it is what closes an order:** `ready → completed` carries
+the code the guest showed, and the API compares it against the column before
+anything is written.
+
+Every order gets one, `pickup` and `dine_in` alike — one rule rather than two,
+so nobody at a counter has to remember which kind of order asks for a code.
+
+**No staff endpoint returns it.** Not the kitchen board (`QueueItem`), not the
+platform-admin customer list (`AdminCustomerOrder`), not a `prep_due`
+notification payload. That is the part that makes the check mean something: a
+counter that can read the code off its own screen never has to ask a guest for
+it. All three now name an order by `orders.code`. The panel's only dealing with
+the collection code is the other direction — typed into the new handover dialog
+and checked by the API — and it *can* still search by it, matched whole and
+never as a substring, so the box finds the order a guest read a code out for and
+cannot be walked digit by digit into one nobody gave.
+
+A mistyped digit is the ordinary case at a counter, not an error: the API
+answers 422 with `details.reason = "pickup_code_mismatch"` — the one failure the
+panel rewords in the shift's own language, beside the box that was typed into.
+**There is no override**, which is a product decision rather than an oversight;
+BUSINESS_LOGIC.md §5 records it and says what would replace it (a
+permission-gated override written to `order_events`) if a real counter proves it
+too rigid.
+
+**The customer's copy is now a real QR.** It was a white square with the digits
+printed in it — honest while the code was read out loud, and not enough once the
+counter has to *type* six digits off a stranger's screen at a queue. `encodeQr`
+moved from `apps/admin/src/qr.ts` to `@amragrir/ui` (with `qrcode-generator`
+as that package's one runtime dependency) and is now shared by the panel, the
+web tracking page (`components/PickupQr`, a server component) and the mobile
+tracking screen (`react-native-svg`). The payload is the six digits alone, so a
+wedge scanner types exactly what the handover box wants; the dialog submits on
+Enter, which makes the whole handover one gesture. The digits stay printed
+beside the picture — a scanner can be flat, out of reach or absent.
+
+**Migration `20260808090000_independent_pickup_code`** adds the column, backfills
+**every** order including finished ones (the column is NOT NULL and the check
+reads it directly, so a row without a code is a row nobody could ever close),
+then adds the unique index. The backfill is a bijection over the code space
+rather than a sequence, so historic codes are as unguessable as new ones. Live
+orders are backfilled too, so a guest holding a screen that still shows the old
+four digits is refused at the counter — a few hours' cost, and the tracking
+screen re-reads the order.
+
+**Global uniqueness caps the platform at 1,000,000 orders, ever.** Per-branch
+uniqueness would be enough for the check to be correct; global uniqueness buys
+that a mistyped code can never quietly be a *different* live order's. Past a
+million, the index refuses the insert and order creation fails loudly rather
+than reusing somebody's proof of purchase. Written down in DATABASE.md §7 with
+the two ways out, both of which are decisions for a person.
+
+Docs: BUSINESS_LOGIC.md §5 + §10, DATABASE.md §7 and §8b, API_DOCUMENTATION.md
+(`POST /orders`, `GET /restaurant/orders`, `PATCH /restaurant/orders/{id}/status`,
+`GET /staff/notifications`, `GET /admin/users/{id}/orders`), SCREENS.md §7,
+USER_FLOW.md §5, COMPONENTS.md, PROJECT_OVERVIEW.md, and the admin/web/mobile
+READMEs.
+
+Tests: the whole suite is green (1,062 API · 331 admin · 19 ui · 65 mobile).
+New coverage for the generator's independence from the order code, the handover
+check (right code, wrong code, the old four-digit tail, no code at all, the
+`reason` the panel keys off, and that the state machine is still checked first),
+whole-vs-substring pickup-code search, and that neither staff payload carries
+the code. One unrelated pre-existing failure was fixed on the way:
+`setReminderLead`'s fixtures pinned a literal "tomorrow" of `2026-08-06`, which
+stopped being in the future on 2026-08-06 and had been red since — the describe
+now pins the clock instead, so the assertions stay literal.
+
+### 2026-08-08 — Reloading a signed-in page no longer logs you out
+
+A refresh token is single-use: the API rotates it and revokes the old one, so
+the second request to present the same token gets a 401 (reproduced directly —
+two concurrent `POST /auth/refresh` with one token answer `200` and `401`). On
+the customer web three things can notice an expired access token at the same
+moment — `/session` when a page is reloaded, the header basket panel, and the
+tracking page's status poll — and each called `api.refresh` on its own. When two
+fired together the loser got the 401, and `/session`'s 401 path **mints a
+guest** — silently turning a signed-in customer into one and sending them back
+to sign in. The five-second tracking poll added by the previous change is what
+made this easy to hit: a reload of the tracking page raced the poll on the same
+token. Web only; no API change, no schema change.
+
+**`lib/session-refresh.ts`** (new) collapses concurrent refreshes onto one
+rotation. It keys a promise on the token being spent and keeps it for a few
+seconds after it settles, so a reload arriving just after the background poll
+rotated the token gets the *new* pair from here rather than trying to spend one
+that is already gone. `/session`, `basket-panel.ts` and `order-live.ts` all
+rotate through it now instead of calling `api.refresh` directly; each still
+writes the resulting cookie in its own request context.
+
+**It is in-process** — one Next server shares the map, the way the API's order
+fan-out is one in-process emitter. A second web instance would not share it and
+the race would return; the complete cross-instance and cross-client (mobile too)
+fix is a short **grace window on the API's own rotation**, where a token consumed
+a moment ago returns the same new pair to a concurrent retry instead of a 401.
+That is recorded as the next step rather than built now, because the deployment
+is single-instance.
+
+Six unit tests on the helper (one rotation for many concurrent callers; the
+result held briefly after settling; a real call again once the hold elapses;
+two different tokens not fused; a rejection reaching every sharer) plus a source
+guard that every refresher goes through it. 295 web tests pass; `tsc --noEmit`
+clean; the dev server compiles `/session`, `/orders/[id]/status` and `/basket`.
+
+Not reproduced end-to-end: the exact in-browser logout, which needs a verified
+OTP login the local tooling would not let me forge. The race underneath it is
+reproduced against the running API, and the fix is verified by the tests above.
+
+### 2026-08-08 — The Customers screen shows customers
+
+A `users` row is written for every visitor who opens the storefront
+(`POST /auth/guest`): an anonymous session with no name and no number until a
+phone is verified. They arrive faster than customers do and they are the newest
+rows, so the back office's Customers list — ordered newest-first — was page after
+page of "No name · no phone · 0 · 0", with the people who actually order buried
+behind them. On a local database with 271 accounts, 223 were guest sessions.
+
+**`GET /admin/users` takes `guests`** (`1`/`true` to include them; off
+otherwise), and leaves out the anonymous sessions that never ordered unless
+asked. Hidden, never deleted — and two accounts are never filtered whatever the
+flag says: a **guest who has ordered**, because that is somebody who bought
+something, which is what the list is asking; and the account an **`id`** names,
+because that comes from a link that already knows who it means, and filtering it
+would answer "that account no longer exists".
+
+**The Customers screen has a "Show guest sessions" switch**, off by default,
+which resets to page 1 when it is flipped — page 9 of one list is not page 9 of
+the other. It stays in React state rather than the address, like the search box:
+it narrows an answer rather than being one.
+
+**`toBool` moved to `apps/api/src/common/query.ts`** and is shared with the
+catalog DTOs. A flag in a query string means the same thing on every endpoint,
+and `Boolean('false')` is `true` — worth getting wrong only once.
+
+Docs: API_DOCUMENTATION.md (`GET /admin/users`), `apps/admin/README.md`.
+
+### 2026-08-08 — The tracker follows the kitchen in place
+
+Confirmed → Preparing → Almost ready → Ready is moved by somebody in the back
+office, and `/[lang]/orders/[id]` learned about it the only way it could: by
+re-running its whole server component every ten seconds and swapping the tree
+for the answer. The entire page was rebuilt to change one word, nothing moved
+until the round trip landed, and the rebuild happened just as often when nothing
+had changed at all — which is nearly always. Web only; no API change, no schema
+change.
+
+**`GET /[lang]/orders/[id]/status`** (new route handler) answers
+`{ status, secondsLeft, readyAt }` — deliberately the three fields the order
+socket pushes, so the payload survives the day this page can hold a socket open.
+Deliberately *not* the pickup code, the lines or the total: none of them can
+change under the reader. A route handler for the reason `[lang]/basket` is one —
+the session is an httpOnly cookie, so only the server can turn it into an API
+call, and only a route handler may write the rotated cookie back when the
+fifteen-minute token behind it expires mid-order. **It refreshes on a 401**; an
+expired token here arrives as a silently dead tracker, which is the exact
+failure the endpoint exists to prevent.
+
+**`OrderLive`** (new client component) polls it every five seconds and provides
+the answer to the two components that care. It renders no markup, so the DOM is
+unchanged. **`OrderSteps`** (new) draws the four steps from it and moves them in
+place — no navigation, no scroll jump, no flash — and **`Countdown`** re-syncs
+from every answer instead of free-running, so a `readyAt` the kitchen pushes
+back lands on the screen rather than leaving the clock counting to a promise
+nobody made.
+
+**The server component still re-runs, but only when something it drew has
+changed** — a new status, or a `readyAt` the kitchen moved. Whether the order
+can still be cancelled, whether the headline says confirmed or cancelled,
+whether there is a countdown at all, what time it says the food arrives: the
+server's to decide, and patching them from the browser would be a second source
+of truth. So a change fires `router.refresh()` behind the repaint that already
+happened. `secondsLeft` is excluded from "changed" on purpose: it falls between
+every pair of answers, and counting that as news would be the old behaviour back
+at twice the rate.
+
+**It stops when there is nothing left to hear.** Completed and cancelled orders
+are not watched; a `401` or a `404` ends the watch, since a session that ended
+and an order that is not yours do not improve by being asked again. Anything
+else — a 5xx, a phone in a tunnel — is assumed temporary and the next tick
+catches up. A tab coming back from the background re-asks at once rather than
+showing a minute-old status, its interval having been throttled while away.
+
+**The new step is announced.** It used to change only when the page reloaded,
+which a screen reader announces by starting the page again; now it changes under
+a reader who may never look at it, so the step it moved to is read out from a
+`visually-hidden` polite live region — the same word the line shows, so there is
+no new string to translate.
+
+**Still polling, not the socket.** The gateway authenticates in its first
+message and this page has no token to put there. Bridging it server-side — the
+Next server holding the upstream WebSocket and streaming SSE down — is the
+upgrade, and it costs a WebSocket client in the server plus one held connection
+per viewer: a deployment decision, not a component one.
+
+`OrderRefresh` is gone, replaced by the above. `isLive(status)` moved into
+`lib/order-status.ts` so the page and the watcher cannot disagree about when an
+order has stopped. 289 tests pass (22 new: the answer parser refusing a status
+that is not one, what counts as a change, which HTTP codes end the watch, the
+statuses worth watching, the language-prefixed endpoint, and source guards on
+the page, the watcher, the steps and the route); `tsc --noEmit` is clean; the
+dev server compiles the new route and answers `401` to a request with no
+session, in both the bare and the `/ru`-prefixed form.
+
+### 2026-08-08 — The tracking timer counts, without the page reloading under it
+
+`/[lang]/orders/[id]` printed `formatCountdown(secondsLeft)` straight from the
+server, and the only thing that changed it was `OrderRefresh` re-running the
+whole server component every ten seconds. So the `mm:ss` under "Ready in" stood
+still for ten seconds and then dropped ten — on the one screen whose whole job
+is to prove the order is moving, and where a frozen number is indistinguishable
+from a stuck order. Web only; no API change, no schema change.
+
+**`Countdown`** (new client component) is the `.timer`'s value, ticking once a
+second in the browser. It is the only new client code on that page, and it makes
+no request and causes no navigation to do it.
+
+**It counts elapsed time, not a number of its own.** `seconds` is the API's
+`secondsLeft`; the component tracks how long ago that value arrived and
+subtracts (`lib/countdown.ts`), and a poll landing with a newer value restarts
+it. The server therefore remains the only thing that decides what is left —
+the same reason the rest of the page is server-rendered — and the poll stays
+exactly as it was, because the *status* still belongs to it.
+
+**Measured against `Date.now()` rather than by decrementing per tick.** A
+background tab's interval is throttled to roughly once a minute and a sleeping
+laptop's stops firing altogether, so a self-decrementing counter comes back
+minutes behind — and behind means "still cooking", which is the direction that
+keeps somebody sitting down. The count floors at zero and stops waking React
+there; the poll is what moves the page past it.
+
+**The first paint is still the server's.** State starts at the prop and no clock
+is read during render, so the markup the browser hydrates is byte-for-byte the
+markup it was sent (checked with `renderToStaticMarkup`). With JavaScript off
+the timer shows the server's value and holds it, exactly as before, with the
+refresh link below it.
+
+`remainingSeconds` is unit-tested (hydration parity, per-second counting, a
+90-second and a five-minute catch-up, the floor at zero, a clock stepped
+backwards); source guards hold the page to `<Countdown>` over `formatCountdown`,
+keep `OrderRefresh` in place, and keep the clock out of the render path. 266
+tests pass; `tsc --noEmit` is clean, and the dev server compiles the route.
+
+### 2026-08-08 — The basket's stepper stops reloading the page
+
+Pressing `＋` on `/[lang]/cart` was a full navigation: `changeLineQty` wrote the
+cookie and then redirected to the page it was already on, so the router threw
+the tree away and rebuilt it. The screen blanked for as long as
+`POST /cart/quote` took to answer and the viewport jumped back to the top —
+every time somebody wanted one more of something. `−` and the ✕ did the same.
+Web only; no API change, no schema change.
+
+**`changeLineQtyInPlace` and `removeLineInPlace`** (new Server Actions) are the
+same writes minus the `redirect`. They are deliberately **not** the restaurant
+page's `changeLineQtyLive`, which neither revalidates nor redirects: nothing the
+server renders *there* depends on the basket, whereas here the line totals, the
+discount, the fee, the total, whether a dish is still available and whether the
+order can be placed at all are the server's answer to the basket that just
+changed. So the revalidation stays and the action returns the rebuilt tree for
+React to patch in place.
+
+**`BasketEditor`** (new client component) is what presses it — the grid, one
+line's `− n +` / total / ✕, and the dim on amounts being re-priced. **Every
+button is still a submit button in a `<form>`** posting the redirecting action,
+so a browser with JavaScript off behaves exactly as before; the interception
+happens only once `useScripted` says React is driving. **The quantity moves on
+the frame it is pressed and no amount does** — this client computes no money, so
+the totals stay last second's under `.settling` until the quote lands. One
+transition serves the whole screen, because a press re-prices the summary down
+the side as well as the row it landed on.
+
+Verified against the running dev server with a filled basket: the action answers
+**200 with no `Location` header**, writes `qty: 3` to the basket cookie, moves
+`amr_n` to 3, and the tree it returns already reads `3` with the line at
+14 400 ֏ and the total at 14 760 ֏. The fallback forms still ship with their
+`$ACTION_ID` and hidden fields. 256 web tests pass (6 new source guards in
+`basket-edit.spec.ts`) and `tsc --noEmit` is clean; the in-browser press itself
+was not driven in a browser. The coupon field still redirects — it was left
+alone.
+
+Docs: `SCREENS.md` (§4), `COMPONENTS.md` (`BasketEditor`).
+
+### 2026-08-08 — The sign-in tabs stop reloading the page
+
+Log in / Sign up were plain links to `?mode=register`, and `/[lang]/signin` is
+`force-dynamic` — so glancing at the other tab cost a full server round trip to
+change one thing: whether "Full name" is on screen. The card was torn down and
+rebuilt, its `rise` animation replayed from the top, and a number already typed
+into the phone field went with it. Web only; no API change, no schema change.
+
+**`AuthPanel`** (new client component) takes the first step — heading, tabs and
+form — and makes the press local state. The tabs are **still links to the same
+addresses**: the href is real, the server renders whichever tab the query string
+names, and a browser without JavaScript navigates exactly as before, which is
+the whole point of keeping this flow scriptless. What mounting adds is
+`preventDefault` plus `history.replaceState`, so the URL keeps saying which tab
+is showing without the router fetching anything. `replaceState` and not
+`pushState`: the two tabs are one screen, and Back belongs to the checkout that
+sent the visitor here. Modified clicks (⌘, ctrl, shift, middle) are left to the
+browser so "open in new tab" still opens a real page.
+
+**The name field is hidden now, not unmounted.** Type a name, look at the log-in
+tab, come back — it is still there. It posts on both tabs as a result, which
+changes nothing: `requestCode` reads `name` only when `mode` is `register`, so a
+name from the log-in tab is ignored there exactly as it was when the field did
+not exist. A `?error=phone` clears on a switch, since the switch rewrites the
+address to one that no longer carries it.
+
+Both tabs verified server-rendered against the running dev server — the log-in
+tab ships the name field `hidden`, the sign-up tab visible, each with its own
+heading and CTA — so the fallback is intact. 249 web tests pass and
+`tsc --noEmit` is clean; the toggle itself was not driven in a browser.
+
+Docs: `SCREENS.md` (§14c), `COMPONENTS.md` (`AuthPanel`).
+
+### 2026-08-08 — Both time pickers go to a 10-minute grain
+
+`RESERVATION_SLOT_MINUTES` 30 → **10** and `READY_STEP_MINUTES` 15 → **10**, both
+in `@amragrir/shared`. Confirmed by product; the booking one was marked
+`[proposed]` in `constants.ts` with "confirm with product" written next to it,
+and 30 had only ever been read off the design's 12:30 default.
+
+**The spacing is the grain of the offer, not the length of the booking.**
+`RESERVATION_SEATING_MINUTES` (90) is untouched, so a party still keeps the
+table an hour and a half and 19:00 still collides with 19:10 exactly as it
+collided with 19:30. What changes is that somebody who wants 19:20 can ask for
+it. A 10:00–23:00 day now offers **70 starts instead of 21** — verified against
+the live API, gap 10 min.
+
+**No API change was needed, by construction.** `isSlotBoundary` decides whether
+a requested instant is legal by regenerating the day from `slotsFor` rather than
+testing the minute against its own copy of the spacing, so the offer and the gate
+moved together. All 53 reservation tests passed untouched.
+
+**The ready-time count went 8 → 12 with the step,** and that is not a separate
+decision — a count is a span in disguise. Eight quarter-hours reached two hours
+ahead; eight ten-minute steps would have reached eighty minutes. Finer grain was
+the ask, a shorter horizon was not, and it would have been the silent half of it.
+Twelve options are eleven steps after the earliest, so the grid still reaches 110
+minutes.
+
+Both clients get it from the same constants, and the web's no-JavaScript fields
+take `step` from them too, so the native field cannot offer a minute the grid
+above it does not.
+
+Two spec expectations moved with the constant (quarter-hours → tens) and one was
+added for the span. **A third assertion I wrote was simply wrong** — I asserted a
+120-minute reach and got 110, because the first entry is the earliest itself, so
+twelve options are eleven steps, not twelve. Corrected to the real number rather
+than to a number that flattered the change.
+
+Driven in a real Chrome: "Ready at" offers `16:40 16:50 17:00 … 18:20`, the
+booking column offers 70 rows for a future day and 32 for today once the past is
+dropped, picking still writes `2026-08-15T10:00`, and the panel is unchanged in
+both themes. The whole workspace passes except the pre-existing expired fixture
+in `restaurant/orders.service.spec.ts` (`READY_AT` pinned to 2026-08-06), which
+is unrelated and was already failing.
+
+Docs: `BUSINESS_LOGIC.md` (§"How a table is held" and the constants table),
+`SCREENS.md` (both rows of the deviation table).
+
+### 2026-08-08 — Times move beside the calendar, and two layering bugs go with them
+
+The times sat *under* the month. Beside it is the shape every desktop
+date-and-time picker has, and it does the one thing a grid underneath cannot:
+put **when** next to **which day**, so moving between them is a glance rather
+than a scroll. A column with ▲/▼ arrows that move it three rows at a time, and
+the chosen time scrolled into view when the panel opens. Web only.
+
+**The part-of-day headings went with the layout that needed them.** Grouping
+twenty-four chips into Morning / Afternoon / Evening was structure a ragged
+wrapping row badly needed; a column does not, and a heading every few rows in an
+82px gutter is noise. `groupSlots`/`periodOf` and the three i18n keys added for
+them are removed — `lib/slots.ts` keeps `upcomingSlots` and `hasFreeSlot`, and
+its tests came down from 12 to 10. Dropping the past times stays: that was never
+about layout.
+
+**Two bugs the screenshot found, neither of them cosmetic.**
+
+*The panel was being painted over* — by the "Ready at" field below it and by the
+payment rows, which sliced the last week off the calendar. Not a z-index that was
+too low: `section.booking` carries `.rise`, whose `animation-fill-mode: both`
+**retains a `transform` forever**, and a retained transform makes the element a
+stacking context. The panel's z-index was therefore being compared against its
+own siblings inside that section instead of against the page. `.rise` is now
+`backwards`, which fills the only frame that matters — the one before the
+animation starts, which is what stops the flash — and leaves no transform behind.
+The `to` frame was the element's natural state, so nothing changes to look at,
+and every popover inside any `.rise` element stops being trapped. `.picker` also
+takes a z-index while open, so it outranks the *next* field rather than only the
+page.
+
+*The panel grew to 541px with both halves 464px tall.* `align-items: stretch`
+sizes every item to the tallest, and a list of twenty-four times **is** the
+tallest — so the calendar was stretched to match a column that was only that tall
+because it had been stretched. Circular. The column's three children are
+`position: absolute` now, so it contributes no height at all, the month is the
+only thing left to measure, and stretch hands that height back: **panel 328px,
+calendar 251, times 251.**
+
+Verified by looking, in both themes, at 2× — plus `document.elementFromPoint`
+down the panel returning panel content at every depth, where it had returned the
+"Ready at" trigger before. The rest still holds: side by side at x=33/x=269, the
+column scrolls, an arrow moves it 248 → 335, picking the 15th then a time gives
+`2026-08-15T10:00`, Escape closes, and with script execution disabled both fields
+are still the plain `datetime-local` and `time`. Home, restaurant, search and
+sign-in all still 200 — `.rise` is used on eight elements and the other seven set
+their own layering explicitly.
+
+Docs: `SCREENS.md` (the booking row of the deviation table), `COMPONENTS.md`
+(`DateTimeField`, `ReadyAtField`).
+
+### 2026-08-08 — The time grid gets the calendar's structure
+
+The calendar landed well and the times under it did not keep up. They were one
+wrapping row of chips — up to twenty-four for a full day, ragged at the right
+edge, with no landmark between lunch and dinner — sitting directly beneath a grid
+that has a month header, a weekday row and seven aligned columns. A blob to scan
+rather than a thing to read. Web only; no API change, no schema change.
+
+**Four aligned columns, under a heading per part of the day** —
+Morning / Afternoon / Evening, styled as the weekday header is so the panel's two
+grids read as a matched pair. The block scrolls at about four rows, because a day
+of half-hours is taller than the calendar that chose it and a panel that grows
+past the viewport puts its Close button somewhere nobody can reach. `HH:mm` is set
+in tabular figures, so the columns line up without a `min-width` fighting the
+grid. The ready-at panel uses the same grid without the headings — it is two
+hours of one evening, not a day.
+
+**A past time and a taken table stop being the same thing.** The API reports both
+as `available: false`, which is right from where it stands and wrong to look at:
+a struck-through 20:00 says somebody has that table, which informs a choice of
+20:30, but a struck-through 10:00 on a day already half gone says nothing at all.
+Today's grid opened with **nine dead chips stacked before the first time anybody
+could pick**. The past is dropped now; only genuinely taken tables are struck
+through. Today went from 24 slots with 15 free to **13, all free**.
+
+**A real bug fell out of building the test for this.** While a newly-picked day's
+slots were in flight, the previous day's stayed on screen and stayed pressable —
+so a press could book the day the calendar had already stopped showing, silently.
+Reproduced exactly that way: picked the 15th, pressed a time, got
+`2026-08-08T16:00`. The slots are `disabled` while a day is loading now, not
+merely dimmed, because dimming would not have stopped a keyboard reaching them.
+
+**`lib/slots.ts`** (new) holds both rules — `groupSlots`, `hasFreeSlot`,
+`periodOf` — out of the component and free of `Date.now()`, the way
+`booking-calendar` is, with **12 tests** covering the Yerevan boundaries
+(11:59 → morning, 12:00 → afternoon, 16:59 → afternoon, 17:00 → evening), the
+slot happening exactly now, an empty part of the day drawing no heading, and an
+unreadable instant. Three new i18n keys in all three dictionaries
+(`slotMorning`, `slotAfternoon`, `slotEvening`).
+
+Driven in a real Chrome: a future day groups as **Morning(4) Afternoon(10)
+Evening(10)**, renders in 4 columns, and the block scrolls. 251 web tests pass,
+`tsc --noEmit` clean across the workspace, and the no-JavaScript path still
+renders the plain `datetime-local` and `time` fields with no picker chrome.
+
+Docs: `SCREENS.md` (the deviation table's booking row), `COMPONENTS.md`
+(`DateTimeField`, `ReadyAtField`).
+
+### 2026-08-08 — The checkout's two time fields become pickers
+
+"Date & time" and "Ready at" were bare native inputs, and both could name a time
+the restaurant would not take: a `datetime-local` offers every half hour on the
+calendar including Mondays the branch is shut and evenings with no free table, a
+`time` field will take 03:00 where the kitchen opens at eleven. The refusal
+arrived after the press, as a 422 drawn above the fold. Asking and being told no
+is a worse way to pick a time than being shown the ones that exist.
+
+**This reverses a trade `SCREENS.md` had recorded**, rather than inventing
+something: the design always specified a month calendar and a slot grid, the app
+has drawn them since it was built, and the web took the native field instead.
+
+**`DateTimeField`** (new) draws the month — Monday first, arrows dead onto a
+month with nothing bookable, days outside the window greyed rather than hidden
+so there is no hole where the 1st should be — and under it the slots
+`GET /restaurants/{id}/availability` answers for that day and that party. A
+taken table is struck through, not removed: that 20:00 exists and is gone is
+worth knowing when picking 20:30. **`ReadyAtField`** (new) leads with "As soon as
+possible" — the *absence* of a time, which is what `POST /orders` defaults to and
+what `--:--` could never say — then the quarter-hours from `readyTimeOptions`.
+
+**Both keep the native field underneath.** `useScripted` swaps to the panel one
+commit after mount, which is also what keeps the first client render identical to
+the server's. Verified with script execution disabled at the browser: the
+`datetime-local` and the `time` field render with their original `name`, `min`,
+`max` and `step`, and no picker chrome. The posted value is unchanged in either
+mode — the same `YYYY-MM-DDTHH:mm` and `HH:mm` Yerevan readings under the same
+names — so `rememberTiming`, `bookTable` and `submitCheckout` never learn the
+control changed. The refusal path stays too: a table can go while somebody is
+deciding, which is the one 422 the grid cannot design away.
+
+**`GET /[lang]/availability`** (new route handler) is how a day is read in the
+browser. A route rather than a Server Action, for the reason the panel's is one:
+paging to Thursday changes nothing else on the checkout, and revalidating would
+re-price the basket to fill in a grid of times. It carries no session — table
+times are public — validates its own query against the API's bounds, and answers
+an empty day rather than an error the picker would have to draw.
+
+**`monthGrid` moved to `@amragrir/shared`**, out of `apps/mobile/src`, by the
+same route `readyTimeOptions` took: two copies of "which weekday does this month
+start on" is two chances to disagree about a booking. Mobile imports it from the
+package now; its spec stayed where the runner is.
+
+Driven in a real Chrome against the live API: the panel opens on **August 2026**,
+week header `Mon Tue Wed Thu Fri Sat Sun`, **42 cells of which 8 bookable** (the
+seven-day order horizon, not the thirty-day booking one — a table booked here
+always carries food). Picking the 15th moved the value `2026-08-08T14:30` →
+`2026-08-15T14:30`, keeping the time; picking a slot took it to
+`2026-08-15T10:00`, and the panel closed. Today offered 24 slots with 15 free
+(the past ones struck through); the 15th offered 24 free. "Ready at" offered
+`14:45 … 16:15`, picking one wrote `"14:45"` and "As soon as possible" wrote
+`""`. Escape closes.
+
+Docs: `SCREENS.md` §5 and the deviation table at its foot (two rows reversed),
+`COMPONENTS.md` (`DateTimeField`, `ReadyAtField`).
+
+### 2026-08-08 — Switching Pre-Order / Table booking stops redrawing the checkout
+
+Pressing a mode tile posted and then redirected to the screen it was already on.
+A redirect to the current page is a navigation: the router throws the tree away
+and builds a new one, so the whole checkout blinked and the viewport jumped
+while the API re-priced the basket. This tile changes more of the screen than
+anything else on it — a calendar, a guest stepper, a deposit, a set of totals
+and the CTA all appear or go — so it was also where that was felt worst. Web
+only. No API change, no schema change; the same two Server Actions do the same
+writes.
+
+**The same answer the dish `＋` already got**, and the same shape:
+`changeServiceModeLive` and `changePickupOptionLive` are the existing actions
+minus the `redirect`, so Next returns the revalidated tree and React swaps what
+differs. `chooseServiceMode` and `choosePickupOption` keep theirs, because they
+are still what the forms post.
+
+**`ModeSwitch`** (new, `components/ModeSwitch.tsx`) owns the mode tiles, the
+take-away / eat-in row under them, and — as `children` — everything the pair
+decides. One component because one press changes all of it, and the pending
+state has to reach the content to dim it. It holds no i18n and no rules about
+what the restaurant offers: tiles arrive translated, sections are chosen by the
+page from the quote. The dead "Eat at the Restaurant" tile travels the *mode*
+path, since that is what it does.
+
+**Every tile is still a submit button in a real `<form>`.** Verified with script
+execution disabled at the browser: one navigation, mode changed, booking block
+present — the fallback is the markup, not something bolted beside it.
+
+**Only the tile is optimistic.** Whether a table can be had, the deposit, the
+totals and which CTA to draw are the server's answers, and this client neither
+prices baskets nor allocates tables (DEVELOPMENT_GUIDE.md). So the tile moves on
+the frame it is pressed and everything it implies wears `.settling` until the
+real answer lands — plus `pointer-events: none` via `.mode-swap`, because a
+stale "Book the table" is not something to let somebody press on the way past.
+The two presses carry **separate pending states**: a mode change dims all of it,
+a pickup ending dims only its own row.
+
+**`.rise` on the booking block**, because it now *arrives* — nothing else marks
+the moment a calendar and a deposit appear where a row of pickup tiles was, now
+that the page does not reload. Tiles ease on `border-color`, `background-color`,
+`box-shadow` (.18s) and `transform` on `:active` (.12s); `border-width` and its
+compensating padding are deliberately **not** transitioned, since the pair fight
+and the tile twitches. All of it opted out under `prefers-reduced-motion`.
+
+Measured in a real Chrome over CDP, against the live API, clicking after
+hydration: **30ms** after the press the tile reads "Table booking", the
+dependent half is dimmed, and the booking block has not arrived yet; it lands
+shortly after. A sentinel set on `window` before the click is still readable
+afterwards and `scrollY` is unchanged — proof the page was patched, not
+replaced. The pickup ending behaves the same and dims only its own row. Both
+directions checked, on `pickup+reserve` and `pickup+dinein` branches.
+
+Docs: `SCREENS.md` §5 (mode tiles, pickup endings), `COMPONENTS.md`
+(`ModeSwitch`), `DESIGN_SYSTEM.md` §8 (the `settling` state, and what may move
+optimistically).
+
+### 2026-08-08 — The checkout says which restaurant, and which of its branches
+
+The web checkout described the restaurant in one grey line — the name and a prep
+time — which is the exact shape the Basket had already replaced with a
+`BranchCard`. So the screen where the money is committed said *less* about the
+place being paid than the screen before it: nothing on it named the address the
+food was being collected from, or said whether that kitchen was still open.
+Checking either meant going back a screen, mid-payment.
+
+**It now draws the same `BranchCard` the Basket does** — cover, name, cuisine ·
+price level, rating and reviews, and the `.tag` row carrying the prep time, the
+address and Open/Closed. Web only. No API change, no schema change, no new
+endpoint: `GET /restaurants/{id}` was already being called on the Basket one
+screen earlier, and it is cached for 60s.
+
+**Fetched by branch id, not by the basket's slug.** A slug resolves to one branch
+of a restaurant that may have several, so an address taken from it can be the
+wrong street. It goes out in the same `Promise.all` as the dine-in availability
+call, so the card costs no extra round trip in front of the booking block.
+
+**The subline is the order now** — dish count · service mode, as on the Basket.
+The restaurant has the card to itself; keeping the name in the grey line above it
+would be the duplication the Basket had already cleaned out of that spot. **When
+the card cannot be fetched the subline takes the name back**: the call is wrapped
+in a `catch` and the card is simply dropped, because a screen holding somebody's
+payment must not 500 because the catalogue had a moment, and the quote — which
+decides every number — is untouched either way.
+
+**The booking-only variant gets it too**, and two things fall out of that:
+
+- `prepMin` is now **optional** on `BranchCard`, and the tag is dropped without
+  it. That variant has no quote, and the branch's general figure is not a
+  stand-in — it would promise a wait for food nobody has ordered.
+- It stopped resolving the restaurant **by slug**. The booking is made against a
+  branch id, and asking by slug drew it under whichever branch the slug happened
+  to name. That was invisible while the screen printed only a name — every branch
+  of `dolmama` is called Dolmama — and stops being invisible the moment the card
+  prints a street.
+
+There it also **replaces the back chip**, which named this restaurant and led to
+this same menu; the card says it, shows it and is still the way there. The priced
+page keeps its chip, which goes to the Basket — a different screen.
+
+Verified against the running stack in all three states — pickup, dine-in, and a
+table with no food — by minting a guest session, forging the two cookies the app
+keeps and reading the rendered HTML: the card renders with Dolmama's Saryan St
+address and Open badge, the prep tag is present on the two priced states and
+absent on the booking-only one, and `/cart` is unchanged. 239 web tests pass;
+`tsc --noEmit` clean.
+
+Docs: `SCREENS.md` §6 (Checkout), `COMPONENTS.md` (`BranchCard`).
+
+### 2026-08-08 — Adding a dish stops rebuilding the restaurant page
+
+Pressing `＋` on a dish, or a stepper in the order panel, rebuilt the whole
+route. On a page of menu that is a sledgehammer for one number: the panel
+remounted and blanked, the press cost most of a second, and a long menu could
+lose where you were in it. Web only — no API change, no schema change, and the
+without-JavaScript path is untouched.
+
+**Nothing the server renders on a restaurant page depends on the basket.** That
+is precisely why the page can be pre-rendered for 69 restaurants × 3 languages —
+the basket is drawn in the browser, by the panel and the header button. So the
+only things that ever had to change were those two, and a redirect was the wrong
+size of answer.
+
+**Two live Server Actions**, `addToBasketLive` and `changeLineQtyLive`. Same
+write through the same `lib/cart` rules, and they **neither `revalidatePath` nor
+`redirect`** — so Next sends back no new RSC payload and the route is not
+rebuilt. What they return is the priced basket, from `pricedPanel`, which was
+lifted out of the `GET /[lang]/basket` route handler into `lib/basket-panel.ts`
+so the write and the fetch cannot disagree about the shape or the money.
+
+**The forms are still forms.** `<form action={addToBasket}>` and `<form
+action={changeLineQty}>` are exactly as they were; the live path is taken only
+once React is driving (`lib/scripted.ts`, `useScripted`, lifted out of
+`LocationPicker` which already had it). With JavaScript off the browser posts,
+the server acts, the browser follows the redirect — verified by clicking the
+button with script execution disabled and watching the count go 6 → 7.
+
+**The quantity moves on the frame it is pressed; the money does not.**
+`useOptimistic` over `applyQtyLocally` (`lib/order-panel.ts`) moves the number
+and **touches no amount** — every string of money came from `POST /cart/quote`
+and the next one will too, so the old totals stay legible and say they are
+settling (`.settling`, 55% opacity) until the server has re-priced. An
+optimistic subtotal is exactly how a client starts computing money.
+
+**`lib/basket-live.ts`** carries the answer between controls that are nowhere
+near each other in the tree — the dish `＋` publishes the basket its write
+returned, the panel takes it. It also holds the panel's memory across a remount
+(moved out of the component) and tells the header's count watchers, since the
+same write moved the cookie they read. `alreadyPublished` stops the panel
+fetching a second copy of what it was just handed: that was one wasted round
+trip per press, and two of them in flight after two quick presses can land out
+of order and put the quantity back down.
+
+Measured in a real browser against a real basket, with the dev server and a live
+API: **147ms** from click to the panel's quantity, the panel's total and the
+button's tick all moving. Scroll position unchanged, menu not remounted (DOM
+marks survive), and the only requests are the action itself and the header's own
+total. Before: a full route rebuild and a blanked panel.
+
+The `＋` also **answers now** — a green tick for 1.2s. With no page rebuild left
+to signal anything, a button that looks identical after being pressed is one
+people press twice.
+
+`order-panel.spec.ts` and `basket-live.spec.ts` cover the optimistic rule (with
+"touches no amount" stated as its own test), the branch-keyed hand-off, and
+guard at the source that the live path never revalidates or redirects and that
+the plain forms underneath it survive — losing those would be silent, since
+every browser we look at has JavaScript. 239 tests. Docs: `COMPONENTS.md`
+(`AddDish`, `OrderPanel`), `apps/web/README.md`.
+
+### 2026-08-08 — The header basket was showing a basket nobody had any more
+
+Remove a line and the list lost it, but the button in the header kept the old
+count and the old total; empty the basket entirely and a badge stayed on a
+button that opened "your basket is empty". The restaurant page's order panel had
+the same fault and one of its own.
+
+**The cause was a wrong assumption written into both components.** Every basket
+write is a Server Action answering with `redirect()`, and Next resolves that as
+a **client-side re-render, not a document load** — so `pageshow`, `focus` and
+`storage`, which both were listening for, never fired. Neither control was ever
+told anything; they showed whatever they had read on the first paint.
+
+**`lib/basket-count.ts`** (new) watches `amr_n`, the small readable cookie
+`cart-store.ts` already rewrites on every basket write, and both controls read
+the count through it via `useSyncExternalStore`. It is a **250ms poll**, plus
+those same events for a tab restored from the back/forward cache or returned to
+after the basket changed in another one. There is no cookie-change event every
+browser has — the CookieStore API is Chromium's alone — and the alternative,
+reading the basket in the layout, is the one thing this app may not do: a single
+`cookies()` call there opts all 69 pre-rendered restaurant pages into rendering
+per request. A quarter-second regex over one short string is the cheap end of
+that trade. The subscription reports only an actual change, so a page nobody is
+touching wakes React not at all.
+
+**The order panel had a second bug underneath the first.** Pressing `＋`
+rebuilds the route, which **remounts** the panel and discards its state — and
+`null`, which its own doc comment has always said means "not asked yet", was
+being rendered as the 🧺 "your basket is empty" block. So every press emptied the
+panel for as long as the refetch took, and every first paint claimed an empty
+basket to anybody who had one. The empty state now waits to be told
+(`basket?.state === 'empty'`), and a module-level `lastSeen` per branch — only
+ever written from inside the effect, so the server's copy of it stays empty and
+no visitor can be handed another's — carries the last answer across the remount.
+Pressing `＋` now moves the line, the panel total and the header together, with
+nothing blank in between.
+
+Verified by driving a real browser against a real priced basket: removing lines
+one at a time takes the badge 6 → 3 → 2 → gone and the total with it, and `＋`
+on the restaurant page moves panel and header in the same frame. `basket-count.spec.ts`
+covers the cookie reading and the subscription, and guards both regressions at
+the source, as `theme.spec.ts` does. 225 tests. Docs: `COMPONENTS.md`
+(`BasketButton`, `OrderPanel`), `apps/web/README.md`.
+
+### 2026-08-08 — The basket says which restaurant you are buying from
+
+`/cart` gave the restaurant a name in a back chip and the same name again in a
+grey subline under the title, and nothing else. That is enough to recognise a
+restaurant and not enough to check one: nobody about to pay could see from this
+screen **which address they were collecting from, or whether the kitchen was
+open**. Web only — no API change, no schema change.
+
+**`BranchCard`** (new, `components/BranchCard.tsx`) — cover, name, cuisine ·
+price level, rating and reviews, and a tag row carrying the prep time, the
+address and Open/Closed. It is built from the catalogue's own parts — `.media`,
+`.tag`, `.tag.prep`, `.tag.good` — so the restaurant reads the same here as on
+the card that was pressed to get here, and the whole card is the link, as
+`RestaurantCard` is.
+
+**It names a branch, and asks by branch id.** `dolmama` is two kitchens on two
+streets, and a slug always resolves to one of them — so an address taken from
+the basket's slug can be the wrong street. The card's prep time is the
+**quote's**, not the branch's: the quote prices the dishes actually collected,
+so a basket of one drink and a basket of four grills report different numbers
+and both are true.
+
+**The back button came off this screen.** The card leads to the same menu, and a
+chip above it saying the restaurant's name a third time was the duplication, not
+the navigation. The title's subline is now about the basket — the dish count and
+the service mode. `＋ Add more items` still sits under the lines.
+
+**Basket lines finally have their photographs.** The markup for one has always
+been there; `POST /cart/quote` does not return `photoUrl`, so every line drew the
+hatch placeholder. They are merged in from the branch's menu — a cached GET the
+restaurant page already makes — and the quote's own field is still preferred for
+the day the API starts sending it. Neither this fetch nor the card's may take
+the screen down: both fall back (no card, hatched photos) so a basket still
+shows what was collected and what it costs when the catalogue is unreachable.
+
+**The two-row basket line is now the line at every width.** That layout already
+existed below 560px, with the note that five things in one row "leave the dish's
+name about five pixels" — which is just as true at 1440, where the basket column
+is 476px and the photo, stepper, total and remove button take 347 of them.
+Armenian dish names were wrapping into three lines inside ninety pixels. Same
+card, same height: the photo is taller than both rows together.
+
+Verified in the browser against a real priced basket in hy and en, light and
+dark, at 1440px and at 400px. Docs: `SCREENS.md` (§ 4 Basket — which already
+specified this banner, from the mobile artifact; the web had simply never drawn
+it), `COMPONENTS.md` (`BranchCard`), `design/README.md` (tenth pass — the
+departure from the web artifact's bare back button).
+
+### 2026-08-08 — The footer no longer floats in the middle of a short page
+
+On any screen whose content did not fill the window — the 404, an empty basket,
+a profile asking someone to sign in — the footer stopped where the content
+stopped and left a band of page colour under it, which reads as the page having
+failed to finish loading rather than as the end of the page.
+
+The page is now a **column**: `body` is `min-height: 100dvh` (with a `100vh`
+line before it for engines that don't know the dynamic unit) laid out as a
+flex column, and `.wrap` — the layout's `<main>` — takes the slack with
+`flex: 1 0 auto`. Short pages push the footer onto the bottom edge; long pages
+are untouched.
+
+Two details that are the whole reason this is `1 0 auto` and not `flex: 1`.
+The shorthand means `1 1 0%`, which measures the column from a **zero basis and
+lets it shrink** — on a page taller than the window that is how content ends up
+squeezed under a footer that thinks there is room. And a flex item with auto
+cross-axis margins is **never stretched**, so `.wrap`'s existing `margin: 0
+auto` would have collapsed the site to the width of its widest row; `width:
+100%` restores what it had as a plain block.
+
+The sticky header is unaffected — a sticky flex item still positions against
+the scrollport — and so is its `backdrop-filter` dance with the location
+dialog. Verified in the browser at 1500px of window (footer flush on the bottom
+edge, 404 centred above it) and at 1000px (home page unchanged, full 1220px
+column). Docs: `DESIGN_SYSTEM.md` ("Web page columns").
+
+### 2026-08-07 — A table can be booked with nothing to eat
+
+`POST /reservations` takes a branch, an instant and a party, and has never
+wanted an order. But the only calendar on the web lived on `/checkout`, which
+prices a basket, so "Book a Table" on a restaurant page stayed **drawn and
+disabled** until a dish was collected. A guest who wanted a table for Saturday
+had to put a burger in a basket to ask for one. **No API change here** — the
+whole feature was screens the clients never had.
+
+**It happens on the checkout, not on a screen of its own.** `loadBasket` grew a
+**`booking`** kind — a basket with no lines that still names a branch, in
+`dine_in` — and it carries no quote, because there is nothing to price. The
+checkout draws the calendar, the guest stepper and the deposit from that exactly
+as it does with food; what disappears is everything the quote fed: the lines,
+the totals, the payment methods and the ready-time field. In "Your order" the
+empty basket says so, with **"Order food ahead" linking to the restaurant** and
+"Book the table" below it.
+
+**This was briefly `/book/{slug}`, a page of its own, and that was wrong.** The
+reasoning — checkout is built around a quote, a booking has none — was true of
+the code and beside the point for the visitor: this is still the screen where
+you settle when you are coming and what it costs, and splitting it left two
+places that had to agree about the calendar, the stepper and the deposit.
+
+**`bookTableState` lost its dead state and then its basket argument.** The
+button is drawn wherever the restaurant takes bookings and always lands on the
+checkout. What it does carry is the **branch**, because an empty basket names no
+restaurant — `chooseServiceMode` opens a basket with no lines against it, and
+only when nothing has been collected, so a basket with food in it can never be
+quietly moved to another restaurant.
+
+**`/[lang]/reservations` and `/reservations/{id}`** were built with it, because
+a table booked on its own could otherwise never be looked at or given back —
+`GET /reservations` and `POST /reservations/{id}/cancel` had existed all along
+with nothing on the web calling either. Upcoming and past are split **by the
+API**, not by reading a status here, so the screen and the back office cannot
+disagree about whether a booking is over. The deposit line **reports** rather
+than computes: `depositCredited` and the status arrive settled by
+`depositOutcomeFor`, the same function the owner panel's no-show path calls.
+
+`/cart` handles the new kind too: a basket holding a table and no food is the
+same nothing there, so it draws the empty state — but points at the restaurant
+already chosen rather than the home page.
+
+27 keys in all three dictionaries, and `/reservations` joined the `PRIVATE` list
+in `robots.ts`. Booking needs no entry of its own: it is `/checkout`, already
+listed.
+
+Verified end to end in a browser against the running app. From a restaurant page
+with an **empty basket**: "Book a Table" live rather than disabled → `/checkout`
+with "Your order" reading "Add a dish to start", the deposit at 4 000 ֏ and two
+buttons → signed in by OTP → booked → "✓ Table booked", the booking button gone,
+"Order food ahead" pointing at `/ru/r/burger-bros`. The row landed in the
+database with **no order against it** — a table and nothing else — and was then
+cancelled from `/ru/reservations`, deposit returned.
+
+
+### 2026-08-07 — Checkout stops offering a booking mode that leads nowhere
+
+`/[lang]/checkout` drew **Table booking** beside **Pre-Order** at every
+restaurant. At one that takes no bookings the tile's only destination was the
+"This restaurant does not take bookings" notice — a door painted on a wall.
+It is drawn only where a table can actually be booked now.
+
+**Which needed a new field, because neither existing one answers it.**
+`GET /cart/quote` gains **`reservationsEnabled`**: `reserve` declared **and**
+bookings not paused, the same pair `GET /restaurants/{id}/availability` and
+`POST /reservations` already gate on. `eatInRequiresBooking` looks like it would
+do and does not — it is the *declaration*, so it stays true through a pause, and
+it is false at a place declaring `reserve` alone because there is no pickup pair
+for a dead half to sit under. The pause switch is not in `services` at all, so
+no client could derive this even in principle. It is `bookableAt` in
+`orders.service.ts`, built from `resolveBranchOffering` like everything else
+that asks what one address offers.
+
+**Both entrances to the calendar close together.** The dead "Eat at the
+Restaurant → Only by booking a table" tile under Pre-Order is gated on
+`reservationsEnabled` too; on `eatInRequiresBooking` alone it would have
+reopened exactly the dead end the mode tile was hidden to avoid.
+
+**A lone option is drawn, not hidden** — in both blocks on this screen, which
+is a reversal of the rule the pickup pair used to follow.
+
+Dropping the mode row wherever booking was unavailable (which this entry
+originally did) left the screen opening on "Pickup type" with nothing above it
+saying what was being picked up. The artifact does not do that: `fulfillModes`
+maps `modeKeys` with no minimum, so one mode draws one tile. The same argument
+applies to the pickup pair, which the artifact *does* gate on
+`subKeys.length > 1` — a take-away-only restaurant drew no section at all, so
+*what happens to this food* was answered nowhere, when stating it is the one
+thing that block is for. Both now draw the single entry, ticked: not a question,
+a label. See `docs/design/README.md` (ninth pass) for the departure.
+
+A restaurant that has declared **nothing** still draws no pickup section, since
+`pickupOptions` is then empty — there is no ending to name, and inventing one
+would be the screen answering what the API did not.
+
+**A basket already `dine_in` keeps the tile** even where the answer is no: a
+restaurant can pause bookings mid-checkout, and hiding the mode somebody is in
+would leave them looking at the refusal with nothing to press. That is now the
+only way to reach the notice.
+
+Checked against the running app across every kind of restaurant: `reserve` draws
+both modes and the dead eat-in door; `dinein` draws one mode and two live
+endings; pickup-only draws one mode and the single "Takeaway"; a restaurant that
+declared nothing draws one mode and no endings. And, by pausing one branch's
+bookings and putting it back, the two cases that motivated the field: paused
+with a pickup basket offers nothing dead, paused with a dine-in basket keeps the
+tile and the notice so there is a way out.
+
+### 2026-08-07 — The sign-in phone field was 26px tall inside a 54px pill
+
+`#phone` in `PhoneField` had `height: 26px`. The artifact draws a 54px row with
+a **`1px × 26px` divider** between the dial code and the number, and the input at
+`height: 100%`; transcribing that divider as the input's `border-left` carried
+its 26px onto the field itself.
+
+Two things were wrong as a result, both measured in the running app rather than
+reasoned about. **Only a band across the middle of the field took a click** —
+`elementFromPoint` at the top and bottom of the right half of the pill returned
+the wrapping `div`, not the input; it returns `#phone` at all three heights now.
+And **the focus ring was drawn around that band**, a 26px box floating inside a
+54px field.
+
+The divider is its own element again, as the design has it, so a hairline's
+height can no longer become a field's. The ring moved to the **pill**: that is
+the field a visitor sees, and it is the shape the invalid state already uses
+(`.phone-row:has(input[aria-invalid='true'])`). The per-control rings stay as a
+fallback where `:has` is unsupported, and are correct now that both controls
+fill the row.
+
+### 2026-08-07 — The web sign-in is the artifact's auth card, tabs and all
+
+`/[lang]/signin` was a bare heading over a stacked form. The web artifact draws
+a centred card with a **Log in / Sign up** tab pair, a name field on the sign-up
+side, the phone pill, the OTP note, the CTA and the terms line — and that is
+what the page is now (SCREENS.md §14c).
+
+**The tabs choose a field, not an endpoint.** There is one credential and one
+call behind both: `verify-code` already took an optional name and upgrades the
+guest account in place, so signing up is the same flow with the name field
+showing. The artifact agrees — both of its tabs run one `submitAuth`. Nothing
+on the page can tell a returning number from a new one before the code is
+confirmed, and it does not need to. The name is a hint, not an instruction: the
+API fills it in only where there is none already, so confirming an existing
+number cannot rename that account from a form.
+
+**They are links (`?mode=register`), not buttons.** The whole order flow works
+with JavaScript off, and a client-side toggle would be the one control on it
+that does not. The tab, the name and the number therefore travel in the query
+string across the code step and every bounce back with an `?error=` — otherwise
+somebody halfway through signing up lands back on the log-in tab with the name
+they typed gone.
+
+**The country picker is the one departure from the artifact.** The artifact
+prints a fixed `+374`; `PHONE_COUNTRIES` has eight countries with their own
+grouping rules, and `requestCode` refuses a number whose country was not named,
+so dropping the select would have dropped the other seven. It sits inside the
+same pill instead — and each option now leads with the dial code, because a
+select narrow enough to leave the number room truncates, and the first render
+of this cut `+374` in half.
+
+The artifact's auth heading, tab, CTA and register strings were missing from
+`packages/i18n` (only the mobile screen's subset was there): `authLoginHead`,
+`authRegisterHead`, `authLoginCta`, `authRegisterCta`, in all three languages.
+
+**No Apple/Google buttons — the web artifact has none.** Its only "Google" is
+Google Pay at checkout. The *mobile* artifact does draw them, and they remain
+unbuilt on both clients for the reason SCREENS.md §0 has always given:
+`POST /auth/social` does not exist.
+
+### 2026-08-07 — The mobile app's committed API address had gone stale
+
+`app.json`'s `extra.apiUrl` pointed at `192.168.27.6`, a dev machine DHCP has
+since moved to `.5`, so every screen in the app rendered its chrome and then
+said "Cannot reach the server". Updated to the current address.
+
+The value being committed at all is the trap — it is a lease, not a constant,
+and it will go stale again. `apps/mobile/README.md` now says so, along with the
+part that makes it hard to diagnose: **Metro bakes the resolved config into the
+bundle and caches it**, so editing `app.json` and restarting still serves the
+old address. The symptom is identical to not having edited it, and
+`expo start --clear` is what actually applies the change. The README also
+described `extra.apiUrl` as holding `localhost:3000`, which it has not for some
+time.
+
+### 2026-08-07 — The checkout's party size is the artifact's stepper, not chips
+
+`/[lang]/checkout` drew a chip per seat to ask how many people are coming. The
+web artifact draws a `− [count] +` stepper there, which is also what the app has
+always drawn, so the web now draws it too.
+
+**Why the chips were the wrong control anyway.** They put up to twelve
+near-identical targets on screen to answer a question whose answer is nearly
+always two or four, and the row grew with the branch: a restaurant seating
+twelve wrapped onto a second line of buttons that all look alike. A stepper is
+two targets whatever the branch seats.
+
+**The markup did not change.** Both buttons are still `type="submit"` on the
+checkout form with `name="guests"`, exactly as the chips were — the party size is
+server state (it re-prices the deposit), and a GET to a new URL would redraw the
+page with the date-and-time field above it emptied. Each carries the number it
+would produce rather than a direction, so the arithmetic stays in the page and
+`submitCheckout` goes on taking one `guests` value and clamping it to
+`RESERVATION_MAX_GUESTS`. Two buttons rather than a number input, for the same
+reason the basket's quantity stepper is two forms: this works with no
+JavaScript, and a field typed into with no button to press would do nothing.
+
+**But pressing one is no longer a navigation** (`GuestStepper`, the first client
+component in the checkout). Submitting the form ran `chooseTiming`, which
+redirected to the page it was already on: the router replaced the whole tree and
+the customer watched the entire checkout blink for the two API round-trips it
+takes to re-price a deposit — to change one digit. The scroll jumped with it.
+
+The component now intercepts the click when it can: `preventDefault`,
+`useOptimistic` moves the count at once, and a new `changeGuests` action stores
+the party and revalidates **without** redirecting, so React patches the count and
+the deposit in place. Measured against the running app: **no top-frame
+navigation at all**, the count moves in ~30ms and the deposit follows at ~300ms,
+the scroll position holds, and the `datetime-local` above keeps both its DOM node
+and a time typed into it but not yet posted.
+
+`changeGuests` takes the **whole form**, not a number, so the guarantee
+`rememberTiming` exists for still holds — an unposted time travels with the
+press exactly as it did when this was a chip submitting the form.
+
+**The deposit is not moved optimistically, only the count.** It is money, and
+this client does no arithmetic on money (DEVELOPMENT_GUIDE.md) — `depositAmd` is
+sized by the server for the party. The number answers instantly and the amount
+follows; showing a figure the page guessed and then correcting it would be worse
+than showing the old one for a moment.
+
+**With JavaScript off nothing above happens and the stepper still works** — the
+submit is the fallback, not a leftover. Verified by clicking `+` with script
+execution disabled: one navigation, party 2 → 3, deposit 4 000 → 6 000 ֏.
+`chooseTiming` keeps its redirect for exactly that path, so a reload does not
+re-post the form.
+
+**Where it stops.** `−` at 1, `+` at the smaller of `RESERVATION_MAX_GUESTS` and
+the branch's `maxSeats` — the same ceiling the chips were generated from, so no
+party that could be asked for before is refused now. At the top a grey "(max)"
+appears beside the count, since a `+` that has quietly stopped working says
+nothing on its own. A disabled button keeps its place rather than being hidden.
+
+New keys in all three dictionaries: `guestsFewer`, `guestsMore` (the buttons'
+accessible names — the glyphs are `−` and `+`) and `guestsMax`. `.guestpicker`
+and `.guest` are gone from `globals.css`, replaced by `.guest-stepper`. The
+button class is `guest-step` rather than `step` because `.step` is already the
+order tracker's progress segment, and its `flex: 1` stretches anything that
+takes the name across the column — a `flex-basis` of 0 beats any `width` set
+beside it.
+
+Docs: SCREENS.md (both the booking block and the web-vs-app table),
+COMPONENTS.md (`GuestPicker`, and `GuestStepper` beside it), DESIGN_SYSTEM.md
+(the two steppers are now described separately, and "Guest chips" is marked
+removed).
+
+### 2026-08-07 — The checkout's two times are the artifact's fields, not grids
+
+"Date & time" and "Ready at" on `/[lang]/checkout` are now drawn as the web
+artifact draws them: a 50px row with an accent glyph and a native field in it —
+`datetime-local` at `step=1800` for the table, `time` at `step=900` for the
+food. The seven-day pager, the reservation slot grid and the ready-time pills
+are gone. `docs/design/README.md` had recorded both fields as **deliberate**
+departures; that entry is reversed and the reasoning is kept beside it.
+
+**What the old objection got right.** A grid could only offer times the API had
+just agreed to, and a field can name one it will not. So that is handled instead
+of avoided: `min`, `max` and `step` keep the obviously-impossible out of the
+browser's picker, and `POST /reservations` answers the rest — a closed day, an
+off-grid minute, a party no table seats, a table already taken — with a 422 the
+page draws above the fold under one message (`slotUnavailable`, new in all three
+dictionaries). What it missed is that the grid was never safe either: a slot
+could be taken between drawing it and pressing it, which is the `slot_taken`
+path that already existed. The real cost is **discoverability** — the grid
+showed which times were free and the field does not.
+
+**Three things moved with them.**
+
+- **The party size is in the basket cookie, not the URL** (`Cart.guests`, and
+  `Cart.reservedFor` beside it). The chips were links, and a link is a fresh GET
+  that would redraw the page with the date-and-time field emptied — a native
+  field holds its value nowhere but the page. They are submit buttons now, and
+  the pair survives a party change, a trip through `/signin` and a refused
+  booking. Both are dropped when the mode leaves dine-in, like `reservationId`.
+- **The left column is one form with an `intent`** (`submitCheckout`, which
+  replaces the exported `placeOrder`, `bookTable` and `chooseReadyAt`), so
+  nothing on the screen can empty anything else on it. `intent` on the button
+  rather than a `formAction` per button, because React encodes which action a
+  `formAction` names in that button's own `name` and the chips need theirs.
+- **The CTA is one button with two meanings**, as the artifact draws it: "book
+  the table" while a dine-in basket has none, the payment once it has. It used
+  to be a warning notice pointing at a slot grid that no longer exists.
+
+**"As soon as possible" is now an empty field**, with a hint saying so. The pill
+that carried it is gone and the artifact draws nothing in its place, but the
+meaning is real — no `readyAt` at all is what `POST /orders` reads that way.
+
+New: `READY_STEP_MINUTES` exported from `packages/shared` so the mobile grid and
+the web field cannot come to disagree about the grain; `yerevanDateTime`,
+`instantOfYerevan`, `instantOfYerevanTime` and `yerevanStepUp` in
+`apps/web/src/lib/format.ts`, because a native field speaks wall-clock readings
+with no zone on them and everything either side of it speaks instants — and the
+clock is the restaurant's, not the reader's. `color-scheme` now follows the
+theme switch and not only the system, or a page put into dark opens a white
+calendar over itself.
+
+**Left open, and written down rather than settled in passing:** the web artifact
+draws "Ready at" for a dine-in basket too, which contradicts `SCREENS.md` §5 —
+the table already answered that question, and asking twice lets somebody hold a
+table for 19:30 tomorrow and have the food cooked this afternoon. That
+contradiction predates this change; the note is now in `SCREENS.md` beside the
+rule.
+
+Docs: `SCREENS.md` (§5, and the app/web table), `DESIGN_SYSTEM.md` (§6 Forms —
+the clock field and its `color-scheme`), `docs/design/README.md` (eighth pass),
+`apps/web/README.md` (checkout).
+
+### 2026-08-07 — A restaurant that takes bookings says so before you have ordered anything
+
+The order panel's "Book a Table" was gated on `canBook` **and** the basket
+having something in it. The artifact gates it on `canBook` alone — its `sc-if`
+sits above the lines and above the empty-basket state alike — so a restaurant
+that takes bookings looked like one that does not until somebody had already
+chosen a dish, which is the one moment they have stopped deciding where to eat.
+
+It is now drawn whenever the restaurant takes bookings, and **disabled** rather
+than absent until this restaurant's basket has a dish in it. That is not a
+second opinion about when to offer it: the calendar lives on `/checkout`, which
+prices a basket, and `POST /cart/quote` refuses one with no lines
+(`@ArrayMinSize(1)`), so a press could only land on the basket page saying "add
+a dish". A basket collected at another restaurant waits too — that is not this
+restaurant's table to book — and so does a panel that has not heard back yet.
+
+The rule is `bookTableState` in `lib/order-panel.ts` rather than a condition
+inside the JSX, because this is exactly the kind of condition that gets quietly
+tightened; it has its own tests. The button also picks up the artifact's
+`display:flex` centring and 9px glyph gap, and a disabled state that keeps its
+colour at half strength beside the panel's own "add a dish to get started".
+
+Docs: `COMPONENTS.md` (`OrderPanel`), `SCREENS.md` (app/web comparison).
+
+### 2026-08-07 — A basket the API will not price no longer takes the page down with it
+
+`/cart` rendered an error screen — the raw `ApiError` throw site in
+`lib/api.ts` — whenever `POST /cart/quote` answered with anything other than
+`401`. Two of those are ordinary and reproduce against a running API: a basket
+whose branch has been withdrawn (`404 Restaurant not found`) and one carrying a
+table booking that has since been cancelled (`404 Reservation not found`). The
+basket cookie is **httpOnly**, so the screen that could have cleared it was the
+one failing, and the customer had no way off it short of devtools.
+
+`loadBasket` now returns one of three states — `empty`, `priced`, `stale` —
+instead of a basket-or-null that threw on the third. `/cart` renders the stale
+one as the empty state's twin: the same shape, with "Start a new basket" wired
+to the `emptyBasket` action. `/checkout` sends anything that is not `priced` to
+`/cart`, which is where it is explained.
+
+**A `5xx` still throws.** That is the API breaking rather than the basket going
+out of date, and telling somebody to rebuild a basket that was never the problem
+would be the wrong instruction. The refusal is logged server-side with its status
+either way — which dish or which booking went missing is a developer's question,
+and the page says only that the basket has to be started again.
+
+This is the rule the Server Actions already stated (`actions.ts`: "a basket that
+has gone stale ... should read as a message on the screen they are on, not as an
+error page that loses their basket"); the page render was the one path that did
+not follow it. Docs: `SCREENS.md` §4 and the app/web comparison.
+
+### 2026-08-07 — A dish may take 0 minutes, because some of them do
+
+The menu form refused a prep time of zero (`@Min(1)` in `menu.dto.ts`, matched by
+`dishFormValid`), so the only way to put a bottle of water on a menu was to leave
+the box empty — which does not mean "no wait", it means "no estimate", and the
+branch's average then promised a wait for something that is handed across the
+counter. **`prepMin` is now `0…480`** on both create and PATCH, and the panel
+accepts a typed `0`.
+
+**Three states, not two.** Absent leaves an estimate alone, `null` takes it back,
+and `0` is a dish claiming it needs no cooking. `dishPatch` already distinguished
+an empty box from a typed number by trimming rather than by truthiness, so it
+sends `0` correctly; the DTO test that `null` survives transformation matters more
+now, because `@Type(() => Number)` applied to `null` would produce a `0` that
+validates and would quietly store "needs no cooking" in place of "no longer says".
+
+**`estimatePrepMinutes` counts a declared `0` as declared.** It filtered on
+`min > 0`, which treated a zero as an unfilled column and fell through to the
+branch average — for a basket of nothing but drinks that invents a wait out of a
+number somebody did fill in. Beside food nothing changes: the estimate is the
+maximum, so a bottle of water never made a burger slower and still does not. Only
+`null` reaches the fallbacks now.
+
+The panel's hint says so in all three languages. Docs: `BUSINESS_LOGIC.md` §4 and
+the menu-edit section, `API_DOCUMENTATION.md` (quote + menu-item rules),
+`COMPONENTS.md` (`dishFormValid`/`dishPatch`).
+
+### 2026-08-06 — The restaurant page is the drawing again: the tabs filter, and the card the artifact never had is gone
+
+Read against `design/Amragrir Web (standalone).html`, the page differed in four
+places. Two were measurements; two were decisions worth re-opening.
+
+**The menu tabs filter now**, one category on screen and the chosen pill dark, as
+the artifact draws them. They were anchors that scrolled a page rendering every
+section at once, because the whole menu has to reach a crawler — that premise was
+right, and it never required the tabs to look different. They filter **in CSS**:
+each pill is a `<label>` around a radio, and `.menu:has(input[value=…]:checked)`
+picks the section to paint. Every section is in the markup unconditionally, so
+the crawler still gets the whole menu and the tabs still work with JavaScript
+off. The rule is gated on `@supports selector(:has(*))` — a browser that applied
+`display:none` to the sections but not the rule that brings one back would draw a
+menu with no dishes on it. Without `:has()` the page is what it was: every
+section at once, under visible headings.
+
+**Section headings are no longer drawn** but stay in the markup, hidden. The pill
+says the word already; a flat run of cards with no headings has no structure for
+a crawler or a screen reader to read.
+
+**The "order ahead / call" card is removed.** The artifact draws nothing there,
+and the reason recorded for keeping it — "with JavaScript off it is the only
+route from a restaurant to its basket" — was **false**: the header's basket pill
+renders as `<a href="/ru/cart">` in the server's markup on every page, verified
+in the response. The phone went with it; the artifact puts no number on this
+screen, and the branch's number is still emitted as `telephone` in the page's
+JSON-LD.
+
+**The title sat 52px under the banner where the drawing puts it at 26** —
+`.rest-head` carried a `margin-top:26px` inside `.rest-grid`, which already has
+one. Everything else already matched the artifact to the pixel.
+
+Removed with them: `.cta` and its five rules in `globals.css` (`.cta-action`
+stays — the hero and the 404 use it), `telHref` in `lib/format.ts` and the spec
+that covered only it, and the strings `orderInAppHint` and `callRestaurant` in
+all three languages. `orderAhead` stays, used by the home hero.
+
+**Not changed:** the artifact's meta line and `📍` chip both show a distance.
+That needs the visitor's coordinates from a cookie, and a `cookies()` call here
+would opt all 69 pre-rendered restaurant pages out of static rendering — the one
+trade this app does not make. The chip keeps the branch's street address.
+
+Verified in the running app at `/hy/r/tashir-pizza`: one section painted, the
+other two present in the HTML and hidden, the first pill dark.
+
+### 2026-08-06 — Un-choosing a place brings the map back to Yerevan
+
+The map already **opened** on Yerevan with nothing chosen — `YEREVAN` in
+`lib/locations.ts`, Republic Square at zoom 12, which is also the centre the
+geocoder biases searches around. What it did not do was go *back* there. The
+`useEffect` in `YandexMap` that frames a place arriving from outside began
+`if (!value) return;`, so `null` — the one value that means "the whole city" —
+was the only one it ignored.
+
+That was invisible until the ✕ on the badge was added earlier today, because
+until then nothing could set `null` on an open dialog. With it, pressing ✕ left
+the map exactly where it was: framed at zoom 16 on the single street the visitor
+had just rejected, while the badge beside it read "Yerevan · all districts". The
+map now returns to the `YEREVAN` view, so "no place" looks the same however it
+was arrived at.
+
+Two tests guard the constant itself (`lib/locations.spec.ts`): that it sits
+inside Yerevan, and that its zoom holds the city rather than one street. A
+slipped decimal there would move the opening view *and* skew every address
+search, in a place nothing else would report.
+
+Also swept up: comments left stale by the chip removal — in `locations.ts`,
+`recent-places.ts`, `map-frame.ts`, the geolocation-failure note in
+`LocationPicker`, the map's keyboard note in `YandexMap`, and two test names in
+`locations.spec.ts` that described the districts as radio values.
+
+### 2026-08-06 — The district chips are out of the location picker, and choosing a place now needs JavaScript
+
+**Removed:** the `locpick-chips` `radiogroup` in `components/LocationPicker.tsx`
+— "all districts" plus the artifact's six, as `<label>`s over radios — and
+everything that existed only to serve it.
+
+That row was the picker's whole no-script story: the browser tracked the
+selection, confirm posted it as `preset`, and `chooseLocation` read that field
+when `place` came back empty. So **the dialog no longer chooses anything without
+JavaScript.** It still opens, reads and closes natively; confirm there posts an
+empty place, which is the whole city — the state such a reader already had.
+Nothing on the ordering path asks for a location, so what this costs is the
+distance on a card and the "near me" sort, both already absent for anyone who has
+not answered. Recorded rather than glossed: it is a real reduction in what the
+site does without a browser, and `SCREENS.md`'s "every step works with JavaScript
+disabled" now carries the exception.
+
+**Two things had to change with it, neither of them cosmetic:**
+
+- **The un-choose was rebuilt.** "All districts" was a chip in that row and the
+  only way back to the whole city; deleting the row alone would have made a
+  visitor's first choice permanent. It is now a ✕ on the glass badge that names
+  the pending place — `.locpick-unset`, scripted like everything else left.
+- **The search box is gone when there is no geocoder key.** Without a key it
+  never searched addresses — it filtered those chips, which is why it had a
+  placeholder of its own. With nothing left to filter, typing in it could not
+  change anything on the screen. An unkeyed deployment is now map, recents and
+  confirm.
+
+**Dead code removed with it:** `showAll`, `presets`/`shownPresets` and the
+`matches()` helper in the component (`DrawnMap` takes `AREAS` directly now); the
+`preset` fallback in `chooseLocation`; `.locpick-empty`, the hidden-radio rules
+and the `:has(input:checked)` half of the chip's on-state in `globals.css`; and
+three strings per language — `locDistricts`, `locAddressSearchOff` and
+`locSearchPlaceholder` (the no-key placeholder, "Search a district…").
+
+`AREAS` stays: the six districts are still the vocabulary points are named in —
+`nearestArea` labels a tapped point when no geocoder can do better, and the drawn
+placeholder still draws their pins — they are simply no longer a control.
+`@amragrir/web` typecheck and its 193 tests are green; no test covered the
+removed markup.
+
+### 2026-08-06 — The pin on the real map is the artifact's pin, and there is now only one of it
+
+The picker has two maps — the artifact's drawing, and Yandex's widget — and they
+were marking a point with two different things. The drawing used the artifact's
+pin, transcribed exactly. The real map used a CSS box rounded into a teardrop
+(`border-radius: … / 44% 44% 60% 60%`), **which is an egg**: it has no point on
+it. So on the only map where the answer is a specific spot on a specific street,
+the marker could not say which spot it meant.
+
+The shape now lives once, in `components/MapPin.tsx`, drawn around its own point
+at the origin. The drawn map places it with a `translate()` inside its own
+coordinate space; the real map renders it as a 26×35 `<svg>` over the frame,
+translated `-50%, -90%` so that the **tip** — 90% down the box, which is what
+`PIN_TIP` records — lands on the coordinate rather than the middle of the head.
+Nothing about the shape itself changed; there is simply no second copy of it to
+get this wrong again.
+
+Verified in the running app at 1440px, light and dark: the pin sits on
+`Կենտրոն` with its point on the street, white ring, white centre and the ground
+shadow the artifact draws, and the drawn placeholder is unchanged.
+
+### 2026-08-06 — Yandex does speak Armenian, and a search now answers in the alphabet it was asked in
+
+**`yandexLang('hy')` returned `en_US`.** The comment above it said Yandex had no
+Armenian; it does. `lang=hy_AM` answers `Վարդանանց փողոց, 10 · Երևան, Հայաստան`,
+and the map widget draws its labels *and its own controls* in Armenian. The
+claim was made without a key to test it with, and it cost the product's default
+language its own alphabet — on the map, in the search results, and in the name
+of every point tapped. Fixed, and the wrong reasoning is recorded next to the
+right answer so it does not get re-derived.
+
+**And the language of a search now follows the query, not the page.** Typing
+`Վարդանանց` on the Russian pages returned Russian results — an answer in an
+alphabet the reader did not type in, which is the moment a search box stops
+feeling like it understood you. `queryLang` reads the script instead: Armenian
+→ `hy_AM`, Cyrillic → `ru_RU`.
+
+**Latin deliberately does not count.** `Vardanants` is how the street is written
+in a Russian reader's transliteration *and* an Armenian one's, so it says
+nothing about which language is wanted — where each of the two non-Latin scripts
+belongs to exactly one. Latin therefore keeps the page's language, and only an
+unambiguous script overrides it. A tap on the map asks in no alphabet at all, so
+its address follows the page.
+
+Verified against the live geocoder in every combination: Armenian query → five
+Armenian suggestions on the Armenian, Russian and English sites alike; Russian
+query → Russian everywhere; Latin → the site's own language; reverse → the
+site's. Then the whole round trip on the Armenian pages — Armenian map, Armenian
+suggestions, `Հանրապետության փողոց, 42-46` for a tapped point, and the header
+reading it back out of the cookie.
+
+### 2026-08-06 — Address search is on, and the keyed path is verified at last
+
+A working `YANDEX_GEOCODER_API_KEY` arrived, and the half of the picker that
+had only ever been unit-tested was finally exercised against the real thing.
+It works, in all three languages, with one change needed on the way.
+
+**Choosing an address now takes the map there.** The rule was "move only if the
+point is not already on screen", which is right for a tap and wrong for a search
+result: picking `Вардананц 10` from the list left the pin as a dot 17 pixels off
+the centre of a whole-city view. It now frames any place that came from outside
+the map at street zoom. The tap case is unaffected and did not need the
+distance test to stay still — a tap writes its own point in before it reports
+it, so it never reaches that code. One guard fewer, and the better behaviour.
+
+Verified end to end at 1280px: `Вардананц 10` → five suggestions, Yerevan first
+and the Ashtarak/Vanadzor/Taperakan namesakes below it (that is `ll`+`spn`
+doing its job) → picking one re-points the frame to `44.518565,40.177291` with
+the pin dead centre → a tap on the map now answers with a street rather than a
+district, `улица Анрапетутян, 42-46` → confirm writes
+`amr_loc=40.176303~44.51599~…` and the header reads it back. Reverse geocoding
+in `hy` answers in English, as designed — Yandex has no Armenian.
+
+One thing worth writing down for the next person holding a key that "does not
+work": **percent-encode Cyrillic yourself when testing by hand.** A shell that
+mangles it makes Yandex answer `found: 0` for `Ереван`, which reads exactly like
+an account with no Armenian data and is not.
+
+### 2026-08-06 — A broken geocoder no longer looks like an empty city
+
+`GET /[lang]/geocode` swallowed every failure into `{ items: [] }`, so a key
+Yandex refuses was indistinguishable from an address nobody has heard of — and
+that is the failure that actually happens, on the day somebody deploys. It now
+answers `{ items: [], failed: true }` and the picker reads it: the results list
+says *"Search is temporarily unavailable"* (`locSearchFailed`) instead of
+*"Nothing found"*.
+
+The reason goes to the server log, where the operator is, rather than to the
+visitor: `[geocode] Yandex answered 403: {"message":"Invalid api key"}`. **The
+URL is never logged** — the key is in it.
+
+Found by installing a real key and watching the dialog say "nothing found" for
+`Вардананц 10`, which is a street that plainly exists.
+
+**How to tell a refused key from a wrong one** is now written down in
+`.env.example`. Three keys were tried — one per product, Geocoder included —
+and all three answered 403 identically on every service that validates a key,
+which points at the account rather than the product. The trap worth recording:
+`api-maps.yandex.ru/2.1/` answers **200 for any key and for none**, so it is
+not a test of anything; `geocode-maps.yandex.ru/1.x/` is. Also recorded there:
+**Geosuggest is not a substitute** for the Geocoder — it returns no coordinates
+at all, and the `uri` it returns instead is resolved by the Geocoder.
+
+Typing a street into the picker with no `YANDEX_GEOCODER_API_KEY` configured
+answered "Այդպիսի թաղամաս չկա" / "No district by that name" — true, since
+without a geocoder the box filters the six presets, and useless to somebody who
+was plainly typing an address. That dead end now says which search this is and
+what to do instead: *"Address search is unavailable. Pick a point on the map, or
+a district from the list."* (`locAddressSearchOff`). `locNoMatches` — still what
+the results list shows when the geocoder answers with nothing — was reworded to
+the general "Nothing found", since with a geocoder it is not about districts.
+
+**A keyless geocoder was investigated and rejected.** Nominatim (OSM) and Photon
+were both queried with the addresses this product's readers actually type:
+`Вардананц`, `Северный проспект` and `Վարդանանց` return **nothing** from either,
+while `Vardanants 10` resolves correctly. OSM has Yerevan's streets in Armenian
+and English, and its Russian index is effectively empty — so a keyless address
+search would be a search box that finds nothing in two of the three languages
+this app ships. Yandex's geocoder remains the only good answer here, and it
+needs its key.
+
+### 2026-08-06 — The picker's map is a frame, and needs no key
+
+The entry below made the picker's map real and made it Yandex's **JS API v3**,
+which needs a key. There is no key here, so what the dialog actually showed was
+the fallback: a drawing of a city that is not Yerevan. The map is now **Yandex's
+public map widget in an `<iframe>`** — no key, no quota, no script on the page —
+so it works in this deployment and every other one.
+
+`NEXT_PUBLIC_YANDEX_MAPS_API_KEY` is gone, and with it the last public key in
+this app. `YANDEX_GEOCODER_API_KEY` is unchanged: still optional, still server
+side behind `GET /[lang]/geocode`.
+
+**A cross-origin frame cannot be read, so it is not asked.** A tap inside the
+frame is Yandex's tap and a pan inside it is Yandex's pan — neither is
+reportable out here, and a frame left interactive would show one place while the
+pin claimed another. The frame is `inert` and the app owns the viewport: the pin
+is an element drawn over it, panning is a CSS transform, and the new
+`lib/map-frame.ts` projects pixels to coordinates. **Tapping picks the point
+under the finger; dragging looks around and picks nothing.** Zoom is two buttons.
+
+Neither tapping nor dragging reloads the widget. The frame is drawn 220px larger
+than its box on every side, so a drag slides real tiles into view; only a zoom,
+or a pan that has spent most of that margin, re-points the URL. A place chosen
+somewhere else — a preset, a search result, geolocation — moves the map only if
+it is not already on screen, so the map never jumps under the hand using it.
+
+**The projection is ellipsoidal Mercator (EPSG:3395)**, which is what Yandex's
+tiles use, not the spherical EPSG:3857 of most other maps. The difference is
+0.4% of every north-south movement: a pin in the wrong street, with nothing
+anywhere reporting an error. A round trip cannot catch it — spherical is
+perfectly self-consistent, it just disagrees with the tiles — so the test writes
+the spherical formula out beside it and asserts the gap between them.
+
+**The map is built when the dialog opens**, never before: an iframe inside a
+closed `<details>` still loads, and this control is in the header of every page.
+Verified — zero frames and zero requests to Yandex on a page view; one frame
+after the dialog opens; none at all with JavaScript off, where the drawing and
+the six presets are still the whole dialog. The drawing is therefore a
+placeholder now rather than a fallback for a missing key, and the "map
+unavailable" note (`locMapOffline`) is gone with the reasoning behind it: a
+frame cannot honestly report that it failed to load.
+
+Two things the widget draws for itself had to be drawn again, because the bleed
+pushes the frame's own corners out of sight: its attribution, now a link to the
+same view on `yandex.ru/maps`, and its dark scheme, now asked for in the URL —
+a frame inherits none of this page's tokens, and a dark page was opening a
+dialog with a white rectangle in the middle of it. New keys: `locMap`,
+`locMapCredit`, `locZoomIn`, `locZoomOut`.
+
+Verified in a browser this time, on the real map: opening, tapping (the pin
+lands exactly under the pointer and the frame does not reload), dragging (the
+selection holds still, the frame re-points once past the margin), zooming, the
+credit link following the view, both themes, 390px and 1280px, and the whole
+round trip on a phone — tap, confirm, `amr_loc=40.188133~44.533199~…`, header
+reading it back. What is still unexercised is the **geocoder**: with no key the
+route answers empty by design, so address search and reverse geocoding are
+covered by unit tests only.
+
+Docs: `COMPONENTS.md` (`YandexMap` rewritten), `SCREENS.md`,
+`DEVELOPMENT_GUIDE.md` (the app now ships no public key at all),
+`design/README.md` (fifth pass), `apps/web/README.md`, `.env.example`.
+
+### 2026-08-06 — A real map in the location picker, and the points you chose before
+
+The dialog added earlier today drew the artifact's hand-drawn city and offered
+the six districts pinned on it. It now shows **Yandex's map**, any point on it
+can be chosen, and the five most recently chosen points sit under the search box.
+
+**What is stored changed from a district to a point.** `amr_loc` held
+`kentron`; it now holds `lat~lng~base64url(label)` — a `Place`, which is what
+`GET /restaurants` has always taken. The district was only ever a way of
+producing a coordinate without a map. `parseArea`/`areaQuery` became
+`parsePlace`/`placeQuery`, and the home page and the "near me" chip follow the
+same rule as before, one field wider. The old cookie value parses as "no place",
+so an existing visitor lands on "all districts" and chooses again rather than
+seeing a broken header.
+
+That cookie alphabet is deliberate: every character `encodePlace` can produce is
+one `encodeURIComponent` leaves alone. Next URL-encodes cookie values on the way
+out and the browser reads `document.cookie` raw, so anything else would be a bug
+that appears only for names with a space in them. A test asserts the property
+rather than the format.
+
+**The six districts survive as presets** — the answer with no JavaScript, the
+answer with no map key, and six fewer taps for the answer most people want. Each
+is a `Place` like any other, so nothing downstream knows the difference.
+`chooseLocation` reads two fields in order: `place`, which the browser fills in
+from the map, the search, a preset or geolocation, and `preset`, the radios,
+which is what a page with no script has to offer. Two names rather than one,
+because a single name would leave which value won depending on where the fields
+sit in the document.
+
+**Recents are `localStorage`, not a cookie.** Only this dialog ever reads them,
+and a cookie would ride along on every request to every page for a row of chips
+most visits never see. Five entries; two points within 120m of each other are
+the same place, so a map tap repeated slightly off does not fill the row with
+one street corner.
+
+**Two keys, and they are not the same kind of thing.**
+`NEXT_PUBLIC_YANDEX_MAPS_API_KEY` reaches the browser — a tile cannot load
+without it — and its safety is the domain restriction set on it in Yandex's
+console. `YANDEX_GEOCODER_API_KEY` cannot be restricted that way, so it stays on
+the server behind a new route handler, `GET /[lang]/geocode`, which does both
+forward and reverse lookups; the browser is only told *whether* there is one.
+Both are optional and degrade separately: no map key falls back to the drawn map
+and the presets, no geocoder key names a tapped point after the nearest district
+rather than by its address. `apps/web/.env.example` is new and says so beside
+each variable.
+
+The map script is ~300KB and loads **on demand**, once per page, the first time
+the dialog opens. A load that fails — offline, ad blocker, a key Yandex
+refuses — falls back to the drawn map with a note saying the map is unavailable,
+rather than letting a decoration pass for something tappable.
+
+**Not verified in a browser: the keyed path.** *(Since verified — see the entry
+of the same day above.)* There is no key in this repository, so what has been
+exercised end to end is the fallback — drawn map, presets, recents, cookie round
+trip — plus the geocode route answering empty with no key. The Yandex-facing
+logic was split into `lib/geocode.ts` as pure functions and unit-tested for the
+parts that fail silently: the language mapping, the script URL, the geocoder
+URL's **longitude-first** coordinate order, and parsing a response shape that is
+optional at every level.
+
+Docs: `COMPONENTS.md` (`LocationPicker`, new `YandexMap`), `SCREENS.md`,
+`USER_FLOW.md`, `DEVELOPMENT_GUIDE.md` (which keys may be public and why),
+`design/README.md`, `apps/web/README.md`.
+
+### 2026-08-06 — "Выберите локацию" opens the artifact's dialog
+
+The header's location control was a 280px dropdown listing six districts. The
+design draws a dialog — 760×640 over a scrim, a map of the city with a pin on
+each district, a search box, the chosen district named on a glass badge, "use
+current location" and a confirm button — and that is what it opens now.
+
+It had been built as a list on the reasoning that the dialog needed a map nobody
+could draw and a geocoder nobody had. Re-reading the artifact, half of that was
+wrong. **Its map is not a map**: it is a hand-drawn SVG of five streets and a
+river, and the only things on it that mean anything are the six pins, which are
+the six districts the dropdown already listed. **Its search box does not
+geocode**: `locQuery` filters those six by name. And **"use current location"**
+is a browser permission prompt, which a server-rendered page cannot ask for but
+this control can — it has been a client component since the day it was built, so
+that all 69 restaurant pages stay pre-rendered. It now asks the browser and
+resolves the answer to the nearest district (`nearestArea()`), because a
+district is what the cookie holds and what `GET /restaurants` can be asked in.
+
+**Nothing was traded for it.** The dialog is a `<details>` whose `open` React
+controls, so it is a modal for a browser and a plain disclosure without one: no
+JavaScript and the summary still opens it, the districts are radios, confirm is
+a `<form>` submit posting `chooseLocation`, and ✕ is a submit on a hidden second
+form that re-posts the district already stored — a write that changes nothing
+and redirects back out. With JavaScript it gains Escape, the scrim, focus
+handling, a scroll lock, the map's pins, the search filter and geolocation. The
+chips are styled off `input:checked` rather than React state, so they stay right
+for the reader whose selection React never hears about. Selection is pending
+until confirmed, as the artifact has it, so four districts tried is one
+navigation instead of four.
+
+Three departures from the drawing, all in `docs/design/README.md`: the map is
+**fitted rather than sliced** (the artifact's `slice` on a 400×340 drawing in a
+panel twice as wide as it is tall crops 45% of the height, taking Cascade's and
+Shengavit's pins off the screen); **"all districts" is kept**, since somebody who
+has chosen a district must be able to un-choose it; and the header **drops its
+`backdrop-filter` while the dialog is open**, because a `backdrop-filter` makes
+its element the containing block for fixed-position descendants and the dialog
+lives inside the header — without that rule the overlay is trapped in a 72px
+strip at the top of the page.
+
+Two faults the artifact's fixed canvas could not have shown were fixed on the
+way: the confirm button collapsed to the height of the word on it below 560px
+(`flex: 1` turned upright grows from a zero basis, and a footer with no spare
+height gives it none), and at 640px of dialog the map cropped two of the six
+pins away.
+
+Six strings per language (`locSearchPlaceholder`, `locUseCurrent`, `locConfirm`,
+`locClose`, `locNoMatches`, `locGeoFailed`); `Area` gains `mapX`/`mapY`, the
+artifact's own pin layout rather than a projection, since its map is a drawing
+and six districts projected onto it truthfully would land in a huddle. Docs:
+`COMPONENTS.md`, `SCREENS.md`, `USER_FLOW.md`, `design/README.md`,
+`apps/web/README.md`.
+
+### 2026-08-06 — Switching language no longer throws the chosen theme away
+
+Switching language turned the page black — or white, for anyone who had chosen
+dark on a light machine. The theme was not being changed; it was being
+**deleted**. `data-theme` on `<html>` is set by the layout's pre-paint script,
+from `localStorage`, outside React. Switching language is the one navigation
+that changes the `[lang]` segment, which remounts the root layout, and React 19
+re-acquires the `<html>` singleton by **stripping every attribute on it** before
+re-applying the ones it rendered. `data-theme` is not one of those, so it went,
+and the page fell back to `prefers-color-scheme` — black on a dark machine.
+
+Measured in Chrome before the fix, on a machine set to dark with light chosen:
+`/r/dolmama` had `data-theme="light"` and `--bg: #F6F5F2`; one click of RU left
+`/ru/r/dolmama` with no `data-theme` at all and `--bg: #100E0B`. An ordinary
+same-language navigation kept it, which is what pointed at the segment change.
+
+The switch's links are now plain `<a>`, so a language change is a document load
+and the pre-paint script runs again before the first frame — which is where the
+theme is meant to be applied anyway. It is also the honest thing for this one
+link: the whole document changes language, down to `<html lang>`, and Next
+itself hard-navigates when a root layout changes. `language.spec.ts` guards the
+anchor, since no unit test can see the attribute being stripped and `<Link>` is
+the reflex everywhere else in this app.
+
+This predates the same-page switch below: the old links went home, and lost the
+theme on the way.
+
+Docs: `COMPONENTS.md` (`LanguageSwitch`), `DEVELOPMENT_GUIDE.md` §5 — with the
+general rule it leaves behind: anything set on `<html>` outside React survives
+only until the next remount of it, so it must be re-applied on every document
+load rather than once per session.
+
+**Noticed, not fixed:** `ThemeToggle` reads the *DOM attribute* to decide which
+glyph to show, not the stored choice, so a visitor who never chose a theme on a
+dark machine sees 🌙 ("switch to dark") on an already-dark page, and pressing it
+appears to do nothing. Same root cause family, different component; left alone
+because nobody asked for it yet.
+
+### 2026-08-06 — Switching language keeps the page you were on
+
+The web header's HY/RU/EN links pointed at `homePath(code)` — the *home page* of
+the language you picked. So choosing Russian while reading Dolmama's menu, or
+halfway through a basket, threw the page away and left the back button as the
+only way back. A language is a way of reading this page, not a reason to leave
+it.
+
+They now link the same page: `/r/dolmama` → `/ru/r/dolmama`, `/ru/cart` →
+`/cart`, and `?q=…` or the home filter chips ride along, so a switch mid-search
+returns the same results in the other language.
+
+The work is one pure function and one small component. `translatedPath()`
+(`apps/web/src/lib/site.ts`) swaps the language segment and keeps the rest of
+the address; it takes both the published path (`/cart`) and the internal one the
+middleware rewrites to (`/hy/cart`), because those are the two forms the caller
+can be holding — the second is what a server render of the Armenian tree sees —
+and a switch that moved you depending on whether JavaScript had loaded would be
+its own bug. It still never emits a `/hy/…` URL, guarded by the same test that
+guards every other link builder.
+
+`LanguageSwitch` (`apps/web/src/components/LanguageSwitch.tsx`) is a client
+component for one reason: **a layout is given its `params`, never the path below
+it**, and the way to get the path there — reading the request's headers — would
+opt every pre-rendered page out of static rendering. `usePathname()` costs
+nothing; only the *query* has to wait for the browser, since `useSearchParams`
+cannot be read while pre-rendering, so the switch renders inside a `Suspense`
+boundary whose fallback is the same nav without the query. The pre-rendered HTML
+therefore still carries real links to the right page — a crawler and a visitor
+without JavaScript keep a working switch — and the browser upgrades them to ones
+that also keep the query. `next build` confirms every page that was `● (SSG)`
+still is.
+
+Its `aria-label` was the literal string `"Language"` in all three languages; it
+is now the `language` key, which the dictionaries already had for the app's
+Settings screen.
+
+Docs: `COMPONENTS.md` (`LanguageSwitch`), `USER_FLOW.md` §8 (the web's switch is
+in the header and is a same-page move), `DEVELOPMENT_GUIDE.md` §5 (the rule that
+a URL-borne language must switch in place).
+
+### 2026-08-06 — The web is measured against the artifact, not just built from it
+
+The previous pass recorded which of the artifact's *screens* had been built. This
+one put the built screens beside the artifact's own measurements, and eight
+things did not match.
+
+**The header basket was the wrong control.** The artifact draws a solid accent
+pill — cart glyph, running total, count badge — and it is the one thing in that
+header meant to be pressed. What shipped was a 44px outline circle with a 🧺 in
+it that **disappeared when the basket was empty**, so the control moved depending
+on what you had. It is now the pill, and it keeps its place whether or not there
+is anything in it. The total arrives from `GET /[lang]/basket`, the same route
+handler `OrderPanel` reads, which returns money **already formatted as strings**
+— so the header still computes nothing and every restaurant page is still
+pre-rendered (the build confirms: `● (SSG)`). The badge went from accent to
+`--ink`, because accent on an accent pill had nothing to stand out against.
+
+**Every screen was laid out on the catalogue's 1220px.** The artifact draws the
+basket on 900 and the checkout on 980, centred; both were running full width and
+sitting left with a strip of dead space beside them. Now `.screen--basket` and
+`.screen--checkout`, with the column table recorded in `DESIGN_SYSTEM.md`.
+
+**The summary column was a box inside a box** — on the basket, the checkout *and*
+the restaurant panel. The `<aside>` is already a card and the artifact puts plain
+rows in it; the bordered `<dl>` nested inside read as a mistake. The standalone
+version on `orders/[id]`, which has no column around it, keeps its border.
+
+**The steppers had drifted from this repo's own documentation.**
+`DESIGN_SYSTEM.md` has recorded the artifact's lopsided pair since before the web
+app existed — `+` is an accent disc, `−` is a quiet chip — and the web drew two
+identical grey buttons. Adding one more is the ordinary thing to want; taking one
+away is the correction, and they should not look alike.
+
+Also transcribed: basket lines are one lifted card each with the dish's photo
+(they were rows in a flat list); the dish card's `＋` moved onto the foot row with
+the price, where the artifact puts it, instead of floating level with the dish's
+name; the checkout's payment rows, radio dots and mode tiles went to the
+artifact's radii and paddings, and the mode tiles now line up — the grid items are
+the `<form>`s, and the buttons inside them were not filling one; the profile hero
+gained the translucent disc the artifact bleeds off its corner.
+
+Two divergences are deliberate and recorded in `docs/design/README.md`: the
+restaurant page keeps a small "order ahead / call" card the artifact does not
+draw, because the order panel is drawn in the browser and that card is the only
+route to a basket with JavaScript off — restyled from an accent-soft panel that
+read as a second hero into the site's ordinary card chrome. And the footer still
+renders on every screen, where the artifact draws it only on home.
+
+Two responsive faults the artifact's fixed 1280 canvas could not have shown were
+fixed on the way: the header dropped the account mark onto a line of its own
+around 820px (the district name truncates instead), and a basket line overflowed
+the viewport below 560px, where five things in one row leave the dish's name a few
+pixels (it stacks into two rows now). `.sticky-cta`, dead since `StickyBasket` was
+deleted, is gone.
+
+Docs: `DESIGN_SYSTEM.md` (web page columns, summary column, header basket, dish
+foot row, basket line), `COMPONENTS.md` (`BasketButton` props and behaviour),
+`docs/design/README.md` (a second-pass reconciliation section). 131 web tests
+pass and `next build` still pre-renders every restaurant page.
+
+### 2026-08-06 — The sign-in phone field takes the shape of the number it wants
+
+The web sign-in already *checked* the number — `isValidNational`, the same
+function the server decides with — but it never *showed* what it was checking
+for. Eight digits arrived as `99123456`, a run the eye cannot count, and
+nothing stopped a ninth, tenth or thirtieth from being typed and then refused
+on submit. **Typing now stops at the chosen country's own length**: eight
+digits for Armenia, and a ninth only for somebody who wrote the trunk `0`,
+which is the one thing that earns the extra digit. A test holds every
+country's cap to a length that country calls valid, so no field can be filled
+to the brim and still be told it is wrong.
+
+The number is now written as it is typed: `99 12 34 56`, in the grouping the
+country uses, beside a select that carries the `+374`. `PHONE_COUNTRIES` in `packages/shared` gained a `groups` per
+country and the module gained `formatNational` and `maxNationalDigits`, so the
+shape, the length cap and the check all come from the one list the API's
+`normalizePhone` already reads. A country with two valid lengths keeps one
+rule — Germany's `[3, 3]` writes both its 10- and 11-digit forms — and every
+placeholder is now held to its own grouping by a test, so the specimen number
+cannot say one thing and the field do another.
+
+Armenia's specimen changed with it, `99 123 456` → `99 12 34 56`, which is how
+the number appears on a business card here. That is also the spelling in the
+API's "enter a valid phone number, e.g. …" message, since it is built from the
+same entry. *(The mobile app's `authPhonePlaceholder` is a separate string and
+still reads `99 123 456`.)*
+
+Three things the shaping had to get right to be worth having: **a pasted whole
+international number loses its duplicate dial code** rather than being kept in
+full and then cut to nonsense at the cap; **backspacing onto a separator takes
+the digit in front of it**, instead of deleting a space the formatter puts
+straight back; and **the caret is put back where it was**, so an edit in the
+middle of a number is not thrown to the end. The dial code stays on the select
+alone: it is already on the row, and printing it inside the number field too
+would state the same fact twice.
+
+The invalid hint now also appears when the field is **left** with an unfinished
+number, not only when a wrong one is long enough to be wrong. None of this is
+permission to submit: `requestCode` and `normalizePhone` still decide, and with
+JavaScript off the plain select and input post and get a translated answer
+exactly as before.
+
+### 2026-08-06 — The web design refresh: a 404 that exists, a location that means something, and an account
+
+`docs/design/web-landing.html` was replaced by
+`docs/design/Amragrir Web (standalone).html` — the same design carried forward
+plus the screens it never had: basket, checkout, **profile**, a **404**, and a
+**location picker**. Read against `apps/web` screen by screen; what follows is
+what was built, and `docs/design/README.md` carries the full reconciliation
+including what was not.
+
+**The 404 was not reachable.** `[lang]/not-found.tsx` existed, but only a page
+that *calls* `notFound()` renders it — an unknown URL matched no route at all
+and got Next's own error page: black, unstyled, outside this app's layout, with
+neither the header nor a way back. A catch-all under `[lang]` now takes the miss
+and calls `notFound()`, so the design's artwork (the two fours around a cloche
+on a gradient disc) renders inside the site. Copy is the artifact's own, which
+is better than what was there: "This page went off the menu".
+
+**The header's location control does real work.** `GET /restaurants` computes
+`distanceKm` and can sort by it, but only for a caller that sends `lat`/`lng` —
+and this app sent none, so every card's distance was blank and `sort=nearest`
+was unreachable. The six Yerevan districts the artifact lists now supply the
+coordinates, and distances appear on the cards. The **"Near me"** chip, recorded
+until now as unmappable to any API parameter, is `sort=nearest`, and is offered
+only once a district is chosen: with no origin the API answers in its default
+order, so a chip that lit and changed nothing would be a lie about the listing.
+A hand-typed `?sort=nearest` is dropped for the same reason.
+
+Not the artifact's map: what it draws is a hand-drawn SVG of nowhere, a real one
+needs a tile provider nobody has chosen, and "use current location" needs a
+permission prompt a server-rendered page cannot raise. Not a `distMax` either —
+saying where you are should not hide the rest of the city.
+
+**`/profile` and `/favorites`.** The account's counters (`GET /me` reports
+`rewardPoints`, `ordersCount`; favourites are counted from `GET /favorites`),
+the last five past orders with **Reorder**, and sign-out. Reorder copies ids and
+quantities only and lands on `/cart`, where `POST /cart/quote` prices it from
+scratch — a dish that changed price or left the menu is caught there rather than
+carried over from history. Sign-out revokes the refresh token before dropping
+the cookies, and takes the basket with it: it belongs to the session that is
+ending, and leaving it would hand the next person at that browser the last one's
+order. The chosen district survives, being a preference, not a credential.
+
+Three rows the artifact draws are absent rather than dead: saved addresses
+(there are no couriers), stored payment methods (the API lists what the platform
+accepts, not saved cards) and a help centre (no page to link to).
+
+**A type that had been lying.** `api.orders()` was typed `{ items: Order[] }`,
+but `GET /orders` returns summaries — `itemsCount` and `date`, no `items`, no
+branch, no payment. It compiled because the orders list only ever read fields
+the two shapes share; the profile page touched `items` and got `undefined` at
+runtime. Now `OrderSummary`, which immediately caught the same wrong assumption
+on `/orders`.
+
+**The basket got the artifact's two-column layout** — lines left, a sticky
+summary right, with the CTA inside it instead of a fixed bar.
+
+**And the restaurant page finally got its order panel** — the one thing this
+repo had recorded as deliberately not transcribed, twice, since 2026-08-03. The
+objection was that the panel needs the basket, the basket needs `cookies()`, and
+one `cookies()` call in that page turns 69 pre-rendered restaurant pages into a
+render per request; and that pricing it in the browser would mean a total the
+client computed. Both were true of building it *in the page*, and neither
+survives building it as `OrderPanel`: a client component over
+`GET /[lang]/basket`, a route handler that reads the httpOnly cookie, prices it
+with `POST /cart/quote` and returns lines and totals **already formatted as
+strings**. The page is still static HTML — the build still prerenders all 69 —
+and the client still computes no money, because it is handed `"1 860 ֏"` and has
+nothing to add up. Same trade `BasketButton` made for the header badge, one step
+further. `StickyBasket`, the fixed bar that stood in for the panel, is deleted.
+
+**Checkout became one page, because the artifact draws one page.** Mode, pickup
+type, table booking, ready time and payment on the left; the order summary
+sticky on the right. It had been split across `/preorder` and a `/checkout`
+slide-over drawer — the previous artifact's shape — which is why the screen bore
+no resemblance to the drawing. `/preorder` now redirects into `/checkout`, and
+the intercepting drawer route, `CheckoutPanel` and the layout's `@modal` slot
+are all deleted.
+
+Two things fell out of the merge. The payment radios are on the left and "Place
+order" is in the right-hand column, which HTML already answers: a submit button
+outside a form owns it by `form="…"`, so choosing a method and paying stays one
+native POST with no JavaScript in the path. And **the page no longer demands a
+sign-in on arrival** — right when it was only the payment, a toll gate now that
+it is also where somebody picks take-away and a time. `placeOrder` and
+`bookTable` each redirect to `/signin` and come back, and everything chosen
+lives in the basket cookie.
+
+The artifact's **pickup type** rows are transcribed as drawn: indented behind a
+rule, a ✓ on the chosen one, and an arrow with a "needs booking" badge on the
+one that leads to the calendar instead of selecting anything. Its ready-time
+clock field and `datetime-local` booking field are still not adopted — the pills
+and the slot grid are the sets the API will accept, and a free-form clock lets
+somebody pick 03:00 and be refused at the payment.
+
+The basket route **refreshes the token itself** on a 401, which driving it is
+what found: an access token lives fifteen minutes, a menu page can be open for
+longer, and the first version quietly returned "empty" — a panel claiming an
+empty basket beside a header badge reading 3. A Route Handler may write cookies
+where a page may not, the same fact `/session` exists because of.
+
+Two more things went with it. The block above the menu was overlapping its own
+buttons once the panel took 380px off that column — it is a flex row now — and
+its hint still read *"Pre-ordering and table booking live in the Amragrir app"*,
+which stopped being true the day web ordering shipped. It now says where the
+basket is.
+
+**The artifact's admin panel confirms the rule shipped yesterday.** Its three
+toggles are `reserve` / `pickup→takeaway` / `pickup→eat-in` under other names,
+and its stated rule — "enabling one automatically disables the other" — is
+`SERVICE_EXCLUDES`. Not built (the artifact hides its own entry point, and the
+real panel is `apps/admin`), but recorded as independent agreement.
+
+Docs: `design/README.md` (new artifact registered and reconciled; four stale
+claims corrected — "Reserve Table leads nowhere", "Near Me needs geolocation",
+"no endpoint reports reward points", and the two entries refusing the order
+panel), `SCREENS.md` (§14 table, §14a profile, §14b favourites),
+`COMPONENTS.md` (`LocationPicker`, `OrderPanel`, `StickyBasket` removed),
+`USER_FLOW.md` (§12: reorder, sign-out, district), `DESIGN_SYSTEM.md` (artifact
+names), `apps/web/README.md`.
+
+### 2026-08-05 — The dine-in *mode* is called Table booking, because that is what it is
+
+`ServiceMode.DineIn` read **"Dine in"** (hy `Տեղում`, ru `В зале`) on the
+pre-order mode selector and the checkout summary. That name was already thin —
+the mode has always required a `reservationId` — and it became actively
+misleading the moment `dinein` stopped meaning "a booking restaurant" and
+started meaning walk-in seating: one phrase, two opposite things, on screens a
+guest moves between.
+
+The **mode** now reads **Table booking** (hy `Սեղանի ամրագրում`, ru `Бронь
+столика`), and its hint says what distinguishes it rather than repeating its
+name — "A table held for you, deposit off the bill" instead of "Reserve a
+table".
+
+**The `dinein` *service* was not renamed to match** — it got its own name in the
+next entry below. Calling the service "Table booking" too would collide head-on
+with `reserve`, which *is* the booking: the home page would carry two filter
+chips both reading like a reservation while one of them filters for places that
+take none. The mode is the booking; the service is the room. They are different
+words because they are different things.
+
+### 2026-08-05 — The `dinein` service is called Eat at the Restaurant, on every surface that shows it
+
+`dinein` was still labelled **"Dine-in"** (hy `Տեղում`, ru `В зале`) — the panel
+switch, the card badge and the home filter chip. A name inherited from when it
+meant "this is a sit-down restaurant", and no longer saying the thing an
+operator needs to decide: **is there somewhere to sit, or is takeaway the only
+option here?** A hatch on a street corner and a room with tables were told apart
+by a word that described neither.
+
+It now reads **Eat at the Restaurant** (hy `Ուտել ռեստորանում`, ru `Поесть в
+ресторане`) — the same words the guest sees on the pre-order screen, because it
+is the switch that puts that button there. The whole chain says one thing:
+operator switches on *Eat at the Restaurant* → the card badge says it → the
+filter chip finds it → the pre-order screen offers it beside *Takeaway*. Switch
+it off and the guest gets Takeaway alone, which is the case the rename exists
+for.
+
+**Both service hints in the panel were wrong and are fixed.** They still
+described the requires-then-cascade rule from earlier the same day: the dine-in
+hint promised "turns table booking **on** with it" when it now turns it off, and
+the pre-order hint said eating in is offered "until table booking is on" when it
+now needs its own switch. A hint that contradicts the switch beside it is worse
+than no hint — somebody would have trusted it.
+
+### 2026-08-05 — A dining room stops needing a booking, and starts excluding one
+
+`dinein` **required** `reserve`, on the reasoning that wherever there is a
+dining room the way to a seat is the booking. That rule made the commonest kind
+of place in this market unsayable: the one with tables and no calendar — a
+khorovats place, a pizzeria, a bakery with a window seat. Under it, "we have a
+dining room" could only be said by a business that also took reservations.
+
+**The two are now mutually exclusive**, because they are two ways of seating
+somebody and an address does one of them:
+
+- **`dinein`** — the room seats whoever arrives. Nothing to hold, so nothing to
+  put a deposit on: the guest pre-orders, **pays for the food exactly as any
+  pre-order**, and eats it there off a plate. That order is a `pickup` order
+  with `pickup_option = eat_in`, and `reservation_id` / `table_no` stay null.
+- **`reserve`** — the table is held in advance. Eating in is the booking flow,
+  in `dine_in` mode with a `reservationId` and a deposit against the bill.
+
+**No new order path was needed**, which is the part worth writing down. The
+walk-in ending already existed as the `eat_in` sub-mode — priced, charged and
+tracked as the pre-order it is. What was wrong was how it was *reached*: eating
+in was offered wherever `reserve` was absent, which quietly assumed every place
+without bookings had somewhere to sit. A hatch on a street corner does not, and
+it was offering "Eat at the Restaurant" to people with nowhere to eat it.
+**Eating in is now declared** (`dinein`) rather than inferred from an absence.
+
+`acceptsPickupOption` deliberately did *not* move with it. It still refuses
+eat-in only where `reserve` is declared, so it stays wider than what the screen
+shows: a restaurant is created with an empty `services` and many never fill it
+in, and refusing an order on the strength of a field nobody got round to would
+break orders those places have always taken.
+
+The panel resolves the conflict instead of refusing to move — turning one
+seating on turns the other off (`toggleService`) — so no switch is disabled. The
+API still refuses a body naming both, with a 422.
+
+**Data.** Nine restaurants held the pair and were repaired by migration
+`20260805170000_dinein_excludes_reserve`, which drops `dinein` and keeps
+`reserve`. That is the behaviour-preserving direction: with both declared
+`takesBookings` was already true, so those places already offered take-away
+alone with the eat-in button dead — a guest sees exactly what they saw
+yesterday. Dropping `reserve` instead would have taken a restaurant's bookings
+off the app. The migration adds `dinein` to nobody: whether a place has tables
+is a fact it has to declare, and guessing would repeat the mistake being fixed.
+
+The seed now covers all three states rather than two — 36 branches take
+bookings, 25 seat walk-ins, 14 are hatches — because the walk-in case had no
+example at all while the old rule stood, and a combination with no seeded
+example is one nobody notices is broken. The biggest chain got the walk-in case
+so the live pair has to survive a paginated list, not just a detail page.
+
+**No switch in the panel is disabled any more.** The dine-in row used to be
+dead, reading "Turn Table booking on first" until somebody found that switch and
+flipped it — the old rule enforced as an obstacle. `restaurantServiceNeeds`
+became `restaurantServiceExcludes` ("Not available while X is on") with it: a
+key named for a requirement, holding exclusion text, is the kind of drift that
+outlives the rule it described.
+
+Two things fixed in passing, both found while working here. The panel's Armenian
+called the dining room `Տեղում ուտել` where all three clients say `Տեղում`, and
+its English said `Dine in` against the clients' `Dine-in` — aligned.
+COMPONENTS.md's ServiceRows section was two changes stale, still describing four
+switches and the `eat_in` service removed earlier; it now matches what the
+component renders.
+
+### 2026-08-05 — "Pickup" is called Pre-Order now, and its two endings say what they are
+
+The mode a guest picks was called **Pickup** — `Վերցնել` on the filter chip,
+`Տանել` on a restaurant card, `Վերցնել տեղից` in the back office. Three names for
+one thing, and none of them said the part that matters: the food is ordered
+*before* anyone arrives. It now reads **Pre-Order** (hy `Պատվիրել նախապես`,
+ru `Заказать заранее`) in all three places, and its two endings are **Takeaway**
+(hy `Վերցնել հետդ`, ru `Забрать с собой`) and **Eat at the Restaurant**
+(hy `Ուտել ռեստորանում`, ru `Поесть в ресторане`).
+
+**No identifier moved.** The mode is still `pickup`, the sub-mode still
+`take_away` / `eat_in`, and `restaurants.services` still holds `pickup` — so
+this is a dictionary change with no migration, no API contract change and no
+touched seed data. `packages/i18n` is the only place the words live, which is
+what made a rename across four surfaces six edits instead of a search across the
+repo. BUSINESS_LOGIC.md §2 now states the split explicitly, because a reader who
+sees `pickup` in a payload and "Pre-Order" on a screen would otherwise have to
+guess they are the same thing.
+
+The back office's two service hints quote the sub-mode names in prose, so they
+moved too — a panel that explains a rule using words the app no longer shows is
+worse than one that says nothing.
+
+Two things this leaves open, both wording rather than code:
+
+- **`orderAhead` (the web hero button and a footer link) is already
+  `Պատվիրել նախապես`.** The hero and the mode chip now read identically while
+  doing different things — the hero scrolls to the list, the chip filters by
+  service. Defensible, since starting a pre-order is exactly what the hero is
+  for, but it is a collision somebody chose to accept rather than one nobody
+  noticed.
+- **The card badge grew.** `Տանել` was one short word; `Պատվիրել նախապես` is two
+  long ones, and on a restaurant offering all three services the badge row now
+  wraps to a second line. It wraps cleanly — nothing overflows — but the cards
+  are taller than the design's. A shorter badge-only form is the fix if that
+  matters.
+
+### 2026-08-05 — A counter and a restaurant are different places, and the booking is what tells them apart
+
+Eating in after collecting an order was a declared service (`eat_in`) that a
+restaurant could switch on beside its table bookings. It should never have been
+a switch at all, and the combination it allowed was incoherent: a place that
+holds tables and takes a deposit for them was also offering "collect it at the
+counter and seat yourself", which is not a second thing such a place does.
+
+**The rule is now derived from one question — does this address take table
+bookings?**
+
+- A **counter** — a shawarma window, a khorovats place, a coffee bar — does not.
+  There is no table to hold, so ordering ahead asks which of the two endings the
+  guest wants, and the kitchen plates it or bags it. **Both buttons are live**,
+  everywhere, with nothing to configure.
+- A **restaurant** does. Eating in there is a table, a seating and a deposit —
+  the booking flow. **Its pickup is take-away and nothing else.**
+
+**`eat_in` is gone from the services vocabulary.** `RestaurantService` is
+`pickup`, `dinein`, `reserve`; the panel's fourth switch is gone with it. A
+switch that could disagree with the booking was a second answer to a question
+that has one.
+
+**`dinein` now requires `reserve`** — the one rule with teeth left in
+`checkServices`. Wherever there is a dining room the way to a seat is the
+booking, so a dining room whose tables cannot be booked is a door onto nothing.
+The exclusion rule it replaces (`dinein` against `eat_in`) is gone, and with it
+the `excludes` half of `ServiceBreach` and the panel's "unavailable while X is
+on" line.
+
+**The guest is shown the rule rather than its result.** At a restaurant the
+pre-order screen still draws **Eat at the restaurant** beside take-away —
+dimmed, dashed, reading "only by booking a table" — and pressing it switches the
+basket to dine-in and opens the calendar. It is deliberately **not** `disabled`:
+a disabled control says "not for you" and then does nothing, and this one has
+somewhere to send them. Hiding the option would have left somebody to discover
+the rule by not finding it, which was the whole complaint about the old screen.
+
+`POST /cart/quote` answers with **`eatInRequiresBooking`** beside
+`pickupOptions`, so neither client derives the rule from `services` — the same
+reason `pickupOptions` was added.
+
+**Enforced on the way in, not merely hidden.** `eat_in` on a basket at a branch
+that takes bookings is a **422** from the quote *and* from `POST /orders`: a
+basket outlives the page it was built on, and a branch can start taking bookings
+between the choice and the payment.
+
+**The pickup pair moved to the pre-order screen in the mobile app**, out of the
+basket, so the dead button sits beside the calendar it points at rather than a
+screen away from it. It was already there on web.
+
+**Migration `20260805090000_eat_in_derives_from_bookings`** strips `eat_in` from
+`restaurants.services` and `restaurant_branches.services`, and adds `reserve` to
+any row carrying `dinein` without it. Adding the booking rather than dropping
+the dining room is the cautious direction — and it starts no bookings on
+anybody's behalf, because a booking still needs `reservations_enabled`, which
+the migration leaves alone. `orders.pickup_option` is untouched and keeps both
+values: what a guest chose is what happened.
+
+**`reserve` and `reservations_enabled` stay different questions.** The first is
+what kind of place this is and is what decides the pickup options; the second is
+whether it is taking bookings this week. A restaurant that pauses its bookings
+does not become a counter that seats walk-ins.
+
+Docs: BUSINESS_LOGIC.md §2, SCREENS.md §5, COMPONENTS.md, USER_FLOW.md,
+API_DOCUMENTATION.md, DATABASE.md, `apps/admin/README.md`.
+
+### 2026-08-04 — A branch answers for itself: its photograph, its services, its bookings
+
+The entry below put the cover on the restaurant, shared by every branch, and
+recorded per-branch covers as deliberately not chosen. **That was wrong, and it
+was wrong the same day.** Branches of one chain are genuinely different places —
+one has a dining room, one is a counter in a mall, one is photographed and one
+is not — and a single row could not say so. Services and `reservations_enabled`
+had the same defect and moved with it.
+
+**Both levels now exist, and the split is the permission.**
+`restaurants.{cover_url, services, reservations_enabled}` is the **default**
+every branch inherits, still `restaurant:write`. The three new columns on
+`restaurant_branches` are what **this address** offers, on `branch:write` —
+which a `restaurant_manager` already holds for the same branch's address and
+phone. A manager answers for one place and nothing else; changing what the chain
+defaults to is still the business's decision.
+
+**The migration is purely additive and backfills nothing.** A branch that has
+not spoken for itself resolves to exactly what it showed before, so no answer
+changed on deploy.
+
+**`resolveBranchOffering` in `@amragrir/shared` is the only place inheritance
+happens** — the catalog, search, favourites, an order's validation, the
+reservation check and the back office all go through it, so a guest cannot be
+shown a service the order endpoint then refuses.
+
+Three settings, three resolutions, and the differences are deliberate:
+
+- **The cover falls back on `null`.** "None here" and "not answered here" are
+  the same state on purpose — there is no reason a branch would want to be blank
+  while its business has a photograph.
+- **The services needed a flag** (`services_overridden`). `[]` is already a
+  legitimate value — every restaurant is created having declared nothing — so a
+  branch must be able to override a pickup parent with a genuinely empty set,
+  which falling back on emptiness would make unsayable. Prisma also cannot
+  express a nullable scalar list. A CHECK holds the array to the flag so a stale
+  set cannot sit behind a `false` looking like an answer.
+- **Bookings fall back on `null`**, since `false` is a real answer.
+
+**The catalog filter now asks each branch**, not just its parent: an overriding
+branch matches on its own array, every other on its restaurant's. Filtering the
+parent alone returned branches that had withdrawn the very service somebody
+filtered for — and hid the ones that had added it. A top-level `OR`, because the
+`q` search builds its own inside `where.restaurant`.
+
+**The panel.** Each branch's disclosure — previously its team — now opens on its
+own cover, services and bookings, each with a "this branch decides" switch that
+*is* the data model: with it off the controls show the restaurant's values,
+disabled, so the screen still says what the address offers rather than going
+blank. The restaurant-level sections stayed and are now labelled as the default.
+Turning the switch on starts from what the branch is already showing, so it
+changes nothing by itself — it only moves who decides.
+
+`POST /uploads/branch-cover` is its own route rather than a parameter, because
+the permission is the whole difference and a single endpoint would have to
+decide that in a service, out of sight of the guard.
+
+**1541 tests pass** (API 1024 → 1034), all eight workspaces typecheck. One
+assumption was corrected on the way: a role that grants none of a permission is
+refused by `reachFor` with a **403** before any query is built, rather than
+matching an empty filter.
+
+Updated: `DATABASE.md` (three columns and the CHECK), `API_DOCUMENTATION.md`
+(four endpoints), `ROLES_AND_PERMISSIONS.md` (the two levels, and why the split
+is the permission), `BUSINESS_LOGIC.md` §2 (the rules judge a branch),
+`COMPONENTS.md`, `apps/admin/README.md`.
+
+**Not done:** the seed still plants covers and services only on restaurants, so
+a fresh database has no branch that differs from its parent. The feature works;
+the demo data does not yet show it off.
+
+### 2026-08-04 — A restaurant can put its own photograph on its card
+
+`restaurants.cover_url` has been read by the catalog, favourites and orders
+endpoints for a while and **written by nothing** — the seed planted a demo
+picture so the screens could be looked at, and a real restaurant had no way to
+replace it. Who may is not a new decision: it was agreed on 2026-08-04 and
+recorded in ROLES_AND_PERMISSIONS.md as decided-and-unbuilt. This builds exactly
+that, unchanged.
+
+**`restaurant_admin` and above; `restaurant_manager` may not.** One cover is
+shared by every branch, so a manager running one branch would be choosing the
+picture the others are advertised under — the same reasoning that already puts
+`PATCH /restaurant/restaurants/{id}/services` at that level. Both run on
+`restaurant:write`, so **no new permission was invented**; widening that one to
+managers would also have handed them the services and the restaurant's name,
+which is the trade that made a narrower `restaurant:cover` not worth having.
+
+Per-branch covers were **again** not chosen. `restaurant_branches` has no image
+column, and adding one is a migration plus a fallback rule in every client — not
+an upload.
+
+**Two endpoints, the same shape as a dish photo.**
+`POST /uploads/restaurant-cover` (`restaurant:write`) stores the file and
+answers with a URL; `PATCH /restaurant/restaurants/{id}/cover` puts it on the
+restaurant and is where reach is checked — the upload only writes a file and
+names it. `UploadsService` grew `saveRestaurantCover` beside `saveMenuPhoto`,
+both on one private `save(bytes, tooLarge, dir)`: the refusals, the sniffing and
+the uuid naming are identical, and the directory is not the caller's to choose.
+Covers land in `covers/`, apart from the dishes, so a later sweep or thumbnailer
+can act on one without reasoning about the other.
+
+**`coverUrl: null` takes a cover down**, and is the one place this differs from
+a dish, which cannot be blanked. An *absent* field is a 400 — `@ValidateIf`
+rather than `@IsOptional()`, because the latter skips null as well and an empty
+body would then read as "remove it".
+
+**A replaced cover is not deleted from disk**, and `restaurant.cover` (new in
+`AuditAction`) carries the URL it replaced — which is the only thing that makes
+an accidental replacement recoverable. A request that changes nothing writes
+neither the update nor the entry, like every other PATCH here.
+
+**The panel.** A restaurant's page grows a Cover section directly under its
+facts, shown to everyone who can open the restaurant — a cover is public the
+moment it is set — with the file input and Remove button only for
+`restaurant:write`. A **small block with the controls beside it**, not a
+full-width banner: it answers "is there one, and is it the right photograph",
+and a hero image this high up the page would push the branches below the fold.
+Choosing a file uploads and stores in one go, since there is no form still being
+filled in. `usePhotoUpload`
+now takes *which* endpoint to send to, defaulting to the dish one; the prop that
+gated the services switches was `canEditServices` and is now `canEditRestaurant`,
+because it gates two things and both are `restaurant:write`.
+
+**The seed's bargain is now load-bearing rather than a precaution.** The
+endpoint overwrites a seeded cover freely; `isSeedCover` keeps `db:photos` from
+ever overwriting an uploaded one, and an uploaded cover is served from this
+API's own origin, so it matches nothing in those tables. `apps/mobile` needed
+nothing — its `Photo` component already rendered the URL and fell back without
+one.
+
+11 new tests (6 on `setCover`, 3 on `saveRestaurantCover`, plus the manager
+refusal and the no-op). **1024 API tests and 323 panel tests pass**; both
+typecheck clean. One of the new tests corrected an assumption worth writing
+down: a manager reaching `setCover` gets a **403 from `reachFor`**, not a 404
+from an empty filter — reach is refused outright when no held role grants the
+permission, rather than assembling a query that happens to match nothing.
+
+Updated: `ROLES_AND_PERMISSIONS.md` (the section is no longer "decided, not yet
+built"; `restaurant.cover` in what is recorded; the implemented list),
+`API_DOCUMENTATION.md` (both endpoints), `DATABASE.md` (`cover_url` has writers
+now), `BUSINESS_LOGIC.md` (seeding is not the feature — here is the feature),
+`COMPONENTS.md` (`usePhotoUpload`'s `send`), `apps/admin/README.md`.
+
+### 2026-08-04 — Fixed: the phone showed half the photographs, and said nothing about it
+
+The new covers appeared on the website and not in the app — and neither did
+about half the **dish** photographs, which had been that way silently since the
+day they were seeded.
+
+**Wikimedia answers 403 to a request whose `User-Agent` is a bare library name.**
+That is their User-Agent policy, not a rate limit, and React Native sends
+`okhttp/4.x`. Every `upload.wikimedia.org` picture was refused on the phone
+while the browser, sending its own agent, got all of them. TheMealDB does not
+care, which is why *some* cards had a picture and the failure looked arbitrary.
+
+Nothing appeared broken, and that is the part worth keeping: `Photo` falls back
+to the placeholder surface on a failed load, which is also what it draws when a
+restaurant genuinely has no cover. A refusal and an absence render identically,
+so the app looked like it was faithfully reporting missing data.
+
+**Two changes, because the first was correct and not sufficient.** `Photo` now
+sends `AmragrirApp/1.0 (+https://amragrir.am)` with every image request, which
+is what Wikimedia's policy asks for and good manners anywhere — but on the
+device the pictures stayed blank, so **the seed no longer uses that host at
+all**. `menu-photos.ts` and `restaurant-covers.ts` now draw only from TheMealDB
+and TheCocktailDB, every URL of which was re-checked with `okhttp/4.9.2` — the
+agent React Native actually sends — before being written down. 206 dishes and 15
+covers rewritten in the running database by `db:photos`; the one uploaded photo
+in that table was left alone, as designed.
+
+Both tables now claim any `upload.wikimedia.org` URL as **their own** in
+`isSeedPhoto` / `isSeedCover`, matching on the host rather than the value. The
+values are gone from the files, and without that rule a database seeded before
+today would keep, forever, exactly the pictures no phone can show.
+
+Losing that host cost four dishes their own photograph — Gata, Four Cheese,
+Garlic Bread, Poke Bowl now show their category's, which is the fallback working
+as designed rather than a gap to paper over by naming a picture of something
+else.
+
+Guards, all of which would have caught this: every URL in both tables must be on
+one of the two hosts (`new URL(url).host`), and `photo-headers.spec.ts` checks
+the header reaches the image and that no second component fetches one behind
+`Photo`'s back. Source scans rather than unit tests, on the same reasoning as
+`link-aschild-style.spec.ts` — the component renders, the request is made and
+the fallback is correct, so nothing below a real device can see the bug.
+
+### 2026-08-04 — Every demo restaurant has a cover photograph
+
+`restaurants.cover_url` was null for all 25 restaurants in a seeded database, so
+the restaurant card, the restaurant banner and the thumbnail beside a past order
+drew their empty state everywhere — three screens whose main visual element
+could not be judged, on the web and on the phone.
+
+**New: `prisma/restaurant-covers.ts`**, the same shape as `menu-photos.ts` — a
+photograph per slug where a restaurant should differ from its neighbours, one
+per cuisine behind that, and something plated for a cuisine the table does not
+know (which is what the three hand-made test restaurants in the dev database
+got, one of them with no cuisine at all). Karas gets meat over an open fire,
+Lavash griddled flatbread, Dolmama a plate of dolma, Jazzve a coffee.
+
+Hotlinked on exactly the terms the dish photographs use, `MENU_PHOTOS=local`
+included — that switch now falls back to the committed category placeholders for
+covers too, reusing the SVGs already in `apps/api/public/menu` rather than
+drawing a second set to keep in step.
+
+Photographs of dining rooms were tried first, from Wikimedia Commons, and
+abandoned within the day: that host refuses the app (see the entry above), and a
+demo has no rights to a picture of anybody's restaurant anyway. Food is what a
+card is selling.
+
+Every URL was fetched and **looked at** before it was written down, which is not
+a formality: the first search for "burger restaurant interior" returned the
+lavatory of a Burger King, "pizzeria interior" a mop bucket under a sign saying
+the dining room was closed, and "Armenian restaurant" a stuffed eagle.
+
+**This is not the upload feature.** Nothing in `apps/api/src` writes this column
+yet; who may set a cover is still decided-and-unbuilt in ROLES_AND_PERMISSIONS.md.
+The seed writes it on create and `refreshSeedCovers` fills the rows that predate
+it — rewriting only a cover that is empty or one the seed planted, never one
+somebody chose, the same rule `db:photos` already applied to dishes. That
+command now does both and reports both, and the seed prints
+`restaurantsWithoutCover` beside `menuItemsWithoutPhoto` so "every restaurant
+has a picture" is re-checked on every run rather than assumed. Applied to the
+running dev database: 25 restaurants updated, a second run correctly finds
+nothing to do.
+
+The spec reads the cuisines and slugs **out of `seed.ts`** rather than keeping a
+copy: a demo restaurant added with a cuisine nobody wrote a cover for should
+fail the suite, not ship a card showing a stranger's dining room.
+
+### 2026-08-04 — Mobile pre-order: the app can book a table and time a kitchen
+
+The last screen the mobile artifact specified is built
+(`apps/mobile/app/preorder.tsx`), and the basket now leads through it rather
+than straight to payment: **Basket → "Choose time" → Pre-order → Checkout**.
+Mode, a Monday-first month calendar, booking slots, guest count, the deposit
+card and the ready-at grid, all against the real API.
+
+**The cart stopped lying about `serviceMode`.** It was the literal string
+`'pickup'` in `toPayload()`, so dine-in was unreachable from the phone whatever
+the API supported. `CartState` now carries `serviceMode`, `reservationId` and
+`readyAt`, with the rules the API enforces mirrored in the reducer and tested:
+leaving dine-in drops the table (a pickup order pointing at a booking is
+refused, and a table left attached is one held for somebody who has decided not
+to sit at it); **any** change of mode drops the chosen time, because the value
+means the table's hour on one side and a slot off the pickup grid on the other;
+and starting a basket at another restaurant drops all three.
+
+**Checkout charges `dueNowAmd`, not `totalAmd`.** Driven against the running
+API, a real dine-in basket quotes `totalAmd 11360`, `depositAmd 4000`,
+`dueNowAmd 7360` — the button used to show 11 360 ֏ to a diner whose 4 000 ֏ was
+already authorised. Mobile's `Quote` and `Order` types had fallen behind the API
+by six fields (`serviceMode`, `discountAmd`, `coupon`, `dueNowAmd`, `tableNo`,
+`scheduled`, `prepStartAt`, `reservationId`); all of them are now declared, the
+same staleness that had hidden the filter parameters last time.
+
+**A dine-in basket has no "food ready at" grid, and that is the point.** Booking
+a slot sets `readyAt` to the booked instant; `POST /orders` accepts it and starts
+the kitchen a prep-time before, so a table at 19:30 tomorrow is served then
+rather than cooked tonight. Asking twice would let somebody order food for 15:00
+and a table for 19:30.
+
+**A bug caught by driving it rather than by reading it: the calendar stops at 7
+days, not 30.** `RESERVATION_MAX_LEAD_DAYS` is 30 and `ORDER_MAX_LEAD_DAYS` is
+7, and this screen books a table *for a basket*. Against the live API a table
+ten days out is created happily and its deposit authorised — and the order for
+it is then refused with *"Orders can be scheduled at most 7 days ahead"*. Day
+eight would have taken 4 000 ֏ for a meal the next screen cannot sell, so the
+shorter limit wins here. **The two constants disagreeing is a product question
+this does not settle**, only avoids: booking a table with no basket behind it is
+still free to go 30 days out.
+
+**Times are the restaurant's, not the phone's.** `formatTime` read
+`date.getHours()`, so a traveller — or anyone whose clock had drifted onto
+another zone — was told to collect their food four hours early. It now formats
+in `Asia/Yerevan`, as `apps/web` already did, and the spec that covered it was
+asserting the old behaviour in a way that only passed on a machine already set
+to Yerevan. `yerevanDate`, `formatMonth` and `weekdayHeads` joined it.
+
+**`readyTimeOptions` moved to `@amragrir/shared`.** Web and mobile draw the same
+grid from the same quote; two copies would have drifted into offering two
+different sets of times for one basket. Its spec stayed in `apps/web`, pointed
+at the package — the package has no runner, and adding one for four assertions
+is more machinery than the move is worth.
+
+One i18n key added — `guestsWord`, in all three dictionaries. Everything else
+the screen needed was already there under the names the other clients use, so
+the screen reuses those rather than minting synonyms for "Pickup". Docs:
+SCREENS.md §5 and §6, USER_FLOW.md §3 and §4, COMPONENTS.md.
+
+### 2026-08-04 — The mobile design artifact enters the repo, and the app grows tabs
+
+`docs/design/` had one artifact and a row admitting the more important one was
+missing. **`Amragrir (mob).dc.html` is now stored** beside it, with the two files
+it imports — `ios-frame.jsx` (the iPhone bezel the mockup is drawn in) and
+`support.js` (the generated runtime that makes it interactive). Neither is
+product code; React Native supplies the first and has no use for the second.
+
+Reconciling it against the code, declaration by declaration: **all 15 palette
+tokens already matched `packages/ui/src/tokens.ts` verbatim, in both themes.**
+Two colours in it had no token — `--danger` and `--dangerSoft`, for a declined
+card, a cancelled order and the button that cancels one. Both were added.
+Purely additive: `apps/web` and `apps/admin` render exactly as before, and the
+generated `tokens.css` diff is 16 insertions with no changed line.
+`--danger` is theme-aware where `--destructive` is not, and DESIGN_SYSTEM.md now
+says why the two are not interchangeable.
+
+**`apps/mobile` speaks three languages.** It did not depend on `@amragrir/i18n`
+at all and hardcoded English, against rule 5 in AI_CONTEXT.md. It now has a
+`LanguageProvider` shaped like the back office's, reading the device's languages
+and remembering the choice. The artifact carried complete hy/ru/en dictionaries,
+so the **123 new keys were transcribed, not translated**; all three files hold
+267 keys in identical order.
+
+This also fixed a quiet bug: the API client took a `language` argument that **no
+screen ever passed**, so the API localised its errors and `*_i18n` columns into
+its own default no matter what the customer had chosen. `Accept-Language` is now
+always sent.
+
+**Five tabs, six new screens.** `app/(tabs)/` carries home, search, orders,
+favorites and profile, with the bar drawn only there — exactly the artifact's own
+`showTabBar`. Search, orders, favorites, profile, settings and referral are built
+to it; the tab glyphs are its own SVG paths. A `ThemeProvider` came with the
+Settings dark-mode toggle, which the old `useTheme` comment had already promised.
+
+**The mobile client's `RestaurantQuery` had fallen behind the API**, not the
+other way round: `openNow`, `dietary[]`, `service[]` and `priceMin`/`priceMax`
+are all in `ListRestaurantsDto` and none were reachable from the app. Added, and
+each verified to narrow a live query.
+
+Three places the artifact was **not** followed, each recorded in
+`docs/design/README.md`: no "delivery addresses" row (there are no couriers), no
+Apple/Google sign-in (customers are phone + OTP only), and no reward-points tile
+(no endpoint reports it, and inventing a number on the screen a customer reads as
+their own record is worse than an absent row).
+
+**Home is restyled to the artifact** — its own header and 27px question, the
+search field as a button, the category rail bleeding to the screen edge, and
+three card-shaped skeletons instead of a spinner so the feed does not jump when
+the real cards land. `RestaurantCard` came with it: a 162px photo, the
+open/closed badge on glass over the image, prep time in accent and the
+restaurant's actual `services[]` as quiet chips — `eat_in` deliberately not
+among them, being a sub-option of pickup rather than a third thing on offer.
+
+**The restaurant screen followed** — a 270px cover with the back button on
+glass, the content sheet pulled up over it with 26px top corners, the rating in
+its own bordered card, menu tabs that invert to `--ink` when selected, and dish
+rows as bordered cards with a 104px photo and a solid accent add button.
+
+Its basket bar shows the item count and **not** a running total, which the
+artifact does draw. Every total in this app is one the server calculated; the
+basket screen asks for a real quote. A number added up in the client would be
+the one place a customer could be shown a figure nobody charged.
+
+**Recorded, not built: restaurant covers are an upload, not seed data.**
+`restaurants.cover_url` is read by three endpoints and written by nothing —
+there is no upload path, no write in `apps/api/src` and no UI in the panel,
+which is why it is null for all 25 seeded restaurants. Agreed that
+`restaurant_admin` and above may upload one and `restaurant_manager` may not,
+and that the cover stays on the restaurant rather than the branch. See
+ROLES_AND_PERMISSIONS.md.
+
+**Fixed: `GET /restaurants/{id}/availability` answered 500 for a slug.** Its
+sibling routes under the same prefix — the restaurant and its menu — all accept
+a branch id, a restaurant id *or* a slug, and clients hold whichever the
+previous screen gave them. This one queried `id` directly, so a slug reached
+Prisma as a UUID and threw there. It now resolves all three the way the catalog
+does, with the same deterministic branch tie-break, so a restaurant's calendar
+and its menu can no longer describe different branches. An unknown slug is a
+404 rather than a 500.
+
+Found while wiring the reservations API into the mobile client for the
+pre-order screen, which is exactly the call that screen has to make first.
+
+**The screens show photographs, because the API has them.** The artifact draws
+hatched blocks wherever a picture goes — a mockup has no photography — and those
+were transcribed literally, which was a mistake: `menu_items.photo_url` is
+populated for every seeded dish. A new `Photo` component renders the URL and
+falls back to the artifact's placeholder surface only when there genuinely is
+none, or when loading fails — the demo photographs are hotlinked from TheMealDB
+and Wikimedia, and Wikimedia rate-limits bursts of thumbnails.
+
+`CartLine` gained `photoUrl` so the basket can show what was added. It is
+carried for display only and never sent: the order payload names the menu item,
+and the server owns everything else about it.
+
+Restaurant `coverUrl` is wired the same way and is **currently null for every
+seeded restaurant** — so those keep the placeholder, correctly this time,
+because the data says there is no picture rather than because a mockup drew one.
+
+**Basket and checkout finished the set** — every screen the artifact draws that
+this app has is now drawn the way it draws it. The basket got its card rows with
+a 66px thumbnail and the ±30px stepper, the dashed "add more" button, and the
+take-away / eat-in choice as two cards rather than a list, still offered only
+where the quote says the restaurant does both. Checkout got the quantity chips,
+the ready-at row and payment as bordered rows with a radio — three methods, no
+cash, because there is no such `PaymentMethod` and an order is paid for before
+the kitchen sees it.
+
+Both keep the logic that was already right and is easy to break by rewriting:
+the basket re-prices on its *contents* rather than its payload object, and
+checkout still holds one idempotency key per attempt across retries, so tapping
+"place order" twice on a bad connection replays rather than ordering twice.
+
+**Tracking is the screen the artifact has most to say about, and it now says
+it**: a 236px countdown ring, the five-stage rail, the pickup-code card, and the
+three states the old screen had no rendering for at all — **unpaid**, **payment
+declined** and **cancelled**. This is where `--danger` and `--dangerSoft` earn
+their place; until now they were tokens nothing used.
+
+Two things there are real rather than decorative. **"Pay now" pays** — it asks
+the API for the default method and posts a payment with a fresh idempotency key,
+rather than routing back through checkout, which would have created a *second*
+order. **"Cancel order" cancels**, and is offered only while the order is unpaid,
+because paying commits it (BUSINESS_LOGIC.md §5).
+
+The ring empties over **this order's own prep window** — the first countdown the
+server reported — instead of the artifact's fixed 480 seconds, which was a mock
+value, not a rule. The code plate carries the pickup digits rather than a
+scannable code; a real one needs a generator, and printing the number the
+counter actually reads is honest in the meantime.
+
+**Sign-in was restyled too**, and gained the artifact's accent hero, brand
+glyph and fixed `+374` prefix — the customer types only the local part and can
+no longer get the country wrong. It keeps its two steps because the API has
+two; the artifact has no OTP screen at all, which SCREENS.md §0 already recorded
+as something it should grow. No Apple/Google buttons and no log-in/sign-up tabs,
+for the reasons above.
+
+That screen held the **last hardcoded English string in the app**. With it and
+the navigator's own screen titles translated, `apps/mobile` finally satisfies
+rule 5 of AI_CONTEXT.md everywhere except the two screens still to be restyled.
+
+Sign-in moved to the profile screen. The artifact reaches it through a
+full-screen auth gate that is not built yet, and the old link on home went with
+the restyle — without somewhere to put it a guest would have had no route to
+verifying a phone at all.
+
+Still unbuilt and written down rather than skipped: **pre-order** (needs the
+reservations API wired into the app) and the **filter sheet**, which is blocked
+on a real disagreement — the artifact draws price *per person* at 4000–24000֏
+while the API filters on a branch's average *menu-item* price, 1167–3900֏ across
+seeded data. The ranges do not overlap, so the slider as drawn matches
+everything or nothing. The six existing screens are not yet restyled.
+
+### 2026-08-04 — The guest picks the ending, and the kitchen sees it
+
+The entry below made `eat_in` something a restaurant can *offer*. This makes it
+something a guest can *choose*, and — the reason it matters — something the pass
+finds out before the food is plated. A bag and a plate are not the same order to
+pack, and the counter is too late to ask.
+
+**`orders.pickup_option`** — `take_away` or `eat_in`, and **null exactly when the
+order is dine-in**, held there by a CHECK constraint rather than by convention:
+the column is required for one value of `service_mode` and forbidden for the
+other, which NOT NULL cannot say. The 406 pickup orders already in the table were
+backfilled to `take_away`, which is not a guess standing in for missing history —
+it was the only ending on offer until this shipped.
+
+**Nothing chosen means take-away**, everywhere. It is what pickup *is*, so the
+field is optional on `POST /cart/quote` and `POST /orders`, and a client that has
+never heard of it places exactly the order it always placed. Two refusals, both
+422: `eat_in` at a restaurant that has not declared the service, and any ending at
+all on a dine-in order. The first is checked **while pricing as well as while
+creating** — a basket outlives the page it was built on, and a restaurant can
+withdraw the option between choosing it and paying; catching it on the quote puts
+the refusal on the screen the guest is looking at instead of at the payment.
+
+**The quote now says which endings exist** (`pickupOptions`), so no client works
+it out from `services` a second time. Fewer than two is not a choice: web and
+mobile draw the buttons only when there are both, because one button labelled
+"take away" asks somebody to confirm something that was never in doubt.
+
+**Where it shows.** Web: a second, smaller pair indented under the mode on
+`/preorder`, two form posts like everything else in that flow, so it survives
+JavaScript being off; repeated on the checkout summary and on the tracking card
+the guest holds at the counter. Mobile: the same choice in the basket, with the
+chosen ending in the quote's cache key. Back office: the order card marks
+`eat_in` **and nothing else** — every other pickup order is take-away, and
+labelling all of them would bury the one that needs a plate.
+
+**Switching mode drops it**, mirroring what dine-in already did with a booking,
+and coming back to pickup starts from take-away rather than a choice the
+restaurant may have withdrawn in between. `toBasket` refuses to send one on a
+dine-in basket even so, because a hand-written cookie can hold the pair.
+
+Updated: `BUSINESS_LOGIC.md` §2 (what the guest chooses, what the kitchen sees),
+`DATABASE.md` §7 (the column and its CHECK), `API_DOCUMENTATION.md`
+(`POST /cart/quote`, `POST /orders`, `GET /restaurant/orders`), `SCREENS.md` §5,
+`USER_FLOW.md` §4, `COMPONENTS.md`. Migration:
+`20260804090000_pickup_option`.
+
+### 2026-08-04 — Pickup can be eaten in, and that fights with dine-in
+
+A restaurant can now declare **`eat_in`**: pickup, but the guest sits down in
+the room with what they collected — no waiter, no booking. It joins `pickup`,
+`dinein` and `reserve` in `restaurants.services`, and it is the first value
+there that is not free to combine with the others.
+
+**The rule.** `dinein` and `eat_in` cancel each other out. A restaurant with
+waiters serves people at their table, so "collect it at the counter and find a
+seat yourself" is not a second thing it would offer — a guest shown both is
+being asked to choose between table service and no table service in the same
+room. And `eat_in` needs `pickup`, because it is a choice made *inside* pickup
+rather than beside it. Four combinations survive, which is the table now in
+BUSINESS_LOGIC.md §2. Take-away needs no flag at all: it is what pickup is.
+
+**Written once, in `@amragrir/shared`** (`service-offering.ts`).
+`checkServices` answers whether a set describes a real restaurant;
+`serviceToggleBreach` answers the panel's per-row question — "would flipping
+this switch produce a legal set" — by asking `checkServices`, so neither side
+restates a rule the other could drift from. `toggleService` is what a switch
+does, cascade included: turning pickup off takes `eat_in` with it.
+
+**The API.** `PATCH /restaurant/restaurants/{id}/services` takes the whole set
+and answers with the restaurant. Whole, because the rules are about
+combinations — "may this restaurant offer dine-in" is unanswerable without
+knowing whether the eat-in option is on. A combination that is not a restaurant
+is a **422** naming both services. It runs on `restaurant:write`, which has been
+declared with services named in it since roles were split and had no endpoint
+behind it until now; no branch-level role holds it, because this is one
+statement covering every branch. Recorded as `restaurant.services` with the
+whole array on both sides.
+
+**The panel.** A restaurant's page grows a Services section: four switches, and
+the switch that would break the rule is dead with the reason in the row — "Недоступно, пока включено «В зале»" — naming the switch to turn off first.
+Plain text rather than a tooltip, which is not there on a touch screen. Read-only
+accounts keep the one-line fact they had. There is no take-away switch, and the
+pickup row says why rather than leaving its absence to be noticed. The `reserve`
+row also admits a pre-existing trap: advertising bookings and taking them are
+two columns (`services` and `reservations_enabled`), a booking needs both, and
+nothing on this screen sets the second — so the row says so instead of letting
+somebody switch it on and wonder why no table can be booked.
+
+**The order-level choice landed the same day** — see the entry below.
+
+Updated: `BUSINESS_LOGIC.md` §2 (the rule and the table), `API_DOCUMENTATION.md`
+(the new endpoint), `DATABASE.md` (`services` vocabulary and why there is no
+CHECK constraint), `ROLES_AND_PERMISSIONS.md` (`restaurant:write` has an
+endpoint; `restaurant.services` in what is recorded), `COMPONENTS.md`
+(`ServiceRows`, `services.ts`). Seeded: Greenhouse and Green Bean now declare
+`eat_in`, so the combination exists to look at.
+
 ### 2026-08-03 — The refreshed design artifact, re-read against the code
 
 `docs/design/web-landing.html` was re-exported. Rather than trust a glance, the
@@ -52,6 +3176,11 @@ page out of pre-rendering, and pricing it in the browser would need a
 client-side API call and a client-computed total. `StickyBasket` plus the
 header basket stays the adaptation, and `docs/design/README.md` records the gap
 rather than quietly closing it.
+
+> **Superseded 2026-08-06.** Both objections were about building it *in the
+> page*. Built as a client component over a route handler, the page keeps its
+> pre-rendering and the client is handed formatted strings, so neither applies.
+> See the 2026-08-06 entry.
 
 ### 2026-08-03 — Sign-in asks which country the number is from
 

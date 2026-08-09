@@ -33,6 +33,8 @@ The design is built on CSS custom properties. There are two themes — `:root` (
 | `--chip` | `#F1EFEA` | Chip / toggle background |
 | `--ph1` / `--ph2` | `#EFE7DD` / `#E6DACB` | Image placeholders (hatching/skeletons) |
 | `--good` | `#12A150` | Success, "open", deposit credit |
+| `--danger` | `#D64524` | Declined card, unpaid order, cancel action |
+| `--dangerSoft` | `#FDEAE4` | Soft fill behind a `--danger` state |
 | `--shadow` | `rgba(60,40,15,.12)` | Shadows |
 | `--glass` | `rgba(246,245,242,.78)` | Glass surfaces (blur) |
 | `--scrim` | `rgba(26,23,18,.42)` | Backdrop behind a modal or bottom sheet |
@@ -54,6 +56,8 @@ The design is built on CSS custom properties. There are two themes — `:root` (
 | `--chip` | `#26221D` |
 | `--ph1` / `--ph2` | `#241F19` / `#2F2820` |
 | `--good` | `#2EC76F` |
+| `--danger` | `#F26B48` |
+| `--dangerSoft` | `rgba(242,107,72,.16)` |
 | `--shadow` | `rgba(0,0,0,.55)` |
 | `--glass` | `rgba(16,14,11,.72)` |
 | `--scrim` | `rgba(0,0,0,.62)` |
@@ -69,6 +73,14 @@ read — and the theme is the staff member's choice, not the scanner's. They are
 generated from `packages/ui/src/tokens.ts` like every other token; nothing may
 hard-code them.
 
+`--danger` and `--destructive` are not interchangeable either, and the mobile
+artifact uses both on purpose. `--destructive` is the fixed red of a *deliberate*
+action the customer is choosing — the Log out row — and is the same colour in
+both themes. `--danger` is a *state that went wrong* and is still theirs to
+fix: a declined card, an order left unpaid, the button that cancels it. That one
+is theme-aware, because it has to stay legible on a dark background as well as a
+light one.
+
 `--scrim` and `--glass` are not interchangeable. `--glass` is a *surface* that
 floats over content and stays legible (the status badge over a restaurant
 photo); `--scrim` is the layer that pushes content back behind a modal. Both
@@ -77,14 +89,12 @@ themes darken, so a scrim cannot be derived from `--ink` — that inverts.
 ### Two design artifacts, one authority
 
 There are two design artifacts: the **mobile app** (820×1020, 12 screens
-— the one this document was transcribed from) and a newer **web landing**
-(1280×860).
+— the one this document was transcribed from) and the **web app**
+(1280×860, 6 screens), which succeeds the earlier web landing.
 
-The web one is now in the repository at
-[design/web-landing.html](./design/web-landing.html), so the table below can be
-re-derived instead of believed; the mobile one is not there yet, which is why it
-is still the half of this comparison you cannot check. See
-[design/README.md](./design/README.md).
+Both are now in the repository — `Amragrir (mob).dc.html` and
+`Amragrir Web (standalone).html` — so every row of the table below can be
+re-derived instead of believed. See [design/README.md](./design/README.md).
 
 They agree on the whole palette except:
 
@@ -139,6 +149,30 @@ Numeric values (prices, timers, counters) use `font-variant-numeric: tabular-num
 - **Icons:** nav 24px; inline 15–19px; large emoji 22–30px.
 - **Hit target:** minimum 44px (± step buttons 30–46px; account for this when porting to RN).
 
+### Web page columns
+
+The web artifact gives **each screen its own column**, centred, rather than one
+width for the whole site. `.wrap` holds the widest and `.screen--*` pulls the
+narrower ones in, so a screen never lays a second set of gutters inside the
+first:
+
+| Screen | `<main>` width | Content width |
+|---|---|---|
+| Home, restaurant, profile | 1220px | 1164px |
+| Checkout | 980px | 924px (`.screen--checkout`) |
+| Basket | 900px | 844px (`.screen--basket`) |
+| 404 | 720px | 664px (`.notfound`) |
+
+Gutters are 28px throughout. Every screen but the catalogue also starts 10px
+higher — 24px of air above the back button rather than 34px above the hero.
+
+**The footer is held against the bottom of the screen.** The page is a column —
+header, `<main>`, footer — at least `100dvh` tall, and `.wrap` takes whatever
+slack is left over. On a short screen (a 404, an empty basket, a profile asking
+someone to sign in) the footer lands on the bottom edge instead of floating
+mid-screen above a band of page colour; on a long one nothing changes, because
+`.wrap` grows from its own content height and is never allowed to shrink.
+
 ### Corner radii
 
 | Element | Radius |
@@ -182,9 +216,36 @@ Common press effect: `transform: scale(.85–.98)` with `transition: transform .
 ## 5. Cards
 
 - **Restaurant card:** 162px photo header (hatch placeholder), overlaid status badge (glass + blur) and favorite button; body: name + rating, meta (cuisine · price · distance), badge row (⏱ prep, services). radius 22px, `--line` border, shadow `0 8px 22px`.
-- **Dish card:** horizontal — 104px photo + text (name, description, kcal · prep, price + `＋` button).
-- **Basket line:** 66px photo + name/price + quantity stepper.
+  - **The favourite button** is a 34px glass disc top-right of the photo — the
+    same `--glass` + `blur(8px)` as the badges beside it — holding a 17px heart
+    stroked in `--ink2`, filled and stroked in `--destructive` once saved. On
+    the web the photo is 180px and the rating badge shifts to `right: 56px` to
+    clear it; the app keeps its rating in the body row, so nothing moves there.
+    Hover on the web tints the heart and scales it 1.08 (dropped under
+    `prefers-reduced-motion`), and the disc paints its own background, so the
+    keyboard ring is an explicit `:focus-visible` outline in `--accent`.
+- **Dish card:** horizontal — 104px photo + text (name, description, kcal · prep,
+  price + `＋` button). Price and `＋` share one row at the **foot of the text
+  column** (`margin-top: auto`), so every card in a row lines its price up with
+  its neighbours' however long the description above it runs; the `＋` belongs to
+  the price it acts on, not to the card's right edge.
+- **Basket line:** 66px photo + name/price + quantity stepper. On the **web** it
+  is its own card rather than a row in a list — 72px photo, radius 20px, padding
+  16px, shadow `0 6px 18px var(--shadow)`, 14px between lines — with the line
+  total right-aligned on a 88px column. Below 560px it becomes a two-row grid
+  (dish above, stepper and total below, photo spanning both): five things in one
+  row leave the dish's name a few pixels.
 - **Info/summary card:** `--card`, border, radius 18–20px, inner dividers `1px solid var(--line)`.
+- **Summary column** (web basket/checkout/restaurant panel): the `<aside>` *is*
+  the card, so what goes in it is plain rows — 8px apart, with a `--line`
+  border-top and 12px above the total — never a second bordered box. A boxed
+  summary inside a boxed column reads as a mistake. The standalone version on
+  `orders/[id]`, which has no column around it, keeps its border.
+- **Header basket** (web): accent pill, height 44px, padding `0 18px`, radius
+  22px, `#fff` at 14.5px/700, gap 9px, shadow `0 6px 16px var(--shadow)`,
+  carrying a cart glyph and the running total. Count badge at `top/right: -4px`,
+  min-width 20px, `--ink` on `--bg` with a 2px `--bg` ring — accent-on-accent
+  would have nothing to stand out against.
 
 ---
 
@@ -194,8 +255,33 @@ Common press effect: `transform: scale(.85–.98)` with `transition: transform .
 - **Range slider:** track height 6px, radius 3px, bg `--chip`; thumb 24px circle `--accent` with 3px `--card` border and shadow.
 - **Toggle (switch):** pill track + round knob; on → `--accent`, off → `--chip`. Active: scale(.96).
 - **Segmented (language):** container `--chip` radius 15px, active segment highlighted.
-- **Stepper (guests/qty):** `− [number] +` inside a card.
-- **Guest chips:** round 46px, selecting guest count.
+- **Stepper (qty, basket line):** `− [number] +`, deliberately lopsided — minus
+  is a quiet 34px chip, plus the same solid accent disc as the `＋` on a dish.
+  Adding one more is the ordinary thing to want; taking one away is the
+  correction.
+- **Stepper (guests):** the *even* pair, because a party of two is as ordinary
+  as a party of four. Both buttons 52px, radius 16, `--card` background and an
+  accent glyph at 24px/700; only the border differs — `--line` on `−`,
+  `--accent` on `+`, marking where the eye starts rather than what to press.
+  Gap 16px, the count between them at 26px/800 in a 44px-wide box, baseline
+  aligned with a 12px `--ink3` suffix that appears only at the maximum. Active:
+  scale(.9). Disabled: `--ink3` glyph at .5 opacity, still occupying its place.
+- **Guest chips:** *removed* 2026-08-07 — both clients use the stepper above.
+- **Clock field (web checkout — "Date & time", "Ready at"):** one row, height
+  50px, radius 15px, border `1px solid var(--line)`, bg `--card`, padding
+  `0 14px`, gap 10px; an 18px accent glyph (calendar / clock) then a native
+  `datetime-local` or `time` filling the rest at 15px/600 on a transparent
+  background with no border. The row is the `<label>`, so pressing anywhere on
+  it opens the browser's own picker. Out of range → the row's border turns
+  `--accent`.
+
+  **`color-scheme` has to follow the theme switch, not just the system.** The
+  picker these fields open is the browser's, drawn in its own chrome, and no
+  token reaches inside it — `color-scheme` is the only lever. `tokens.css` sets
+  `light dark` on `:root`, which tracks the system; `globals.css` adds
+  `:root[data-theme='light'|'dark']` so an explicit choice wins here as it does
+  everywhere else. Without it a page somebody has put into dark opens a white
+  calendar over it.
 
 ---
 
@@ -214,13 +300,27 @@ Header/greeting, Search bar, Location selector, Category rail (horizontal scroll
 | **active / pressed** | `transform: scale(.85–.99)` with `transition .12s`. Selected pills/tabs/chips → `--accent` bg (or `--ink` for menu tabs), contrasting text, shadow. |
 | **selected** | Accent bg + shadow + `--accent` border (pills, pickup/dine mode, date, time, payment method — with a radio dot). |
 | **disabled** | Past calendar days: `disabled`, lowered opacity/`--ink3`, blocked cursor; unavailable time slots — muted. Buttons without actions — reduced contrast. |
-| **loading** | `.skel` skeletons — gradient `--ph1→--ph2→--ph1` with `shimmer` animation 1.3s. Initial restaurant-list load (~950ms) until `loaded:true`. |
+| **loading** | `.skel` skeletons — `--placeholder` blocks with a `--placeholder2` band sweeping across them (`skelSweep`, 1.5s). On the web these are built from the page's own layout classes so the blocks sit where the words will (COMPONENTS.md → `Skeleton (web)`), and each route's `loading.tsx` assembles them; rows stagger by 0.08s via an inherited `--skel-delay`. Reduced motion keeps the blocks and drops the sweep. |
+| **navigating** (web) | Between a press and a server-rendered page. `.route-progress` — a 3px accent→accent2 bar at the top of the window (`z-index: 60`, above header and dialog), silent for the first 140ms, approaching 90% and never arriving; `.is-pending` on the control that was pressed (`navPulse`, breathing to `opacity: .5`); `[data-navigating]` on `<html>` → `cursor: progress`. See COMPONENTS.md → `RouteProgress (web)`. |
+| **settling** (web) | `.settling` — `opacity: .55`, `transition .15s`. Content the server is still working out, where this client is not allowed to guess it: money being re-priced (order panel), and the half of the checkout a change of service mode decides. Deliberately understated, because it is often one frame and a spinner for one frame is worse than nothing. On the checkout it composes with `.mode-swap`, which adds `pointer-events: none` — the controls under it describe the mode on its way out, so they are dimmed *and* sealed. |
 | **empty** | Empty basket, "No active orders" — illustrative icon + title + description + CTA. |
+
+**Selected states move before the server answers, where it is safe.** A mode
+tile, a pickup ending and the guest count are chosen by the person pressing
+them, so they are drawn optimistically and eased (`border-color`,
+`background-color`, `box-shadow` .18s; `transform` .12s on `:active`).
+`border-width` and the padding that compensates for it are **never**
+transitioned — the two fight and the tile twitches. What the press *implies* —
+totals, deposits, whether a table can be had — is never moved optimistically;
+it wears `.settling` until the server says. See COMPONENTS.md (`ModeSwitch`,
+`GuestStepper`).
 
 ### Animations (keyframes from the design)
 
 - `scIn` — screen enter (fade + slide up 10px, .32s).
-- `shimmer` — skeletons.
+- `shimmer` — skeletons (mobile). On the web this is `skelSweep`: a translucent
+  band moved with `transform` so thirty of them on a menu cost nothing.
+- `navPulse` — the pressed link or button, while its page is on the way.
 - `checkPop` — order-confirmed checkmark (scale-pop).
 - `floaty` — gentle float (indicators, emoji).
 - `sheetUp` — bottom sheet slide up.

@@ -3,7 +3,6 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { OrderStatus, StaffNotificationType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
-import { pickupCodeFrom } from '../orders/order-code';
 import { StaffNotificationsService } from './staff-notifications.service';
 
 /**
@@ -118,7 +117,11 @@ export class OrderRemindersService {
             payload: {
               // Numbers, not a sentence: a job has no request to take a
               // language from, and the panel already translates.
-              pickupCode: pickupCodeFrom(order.code),
+              //
+              // The order's name and not its collection code — the bell is a
+              // screen a shift leaves open, and a notification that printed the
+              // code would hand out at a glance the thing the counter is
+              // supposed to ask a guest for.
               code: order.code,
               readyAt: order.readyAt?.toISOString() ?? null,
               prepStartAt: order.prepStartAt?.toISOString() ?? null,

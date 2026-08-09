@@ -2,9 +2,12 @@ import {
   formatAmd,
   formatCountdown,
   formatDistance,
+  formatMonth,
   formatOrderStatus,
   formatPriceLevel,
   formatTime,
+  weekdayHeads,
+  yerevanDate,
 } from './format';
 
 describe('formatCountdown', () => {
@@ -41,9 +44,45 @@ describe('formatTime', () => {
     expect(formatTime('not a date')).toBeNull();
   });
 
-  it('renders zero-padded local hours and minutes', () => {
-    const iso = new Date(2026, 6, 21, 9, 5).toISOString();
-    expect(formatTime(iso)).toBe('09:05');
+  // Yerevan is UTC+4 all year. The times in this app are times somebody has to
+  // physically be somewhere, so they are the restaurant's, not the device's —
+  // and this used to read the phone's own hours, which told anyone outside
+  // Armenia to collect their food at the wrong time. Building the fixture from
+  // a local `new Date(...)` would have hidden that on a machine already set to
+  // Yerevan, so the instant here is written in UTC.
+  it('renders zero-padded hours and minutes in Yerevan, wherever the phone is', () => {
+    expect(formatTime('2026-07-21T05:05:00.000Z')).toBe('09:05');
+  });
+
+  it('gives the Yerevan time even when that is the next day', () => {
+    expect(formatTime('2026-07-21T21:30:00.000Z')).toBe('01:30');
+  });
+});
+
+describe('yerevanDate', () => {
+  it('gives the calendar date in Yerevan, which can differ from UTC', () => {
+    expect(yerevanDate(new Date('2026-08-03T21:30:00.000Z'))).toBe('2026-08-04');
+  });
+});
+
+describe('weekdayHeads', () => {
+  it('starts the week on Monday, which is the week Armenia reads', () => {
+    const [first, , , , , , last] = weekdayHeads('en');
+
+    expect(first).toBe('Mon');
+    expect(last).toBe('Sun');
+  });
+
+  it('gives seven of them in each language', () => {
+    for (const language of ['hy', 'ru', 'en']) {
+      expect(weekdayHeads(language)).toHaveLength(7);
+    }
+  });
+});
+
+describe('formatMonth', () => {
+  it('names the month and year for the calendar heading', () => {
+    expect(formatMonth(2026, 7, 'en')).toBe('August 2026');
   });
 });
 

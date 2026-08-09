@@ -25,6 +25,15 @@ describe('the demo photo table', () => {
     expect(url.length).toBeLessThanOrEqual(500);
   });
 
+  it.each(Object.entries(all))('%s is on a host that serves the app', (_key, url) => {
+    // The rule this table was rewritten for. Wikimedia answers 403 to a request
+    // whose `User-Agent` is a bare library name — which is what React Native
+    // sends — so a Commons URL here is a dish that is blank on every phone
+    // while looking right in a browser, and blank is also how the app draws
+    // "no photograph". Nothing catches that but this.
+    expect(new URL(url).host).toMatch(/^www\.(themealdb|thecocktaildb)\.com$/);
+  });
+
   it('has a picture for every category the seed plants, and a fallback', () => {
     // Against the real list rather than a copy of it: a category added to the
     // seed without a photograph should fail here, not ship every dish under it
@@ -87,6 +96,17 @@ describe('isSeedPhoto', () => {
   it('claims a placeholder from an older seed, whatever host it was seeded against', () => {
     expect(isSeedPhoto('http://localhost:3000/static/menu/pizza.svg')).toBe(true);
     expect(isSeedPhoto('https://api.amragrir.am/static/menu/dish.svg')).toBe(true);
+  });
+
+  it('claims a Commons photograph from the version of this table that had them', () => {
+    // Not in either table any more, so it cannot be claimed by value — and a
+    // database seeded before the hosts changed would otherwise keep the
+    // pictures the app cannot load, forever.
+    expect(
+      isSeedPhoto(
+        'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Miso_Soup_001.jpg/960px-Miso_Soup_001.jpg',
+      ),
+    ).toBe(true);
   });
 
   it('leaves an uploaded photograph alone', () => {

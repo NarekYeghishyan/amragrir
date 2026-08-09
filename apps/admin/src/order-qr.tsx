@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { StaffOrder } from './api';
 import type { Translate } from './language';
-import { encodeQr } from './qr';
+import { encodeQr } from '@amragrir/ui';
 import { Button, Dialog, DialogBody } from './ui';
 
 /**
@@ -30,7 +30,7 @@ export function OrderQrDialog({ t, order }: { t: Translate; order: StaffOrder })
   // needs on the card already, so open/closed is Radix's business alone.
   return (
     <Dialog
-      title={t('orderQrTitle', { code: order.pickupCode })}
+      title={t('orderQrTitle', { code: order.code })}
       description={t('orderQrDesc')}
       trigger={<Button icon="qr">{t('orderQrAction')}</Button>}
     >

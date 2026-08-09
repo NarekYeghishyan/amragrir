@@ -16,13 +16,17 @@ const APP = join(__dirname, '..', 'app', '[lang]');
  * listing. This is the guard that a new screen cannot ship without saying so.
  */
 describe('the order flow is never indexed', () => {
+  // Every screen that renders one visitor's own data. `preorder/page.tsx` is
+  // deliberately absent: it stopped being a screen when checkout absorbed it,
+  // and a page that only redirects has no metadata to declare.
   const pages = [
     'cart/page.tsx',
-    'preorder/page.tsx',
     'checkout/page.tsx',
     'signin/page.tsx',
     'orders/page.tsx',
     'orders/[id]/page.tsx',
+    'profile/page.tsx',
+    'favorites/page.tsx',
   ];
 
   it.each(pages)('%s declares ORDER_ROBOTS', (page) => {

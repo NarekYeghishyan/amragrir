@@ -80,8 +80,20 @@ describe('the prep reminder sweep', () => {
     await service.send(NOW);
 
     const payload = (notifications.record as jest.Mock).mock.calls[0][1].payload;
-    expect(payload).toMatchObject({ pickupCode: '4821', prepMin: 20, itemsCount: 2 });
+    expect(payload).toMatchObject({ code: 'AMR-12344821', prepMin: 20, itemsCount: 2 });
     expect(JSON.stringify(payload)).not.toMatch(/[a-z]{4,}\s[a-z]{4,}/i);
+  });
+
+  it('names the order rather than printing its collection code', async () => {
+    // The bell is a screen a shift leaves open. A notification carrying the
+    // code would hand out at a glance the one thing the counter is meant to
+    // ask a guest for.
+    const { service, notifications } = build();
+
+    await service.send(NOW);
+
+    const payload = (notifications.record as jest.Mock).mock.calls[0][1].payload;
+    expect(payload).not.toHaveProperty('pickupCode');
   });
 
   it('says whether the order still needs accepting', async () => {

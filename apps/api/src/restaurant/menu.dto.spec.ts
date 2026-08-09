@@ -88,6 +88,15 @@ describe('UpdateMenuItemDto.photoUrl', () => {
   });
 });
 
+describe('CreateMenuItemDto.prepMin', () => {
+  it('accepts zero on a new dish, which is how a drink goes on the menu', () => {
+    const dto = create({ prepMin: 0 });
+
+    expect(failedFields(dto)).toEqual([]);
+    expect(dto.prepMin).toBe(0);
+  });
+});
+
 /**
  * The other half of the same question, answered the other way round.
  *
@@ -105,13 +114,20 @@ describe('UpdateMenuItemDto.prepMin', () => {
     const dto = update({ prepMin: null });
 
     expect(failedFields(dto)).toEqual([]);
-    // Still null after transforming: `@Type(() => Number)` would turn it into 0
-    // if it applied to null, and 0 is both a claim and below the minimum.
+    // Still null after transforming, and this is why it matters: `@Type(() =>
+    // Number)` applied to null would produce 0, which now *validates* — the
+    // request would quietly store "needs no cooking" instead of clearing.
     expect(dto.prepMin).toBeNull();
   });
 
+  it('accepts zero, for a dish that is handed over rather than cooked', () => {
+    const dto = update({ prepMin: 0 });
+
+    expect(failedFields(dto)).toEqual([]);
+    expect(dto.prepMin).toBe(0);
+  });
+
   it.each([
-    ['zero, which is not an estimate', 0],
     ['a negative number', -5],
     ['longer than a working day', 481],
     ['a fraction of a minute', 12.5],

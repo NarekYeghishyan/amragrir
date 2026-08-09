@@ -14,7 +14,8 @@ import { PasswordService } from '../src/staff/password.service';
 import { seedOrders } from './seed-orders';
 import { seedActivity } from './seed-activity';
 import { photoFor, usingLocalPhotos } from './menu-photos';
-import { refreshSeedPhotos } from './refresh-photos';
+import { coverFor } from './restaurant-covers';
+import { refreshSeedPhotos, refreshSeedCovers } from './refresh-photos';
 import { CATEGORIES } from './categories';
 
 const prisma = new PrismaClient();
@@ -82,7 +83,11 @@ const RESTAURANTS: SeedRestaurant[] = [
     ratingAvg: 4.8,
     reviewsCount: 1200,
     reservationsEnabled: true,
-    services: ['pickup', 'dinein', 'reserve'],
+    // A booking restaurant: the way to a seat here is the calendar, so its
+    // pre-order is take-away and the "Eat at the Restaurant" button is drawn
+    // dead beside it, leading to the booking block. `dinein` is the *other*
+    // way of seating somebody and cannot be declared alongside `reserve`.
+    services: ['pickup', 'reserve'],
     branches: [
       {
         name: 'Northern Ave',
@@ -110,7 +115,14 @@ const RESTAURANTS: SeedRestaurant[] = [
     ratingAvg: 4.6,
     reviewsCount: 640,
     reservationsEnabled: false,
-    services: ['pickup'],
+    // A counter with tables, and the other half of the rule: no bookings, but
+    // a room that seats whoever turns up — so a guest ordering ahead picks
+    // between eating it here and taking it away, and both buttons are live.
+    // `dinein` is what says the tables exist; without it this would be a hatch
+    // offering take-away alone. Seeded on one of the two detailed restaurants
+    // so the live pair exists to look at beside a restaurant where the second
+    // button is dead.
+    services: ['pickup', 'dinein'],
     branches: [
       {
         name: 'Cascade',
@@ -244,34 +256,51 @@ interface SeedChain {
  * cannot show whether the panel's restaurant-then-branch pickers, its branch
  * filter or its pagination actually work; one where they all have ten is just
  * as unrepresentative of a market that is mostly single-site restaurants.
+ *
+ * **The services spread is the point too**, and it is the three kinds of place
+ * BUSINESS_LOGIC.md §2 allows — one of which had no example at all until
+ * `dinein` stopped requiring `reserve`:
+ *
+ * - **`pickup` + `reserve`** (9 chains) — tables are booked. The pre-order is
+ *   take-away, and "Eat at the Restaurant" is drawn dead beside it, leading to
+ *   the calendar.
+ * - **`pickup` + `dinein`** (6 chains, 25 branches) — a room that seats whoever
+ *   turns up. Both endings live, the food paid for as a pre-order with no
+ *   deposit and no table held.
+ * - **`pickup` alone** (5 chains) — a hatch with nowhere to sit. Take-away and
+ *   nothing else.
+ *
+ * A combination with no seeded example is one nobody notices is broken, which
+ * is why the walk-in case gets the biggest chain rather than a token two-branch
+ * one: the live pair has to survive a paginated list, not just a detail page.
  */
 const CHAINS: SeedChain[] = [
   // Ten branches — the two big chains.
-  { slug: 'tashir-pizza', name: 'Tashir Pizza', cuisine: 'Pizza', menu: 'pizza', priceLevel: 2, ratingAvg: 4.4, reviewsCount: 3100, reservationsEnabled: false, services: ['pickup'], branchCount: 10 },
-  { slug: 'jazzve', name: 'Jazzve', cuisine: 'Coffee', menu: 'breakfast', priceLevel: 2, ratingAvg: 4.5, reviewsCount: 2870, reservationsEnabled: true, services: ['pickup', 'dinein', 'reserve'], branchCount: 10 },
+  { slug: 'tashir-pizza', name: 'Tashir Pizza', cuisine: 'Pizza', menu: 'pizza', priceLevel: 2, ratingAvg: 4.4, reviewsCount: 3100, reservationsEnabled: false, services: ['pickup', 'dinein'], branchCount: 10 },
+  { slug: 'jazzve', name: 'Jazzve', cuisine: 'Coffee', menu: 'breakfast', priceLevel: 2, ratingAvg: 4.5, reviewsCount: 2870, reservationsEnabled: true, services: ['pickup', 'reserve'], branchCount: 10 },
 
   // Five branches.
-  { slug: 'karas', name: 'Karas', cuisine: 'Armenian', menu: 'grill', priceLevel: 1, ratingAvg: 4.3, reviewsCount: 4200, reservationsEnabled: true, services: ['pickup', 'dinein', 'reserve'], branchCount: 5 },
-  { slug: 'black-angus', name: 'Black Angus', cuisine: 'Burgers', menu: 'burgers', priceLevel: 3, ratingAvg: 4.6, reviewsCount: 1560, reservationsEnabled: true, services: ['pickup', 'dinein', 'reserve'], branchCount: 5 },
+  { slug: 'karas', name: 'Karas', cuisine: 'Armenian', menu: 'grill', priceLevel: 1, ratingAvg: 4.3, reviewsCount: 4200, reservationsEnabled: true, services: ['pickup', 'reserve'], branchCount: 5 },
+  { slug: 'black-angus', name: 'Black Angus', cuisine: 'Burgers', menu: 'burgers', priceLevel: 3, ratingAvg: 4.6, reviewsCount: 1560, reservationsEnabled: true, services: ['pickup', 'reserve'], branchCount: 5 },
   { slug: 'sushi-time', name: 'Sushi Time', cuisine: 'Japanese', menu: 'sushi', priceLevel: 3, ratingAvg: 4.5, reviewsCount: 980, reservationsEnabled: false, services: ['pickup'], branchCount: 5 },
-  { slug: 'green-bean', name: 'Green Bean', cuisine: 'Healthy', menu: 'healthy', priceLevel: 2, ratingAvg: 4.7, reviewsCount: 720, reservationsEnabled: false, services: ['pickup'], branchCount: 5 },
+  { slug: 'green-bean', name: 'Green Bean', cuisine: 'Healthy', menu: 'healthy', priceLevel: 2, ratingAvg: 4.7, reviewsCount: 720, reservationsEnabled: false, services: ['pickup', 'dinein'], branchCount: 5 },
 
   // Three branches.
-  { slug: 'lavash', name: 'Lavash', cuisine: 'Armenian', menu: 'grill', priceLevel: 3, ratingAvg: 4.8, reviewsCount: 5400, reservationsEnabled: true, services: ['pickup', 'dinein', 'reserve'], branchCount: 3 },
-  { slug: 'wok-star', name: 'Wok Star', cuisine: 'Asian', menu: 'asian', priceLevel: 2, ratingAvg: 4.2, reviewsCount: 610, reservationsEnabled: false, services: ['pickup'], branchCount: 3 },
-  { slug: 'gouroo', name: 'Gouroo', cuisine: 'European', menu: 'breakfast', priceLevel: 3, ratingAvg: 4.6, reviewsCount: 1340, reservationsEnabled: true, services: ['pickup', 'dinein', 'reserve'], branchCount: 3 },
+  { slug: 'lavash', name: 'Lavash', cuisine: 'Armenian', menu: 'grill', priceLevel: 3, ratingAvg: 4.8, reviewsCount: 5400, reservationsEnabled: true, services: ['pickup', 'reserve'], branchCount: 3 },
+  { slug: 'wok-star', name: 'Wok Star', cuisine: 'Asian', menu: 'asian', priceLevel: 2, ratingAvg: 4.2, reviewsCount: 610, reservationsEnabled: false, services: ['pickup', 'dinein'], branchCount: 3 },
+  { slug: 'gouroo', name: 'Gouroo', cuisine: 'European', menu: 'breakfast', priceLevel: 3, ratingAvg: 4.6, reviewsCount: 1340, reservationsEnabled: true, services: ['pickup', 'reserve'], branchCount: 3 },
   { slug: 'pizza-nova', name: 'Pizza Nova', cuisine: 'Pizza', menu: 'pizza', priceLevel: 2, ratingAvg: 4.1, reviewsCount: 880, reservationsEnabled: false, services: ['pickup'], branchCount: 3 },
-  { slug: 'sweet-hour', name: 'Sweet Hour', cuisine: 'Desserts', menu: 'desserts', priceLevel: 2, ratingAvg: 4.7, reviewsCount: 1020, reservationsEnabled: false, services: ['pickup'], branchCount: 3 },
-  { slug: 'ramen-house', name: 'Ramen House', cuisine: 'Asian', menu: 'asian', priceLevel: 2, ratingAvg: 4.4, reviewsCount: 540, reservationsEnabled: true, services: ['pickup', 'dinein', 'reserve'], branchCount: 3 },
+  { slug: 'sweet-hour', name: 'Sweet Hour', cuisine: 'Desserts', menu: 'desserts', priceLevel: 2, ratingAvg: 4.7, reviewsCount: 1020, reservationsEnabled: false, services: ['pickup', 'dinein'], branchCount: 3 },
+  { slug: 'ramen-house', name: 'Ramen House', cuisine: 'Asian', menu: 'asian', priceLevel: 2, ratingAvg: 4.4, reviewsCount: 540, reservationsEnabled: true, services: ['pickup', 'reserve'], branchCount: 3 },
 
   // Two branches.
-  { slug: 'dolmama', name: 'Dolmama', cuisine: 'Armenian', menu: 'grill', priceLevel: 4, ratingAvg: 4.9, reviewsCount: 2100, reservationsEnabled: true, services: ['pickup', 'dinein', 'reserve'], branchCount: 2 },
-  { slug: 'anteb', name: 'Anteb', cuisine: 'Middle Eastern', menu: 'grill', priceLevel: 3, ratingAvg: 4.6, reviewsCount: 760, reservationsEnabled: true, services: ['pickup', 'dinein', 'reserve'], branchCount: 2 },
+  { slug: 'dolmama', name: 'Dolmama', cuisine: 'Armenian', menu: 'grill', priceLevel: 4, ratingAvg: 4.9, reviewsCount: 2100, reservationsEnabled: true, services: ['pickup', 'reserve'], branchCount: 2 },
+  { slug: 'anteb', name: 'Anteb', cuisine: 'Middle Eastern', menu: 'grill', priceLevel: 3, ratingAvg: 4.6, reviewsCount: 760, reservationsEnabled: true, services: ['pickup', 'reserve'], branchCount: 2 },
   { slug: 'burger-bros', name: 'Burger Bros', cuisine: 'Burgers', menu: 'burgers', priceLevel: 2, ratingAvg: 4.3, reviewsCount: 430, reservationsEnabled: false, services: ['pickup'], branchCount: 2 },
-  { slug: 'kohaku', name: 'Kohaku', cuisine: 'Japanese', menu: 'sushi', priceLevel: 4, ratingAvg: 4.8, reviewsCount: 690, reservationsEnabled: true, services: ['pickup', 'dinein', 'reserve'], branchCount: 2 },
-  { slug: 'morning-set', name: 'Morning Set', cuisine: 'Breakfast', menu: 'breakfast', priceLevel: 1, ratingAvg: 4.2, reviewsCount: 310, reservationsEnabled: false, services: ['pickup'], branchCount: 2 },
+  { slug: 'kohaku', name: 'Kohaku', cuisine: 'Japanese', menu: 'sushi', priceLevel: 4, ratingAvg: 4.8, reviewsCount: 690, reservationsEnabled: true, services: ['pickup', 'reserve'], branchCount: 2 },
+  { slug: 'morning-set', name: 'Morning Set', cuisine: 'Breakfast', menu: 'breakfast', priceLevel: 1, ratingAvg: 4.2, reviewsCount: 310, reservationsEnabled: false, services: ['pickup', 'dinein'], branchCount: 2 },
   { slug: 'salad-lab', name: 'Salad Lab', cuisine: 'Healthy', menu: 'healthy', priceLevel: 2, ratingAvg: 4.5, reviewsCount: 280, reservationsEnabled: false, services: ['pickup'], branchCount: 2 },
-  { slug: 'pastry-corner', name: 'Pastry Corner', cuisine: 'Desserts', menu: 'desserts', priceLevel: 1, ratingAvg: 4.4, reviewsCount: 950, reservationsEnabled: false, services: ['pickup'], branchCount: 2 },
+  { slug: 'pastry-corner', name: 'Pastry Corner', cuisine: 'Desserts', menu: 'desserts', priceLevel: 1, ratingAvg: 4.4, reviewsCount: 950, reservationsEnabled: false, services: ['pickup', 'dinein'], branchCount: 2 },
   { slug: 'noodle-bar', name: 'Noodle Bar', cuisine: 'Asian', menu: 'asian', priceLevel: 1, ratingAvg: 4.0, reviewsCount: 190, reservationsEnabled: false, services: ['pickup'], branchCount: 2 },
 ];
 
@@ -400,6 +429,11 @@ async function main(): Promise<void> {
         reviewsCount: r.reviewsCount,
         reservationsEnabled: r.reservationsEnabled,
         services: r.services,
+        // On create only. A restaurant that has been here a while may have had
+        // its cover changed, and the update above must not walk over that —
+        // `refreshSeedCovers` below fills the empty ones instead, and knows the
+        // difference between a picture this seed planted and one somebody chose.
+        coverUrl: coverFor(r.slug, r.cuisine),
         ownerId: owner.id,
       },
     });
@@ -470,6 +504,14 @@ async function main(): Promise<void> {
     console.log(`Menu photos: gave ${refreshed} dish(es) the picture for what they are.`);
   }
 
+  // And the same for restaurants seeded before covers existed here — every one
+  // of them was planted with `cover_url` null, which is why the card, the
+  // restaurant banner and the order thumbnail all drew their empty state.
+  const covers = await refreshSeedCovers(prisma);
+  if (covers > 0) {
+    console.log(`Restaurant covers: gave ${covers} restaurant(s) a picture.`);
+  }
+
   await seedStaff();
   // Last: an order needs a branch to belong to, a menu to be made of and
   // somebody at that branch to have moved it through the kitchen.
@@ -481,6 +523,10 @@ async function main(): Promise<void> {
   const counts = {
     categories: await prisma.category.count(),
     restaurants: await prisma.restaurant.count(),
+    // Should print 0 too, and for the same reason as the dishes below: the
+    // screens that read this column have no other way of saying "no picture"
+    // than the empty state they used to show for every restaurant.
+    restaurantsWithoutCover: await prisma.restaurant.count({ where: { coverUrl: null } }),
     branches: await prisma.restaurantBranch.count(),
     menuItems: await prisma.menuItem.count(),
     // Should always print 0. It is in the summary rather than in a comment

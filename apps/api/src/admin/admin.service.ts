@@ -22,7 +22,6 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { maskPhone } from '../auth/phone.util';
 import { AuditService } from '../audit/audit.service';
-import { pickupCodeFrom } from '../orders/order-code';
 import { InvitesService } from '../staff/invites.service';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
 import {
@@ -114,8 +113,6 @@ export interface AdminCustomerOrderItem {
 export interface AdminCustomerOrder {
   id: string;
   code: string;
-  /** The last four digits — what a counter says out loud. */
-  pickupCode: string;
   status: OrderStatus;
   serviceMode: ServiceMode;
   restaurantId: string;
@@ -167,6 +164,19 @@ export class AdminService {
     }
     if (query.role) {
       where.role = query.role as Prisma.EnumRoleFilter['equals'];
+    }
+    // Anonymous sessions that never bought anything are hidden unless asked
+    // for. One row is written per visitor to the storefront, so they arrive
+    // faster than customers do and, newest-first, they are the whole first
+    // page — a screen about "people who order food" showing nobody who has.
+    //
+    // A guest with orders is kept whatever the flag says: it is somebody who
+    // bought something, which is the only thing this list is really asking.
+    // And an `id` is a link that already knows who it means — the order board
+    // names a diner and sends you here — so it answers for guests too, or the
+    // link would land on "that account no longer exists".
+    if (!query.guests && !query.id) {
+      where.NOT = { isGuest: true, orders: { none: {} } };
     }
 
     const [rows, total] = await Promise.all([
@@ -444,7 +454,9 @@ function toCustomerOrder(row: CustomerOrderRow): AdminCustomerOrder {
   return {
     id: row.id,
     code: row.code,
-    pickupCode: pickupCodeFrom(row.code),
+    // No `pickupCode`. This screen looks at somebody else's orders from the
+    // platform side, which is further from the counter than the board is, not
+    // closer — and the board does not get it either. See `QueueItem`.
     status: row.status as OrderStatus,
     serviceMode: row.serviceMode as ServiceMode,
     restaurantId: row.branch.restaurantId,

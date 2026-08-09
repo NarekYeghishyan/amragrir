@@ -34,8 +34,58 @@ export const AuditAction = {
    *  resolves and the dish can still be named. */
   MenuItemDelete: 'menu_item.delete',
 
+  /**
+   * The ways a restaurant says it will feed people — pickup, the eat-in
+   * sub-option under it, table service, table booking.
+   *
+   * Its own action rather than a `restaurant.update` carrying one field,
+   * because it is the only thing about a restaurant this panel can change and
+   * because of what changing it does: turning table service on withdraws the
+   * eat-in option, and a guest who could sit down with their own tray this
+   * morning cannot this afternoon. `before`/`after` carry the whole array, not
+   * a diff — a set of four values is shorter read whole than as a delta.
+   */
+  RestaurantServices: 'restaurant.services',
+
+  /**
+   * The photograph on the restaurant's card, replaced or taken down.
+   *
+   * `before`/`after` carry the URLs. Storing them is what makes the entry
+   * answer "which picture was this before somebody changed it" — the file the
+   * old URL points at is still on disk, because an upload is never deleted when
+   * it stops being referenced, so the previous cover is recoverable from this
+   * row alone. Taking one down is the same action with `null` in `after`,
+   * rather than a `restaurant.cover_delete` nobody would think to look for.
+   */
+  RestaurantCover: 'restaurant.cover',
+
   BranchCreate: 'branch.create',
   BranchUpdate: 'branch.update',
+
+  /**
+   * This branch's own cover, set, replaced or handed back to the restaurant.
+   *
+   * Separate from `restaurant.cover` because they are different decisions by
+   * different people: one is what the business looks like, the other what this
+   * address looks like, and a manager may do the second and not the first.
+   * `after.coverUrl: null` is "wear the restaurant's again", not "no picture".
+   */
+  BranchCover: 'branch.cover',
+
+  /**
+   * What this branch offers, or its return to following the restaurant.
+   *
+   * `after.servicesOverridden: false` is the branch giving the question back to
+   * the business — which is a different event from declaring the same set the
+   * business happens to declare, and the flag is what keeps the two readable
+   * apart a year later.
+   */
+  BranchServices: 'branch.services',
+
+  /** Whether this branch takes table bookings, or follows the restaurant.
+   *  Recorded apart from `branch.services` even though `reserve` lives there:
+   *  they are two columns and either can move without the other. */
+  BranchBookings: 'branch.bookings',
   /** Open/closed and the prep estimate — the shift's own switch, on
    *  `branch:hours` rather than `branch:write`. */
   BranchStatus: 'branch.status',
@@ -72,6 +122,7 @@ export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
  */
 export const AuditEntity = {
   MenuItem: 'menu_item',
+  Restaurant: 'restaurant',
   Branch: 'branch',
   StaffUser: 'staff_user',
   StaffInvite: 'staff_invite',
@@ -93,9 +144,14 @@ export const AUDIT_ACTION_ENTITY: Readonly<Record<AuditAction, AuditEntity>> = {
   [AuditAction.MenuItemUpdate]: AuditEntity.MenuItem,
   [AuditAction.MenuItemAvailability]: AuditEntity.MenuItem,
   [AuditAction.MenuItemDelete]: AuditEntity.MenuItem,
+  [AuditAction.RestaurantServices]: AuditEntity.Restaurant,
+  [AuditAction.RestaurantCover]: AuditEntity.Restaurant,
   [AuditAction.BranchCreate]: AuditEntity.Branch,
   [AuditAction.BranchUpdate]: AuditEntity.Branch,
   [AuditAction.BranchStatus]: AuditEntity.Branch,
+  [AuditAction.BranchCover]: AuditEntity.Branch,
+  [AuditAction.BranchServices]: AuditEntity.Branch,
+  [AuditAction.BranchBookings]: AuditEntity.Branch,
   [AuditAction.StaffInvite]: AuditEntity.StaffInvite,
   [AuditAction.StaffInviteRevoke]: AuditEntity.StaffInvite,
   [AuditAction.StaffAssignmentRevoke]: AuditEntity.StaffAssignment,

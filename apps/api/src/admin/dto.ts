@@ -1,5 +1,6 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsEmail,
   IsIn,
   IsISO8601,
@@ -15,6 +16,7 @@ import {
 } from 'class-validator';
 import { CouponSource } from '@prisma/client';
 import { CustomerOrderFilter, REFERRAL_MAX_STACK_PCT, Role } from '@amragrir/shared';
+import { toBool } from '../common/query';
 
 export class MetricsQueryDto {
   @IsISO8601()
@@ -47,6 +49,23 @@ export class ListUsersDto {
   @IsIn(Object.values(Role))
   @IsOptional()
   role?: Role;
+
+  /**
+   * Include the anonymous sessions that have never ordered.
+   *
+   * Off by default, and that default is the useful one: a row is created for
+   * every visitor who opens the storefront (`AuthService.createGuest`), so a
+   * list ordered newest-first is otherwise page after page of accounts with no
+   * name, no number and nothing bought — with the people who actually order
+   * buried behind them.
+   *
+   * They are hidden, never deleted: a guest is a real session, and one that
+   * *has* ordered stays in the list either way (see `AdminService.listUsers`).
+   */
+  @IsBoolean()
+  @IsOptional()
+  @Transform(toBool)
+  guests?: boolean;
 
   @IsInt()
   @IsOptional()

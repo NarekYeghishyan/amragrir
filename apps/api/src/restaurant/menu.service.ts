@@ -1,6 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { AuditAction, Permission, type MenuTab } from '@amragrir/shared';
+import {
+  AuditAction,
+  Permission,
+  RestaurantService,
+  canonicalServices,
+  checkServices,
+  resolveBranchOffering,
+  type MenuTab,
+  type ServiceBreach,
+} from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { changedFields } from '../audit/audit';
@@ -13,7 +22,12 @@ import {
   ListMenuItemsDto,
   ListRestaurantsDto,
   SetAvailabilityDto,
+  SetBranchBookingsDto,
+  SetBranchCoverDto,
+  SetBranchServicesDto,
   SetBranchStatusDto,
+  SetRestaurantCoverDto,
+  SetRestaurantServicesDto,
   UpdateBranchDto,
   UpdateMenuItemDto,
 } from './menu.dto';
@@ -54,6 +68,31 @@ export interface StaffBranch {
   isOpen: boolean;
   avgPrepMin: number | null;
   menuItemCount: number;
+  /**
+   * What this branch has answered for itself. `null` / `false` means it has
+   * not, and follows the restaurant.
+   *
+   * Sent **beside** `offering` below rather than instead of it, because the
+   * panel has to draw two different things: whether this branch is speaking for
+   * itself (which is what the "follow the restaurant" control toggles) and what
+   * a guest is actually shown. Deriving either from the other is impossible —
+   * a branch declaring exactly what the business declares is a different state
+   * from one that has not declared, and only the flag can tell them apart.
+   */
+  own: {
+    coverUrl: string | null;
+    services: string[];
+    servicesOverridden: boolean;
+    reservationsEnabled: boolean | null;
+  };
+  /** What a guest sees at this address, resolved against the restaurant's
+   *  defaults by `resolveBranchOffering` — the same function every customer
+   *  read path uses, so the panel cannot show something the catalog will not. */
+  offering: {
+    coverUrl: string | null;
+    services: string[];
+    reservationsEnabled: boolean;
+  };
 }
 
 /**
@@ -94,8 +133,42 @@ export interface StaffRestaurantDetail extends StaffRestaurant {
   createdAt: string;
 }
 
+/** The branch edits that write an entry, so a caller cannot pass a menu action
+ *  to the branch updater. */
+type BranchAuditAction =
+  | typeof AuditAction.BranchStatus
+  | typeof AuditAction.BranchUpdate
+  | typeof AuditAction.BranchCover
+  | typeof AuditAction.BranchServices
+  | typeof AuditAction.BranchBookings;
+
+/** What one of those edits may move. Spelled out rather than `Partial<Branch>`
+ *  so nothing can reach the updater that the audit diff has not been thought
+ *  about for. */
+type BranchPatch = {
+  name?: string;
+  address?: string;
+  phone?: string;
+  isOpen?: boolean;
+  avgPrepMin?: number;
+  coverUrl?: string | null;
+  services?: string[];
+  servicesOverridden?: boolean;
+  reservationsEnabled?: boolean | null;
+};
+
 const BRANCH_INCLUDE = {
-  restaurant: { select: { id: true, name: true } },
+  // The restaurant's defaults travel with every branch, because a branch that
+  // has overridden nothing cannot say what it offers without them.
+  restaurant: {
+    select: {
+      id: true,
+      name: true,
+      services: true,
+      coverUrl: true,
+      reservationsEnabled: true,
+    },
+  },
   // Filtered, or "12 dishes" would keep counting the ones taken off the menu and
   // never move down again.
   _count: { select: { menuItems: { where: LIVE_MENU_ITEM } } },
@@ -234,7 +307,10 @@ export class MenuService {
            *  of them a filter left showing. */
           branchCount: row.branches.length,
           branches: shown.map((branch) =>
-            toStaffBranch({ ...branch, restaurant: { id: row.id, name: row.name } }),
+            // The restaurant is already loaded, so its defaults are handed
+            // down rather than re-queried per branch — a branch that has
+            // overridden nothing cannot say what it offers without them.
+            toStaffBranch({ ...branch, restaurant: restaurantDefaults(row) }),
           ),
         };
       }),
@@ -283,7 +359,7 @@ export class MenuService {
       // disappears between two responses of the same type is a trap.
       branchCount: row.branches.length,
       branches: row.branches.map((branch) =>
-        toStaffBranch({ ...branch, restaurant: { id: row.id, name: row.name } }),
+        toStaffBranch({ ...branch, restaurant: restaurantDefaults(row) }),
       ),
       // `Decimal` over the wire would arrive as an object with its own toString
       // and compare wrongly against a number. Resolved here, once.
@@ -292,6 +368,129 @@ export class MenuService {
       coverUrl: row.coverUrl,
       createdAt: row.createdAt.toISOString(),
     };
+  }
+
+  /**
+   * What the restaurant offers: pickup, eating in after collecting it, table
+   * service, table booking.
+   *
+   * The rule the panel and this endpoint share is that **table service and the
+   * eat-in pickup option cancel each other out** — a room with waiters has no
+   * use for "collect it yourself and find a seat", and a guest offered both is
+   * being asked a question the restaurant has already answered. The panel
+   * disables the switch that would break it; this refuses it, because a
+   * disabled control is a courtesy to whoever is looking at the screen and not
+   * a check on what reaches the database. Both read `checkServices` — the rule
+   * is written once, in `shared`.
+   *
+   * Scoped by `restaurant:write`, which no branch-level role holds: services
+   * are a statement about the whole business, and a manager flipping one at one
+   * branch would be changing what every other branch advertises.
+   */
+  async setServices(
+    staff: StaffJwtPayload,
+    id: string,
+    dto: SetRestaurantServicesDto,
+  ): Promise<StaffRestaurantDetail> {
+    const current = await this.prisma.restaurant.findFirst({
+      where: { id, ...restaurantScope(staff.scopes, Permission.RestaurantWrite) },
+      select: { services: true },
+    });
+    if (!current) {
+      throw new NotFoundException('Restaurant not found');
+    }
+
+    const services = canonicalServices(dto.services);
+    const breach = checkServices(services);
+    if (breach) {
+      throw new UnprocessableEntityException(breachMessage(breach));
+    }
+
+    // Both sides canonical, so a row seeded in another order is not diffed as a
+    // change it never made — it is just quietly stored in order from now on.
+    const changed = changedFields(
+      { services: canonicalServices(current.services) },
+      { services },
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.restaurant.update({ where: { id }, data: { services } });
+
+      if (changed) {
+        await this.audit.record(tx, staff, {
+          action: AuditAction.RestaurantServices,
+          entityId: id,
+          // No branch: this is the restaurant's own decision, and filing it
+          // against one of its branches would be saying it happened there.
+          scope: { restaurantId: id },
+          before: changed.before,
+          after: changed.after,
+        });
+      }
+    });
+
+    // Read back through the same door `GET restaurants/:id` uses, so the panel
+    // gets the shape it already renders rather than a second one to keep in
+    // step — branches, counts and all.
+    return this.getRestaurant(staff, id);
+  }
+
+  /**
+   * The photograph on the restaurant's card.
+   *
+   * Same permission and same scope as `setServices` above, for the same reason:
+   * one cover is shared by every branch, so this is a statement about the whole
+   * business and a `restaurant_manager` — who answers for one branch — does not
+   * hold it. Per-branch covers were considered and deliberately not chosen; see
+   * ROLES_AND_PERMISSIONS.md.
+   *
+   * Only the URL is stored. Uploading is `POST /uploads/restaurant-cover`, and
+   * nothing here checks that the URL came from it: the column has always held
+   * addresses this API did not issue (the seed hotlinks them), and a check that
+   * the panel's own two-step flow would pass and the seed would fail is a rule
+   * about where a picture is hosted rather than about who may set it.
+   *
+   * A cover this overwrites is **not deleted from disk**, which is the same
+   * known cost the menu photos carry: the previous URL is in the audit entry,
+   * so a cover replaced by accident is recoverable, and nothing sweeps the
+   * orphans yet either way.
+   */
+  async setCover(
+    staff: StaffJwtPayload,
+    id: string,
+    dto: SetRestaurantCoverDto,
+  ): Promise<StaffRestaurantDetail> {
+    const current = await this.prisma.restaurant.findFirst({
+      where: { id, ...restaurantScope(staff.scopes, Permission.RestaurantWrite) },
+      select: { coverUrl: true },
+    });
+    if (!current) {
+      throw new NotFoundException('Restaurant not found');
+    }
+
+    const coverUrl = dto.coverUrl;
+    const changed = changedFields({ coverUrl: current.coverUrl }, { coverUrl });
+
+    // Nothing moved — re-uploading the picture that is already there writes no
+    // row and no update, the same rule every PATCH here follows.
+    if (!changed) {
+      return this.getRestaurant(staff, id);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.restaurant.update({ where: { id }, data: { coverUrl } });
+
+      await this.audit.record(tx, staff, {
+        action: AuditAction.RestaurantCover,
+        entityId: id,
+        // No branch, as with the services above: it did not happen at one.
+        scope: { restaurantId: id },
+        before: changed.before,
+        after: changed.after,
+      });
+    });
+
+    return this.getRestaurant(staff, id);
   }
 
   async listBranches(staff: StaffJwtPayload): Promise<{ items: StaffBranch[] }> {
@@ -378,6 +577,87 @@ export class MenuService {
       Permission.BranchWrite,
       AuditAction.BranchUpdate,
       dto,
+    );
+  }
+
+  /**
+   * This branch's own photograph, or `null` to wear the restaurant's again.
+   *
+   * `branch:write`, which a `restaurant_manager` holds — the same permission
+   * that already lets them correct this branch's address and phone. A cover is
+   * a statement about *this address*, so the person who answers for the address
+   * answers for it, which is exactly what the restaurant-level endpoint is not.
+   *
+   * `null` here means "follow the business", not "no picture" — see
+   * `SetBranchCoverDto`.
+   */
+  async setBranchCover(
+    staff: StaffJwtPayload,
+    branchId: string,
+    dto: SetBranchCoverDto,
+  ): Promise<StaffBranch> {
+    return this.updateBranchWith(staff, branchId, Permission.BranchWrite, AuditAction.BranchCover, {
+      coverUrl: dto.coverUrl,
+    });
+  }
+
+  /**
+   * What this branch offers, or `null` to follow the restaurant again.
+   *
+   * The combination rules are checked here exactly as they are for a
+   * restaurant, because they describe a place that can exist and a branch is
+   * one — a room with waiters still has no use for "collect it and seat
+   * yourself", whichever level declared it.
+   *
+   * Writes both columns together: the flag is what makes `[]` (this branch
+   * offers nothing) distinguishable from "has not declared", so setting one
+   * without the other would produce a row that reads as an answer it is not.
+   */
+  async setBranchServices(
+    staff: StaffJwtPayload,
+    branchId: string,
+    dto: SetBranchServicesDto,
+  ): Promise<StaffBranch> {
+    if (dto.services === null) {
+      // Handing the question back. The array is cleared rather than left
+      // behind, so a row read by hand cannot show a stale set behind a `false`
+      // flag — the CHECK constraint in the migration holds this too.
+      return this.updateBranchWith(
+        staff,
+        branchId,
+        Permission.BranchWrite,
+        AuditAction.BranchServices,
+        { services: [], servicesOverridden: false },
+      );
+    }
+
+    const services = canonicalServices(dto.services);
+    const breach = checkServices(services);
+    if (breach) {
+      throw new UnprocessableEntityException(breachMessage(breach));
+    }
+
+    return this.updateBranchWith(
+      staff,
+      branchId,
+      Permission.BranchWrite,
+      AuditAction.BranchServices,
+      { services, servicesOverridden: true },
+    );
+  }
+
+  /** Whether this branch takes bookings, or `null` to follow the restaurant. */
+  async setBranchBookings(
+    staff: StaffJwtPayload,
+    branchId: string,
+    dto: SetBranchBookingsDto,
+  ): Promise<StaffBranch> {
+    return this.updateBranchWith(
+      staff,
+      branchId,
+      Permission.BranchWrite,
+      AuditAction.BranchBookings,
+      { reservationsEnabled: dto.reservationsEnabled },
     );
   }
 
@@ -607,18 +887,17 @@ export class MenuService {
   // ── internals ─────────────────────────────────────────────────────────────
 
   /**
-   * The two branch edits, which differ only in the permission they need and the
+   * Every branch edit, which differ only in the permission they need and the
    * action they record. The action is passed rather than derived from the
-   * permission: `branch:hours` and `branch:write` happen to map one-to-one today
-   * and there is no reason a third edit could not share a permission with one of
-   * them.
+   * permission: three of them now share `branch:write`, and the feed has to be
+   * able to tell "changed the address" from "changed the photograph".
    */
   private async updateBranchWith(
     staff: StaffJwtPayload,
     branchId: string,
     permission: Permission,
-    action: typeof AuditAction.BranchStatus | typeof AuditAction.BranchUpdate,
-    data: SetBranchStatusDto | UpdateBranchDto,
+    action: BranchAuditAction,
+    data: BranchPatch,
   ): Promise<StaffBranch> {
     const current = await this.prisma.restaurantBranch.findFirst({
       where: { id: branchId, ...branchScope(staff.scopes, permission) },
@@ -629,6 +908,10 @@ export class MenuService {
         phone: true,
         isOpen: true,
         avgPrepMin: true,
+        coverUrl: true,
+        services: true,
+        servicesOverridden: true,
+        reservationsEnabled: true,
       },
     });
     if (!current) {
@@ -717,6 +1000,27 @@ export class MenuService {
   }
 }
 
+/**
+ * The services as a sentence, for the one refusal that has to explain itself.
+ *
+ * English, like every other message this API produces: the back office renders
+ * its own translated version from the same rule (see `serviceToggleBreach`), so
+ * nobody reading a screen sees this. It is for whoever is holding an HTTP
+ * response — and it names both services, because "invalid services" would send
+ * them to the source to find out.
+ */
+const SERVICE_LABEL: Readonly<Record<RestaurantService, string>> = {
+  [RestaurantService.Pickup]: 'pre-order',
+  [RestaurantService.DineIn]: 'dine-in table service',
+  [RestaurantService.Reserve]: 'table booking',
+};
+
+function breachMessage(breach: ServiceBreach): string {
+  const service = SERVICE_LABEL[breach.service];
+  const other = SERVICE_LABEL[breach.other];
+  return `${service} and ${other} cannot both be offered — they are two ways of seating somebody, and an address does one of them`;
+}
+
 /** Drops blank translations so a half-filled form stores `{ hy: … }` rather
  *  than `{ hy: …, ru: '', en: '' }` — an empty string is not a translation,
  *  and it would win over the `hy` fallback in `localize()`. */
@@ -726,17 +1030,47 @@ export function stripEmpty(field: object): Record<string, string> {
   ) as Record<string, string>;
 }
 
+/** The defaults a branch inherits, off an already-loaded restaurant row — so a
+ *  page of forty branches resolves against one object rather than forty
+ *  queries. */
+function restaurantDefaults(row: {
+  id: string;
+  name: string;
+  services: string[];
+  coverUrl: string | null;
+  reservationsEnabled: boolean;
+}) {
+  return {
+    id: row.id,
+    name: row.name,
+    services: row.services,
+    coverUrl: row.coverUrl,
+    reservationsEnabled: row.reservationsEnabled,
+  };
+}
+
 function toStaffBranch(row: {
   id: string;
-  restaurant: { id: string; name: string };
+  restaurant: {
+    id: string;
+    name: string;
+    services: string[];
+    coverUrl: string | null;
+    reservationsEnabled: boolean;
+  };
   name: string | null;
   address: string | null;
   city: string;
   phone: string | null;
   isOpen: boolean;
   avgPrepMin: number | null;
+  coverUrl: string | null;
+  services: string[];
+  servicesOverridden: boolean;
+  reservationsEnabled: boolean | null;
   _count: { menuItems: number };
 }): StaffBranch {
+  const offering = resolveBranchOffering(row, row.restaurant);
   return {
     id: row.id,
     restaurantId: row.restaurant.id,
@@ -748,6 +1082,17 @@ function toStaffBranch(row: {
     isOpen: row.isOpen,
     avgPrepMin: row.avgPrepMin,
     menuItemCount: row._count.menuItems,
+    own: {
+      coverUrl: row.coverUrl,
+      services: row.services,
+      servicesOverridden: row.servicesOverridden,
+      reservationsEnabled: row.reservationsEnabled,
+    },
+    offering: {
+      coverUrl: offering.coverUrl,
+      services: [...offering.services],
+      reservationsEnabled: offering.reservationsEnabled,
+    },
   };
 }
 

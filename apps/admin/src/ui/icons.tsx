@@ -146,6 +146,16 @@ const ICONS = {
       <path d="M13.8 13.8h3M20.8 13.8v3M17.3 17.3h3.5M13.8 20.8h3.5M20.8 20.8h.01" />
     </>
   ),
+  /** A pushpin driven straight in — the board held on one order while the rest
+   *  of the queue is set aside. Head-on rather than leaning the way a map pin
+   *  does: at 17px a tilted pin reads as an arrow, and an arrow on a card full
+   *  of buttons looks like something that moves the order along. */
+  pin: (
+    <>
+      <path d="M9 3h6l-.8 6.3 2.6 2.9a1 1 0 0 1-.7 1.7H7.9a1 1 0 0 1-.7-1.7l2.6-2.9z" />
+      <path d="M12 13.9V21" />
+    </>
+  ),
   inbox: (
     <>
       <path d="M22 12h-5.5l-1.7 3h-5.6l-1.7-3H2" />

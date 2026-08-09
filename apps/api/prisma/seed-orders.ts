@@ -38,6 +38,7 @@ import {
   OrderActorType,
   OrderEventType,
   OrderStatus,
+  PICKUP_CODE_LENGTH,
   PaymentMethod,
   PaymentStatus,
   RESERVATION_SLOT_MINUTES,
@@ -136,6 +137,9 @@ export interface PlannedEvent {
 export interface PlannedOrder {
   /** The idempotency key: a re-run skips whatever is already in the database. */
   code: string;
+  /** What a demo guest would show at the counter. Unique across the run, like
+   *  the column it lands in. */
+  pickupCode: string;
   userId: string;
   serviceMode: ServiceMode;
   status: OrderStatus;
@@ -293,9 +297,9 @@ export function planBranchOrders(plan: BranchOrderPlan): PlannedOrder[] {
   }
 
   const orders: PlannedOrder[] = [];
-  // Two invariants the real code maintains, kept here for the same reasons:
-  // an order code is unique platform-wide, and two *active* orders at one
-  // branch must not share the last four digits the counter calls out.
+  // Both codes are unique platform-wide, which is what the database enforces —
+  // so the seed has to hold itself to it too, or a demo dataset fails to insert
+  // on a constraint the application never trips.
   const codes = new Set<string>();
   const pickupCodes = new Set<string>();
   // `(table, slot)` is unique among live bookings — see `reservations`.
@@ -311,9 +315,9 @@ export function planBranchOrders(plan: BranchOrderPlan): PlannedOrder[] {
       heldSlots,
     });
     codes.add(order.code);
-    if (isLive(status)) {
-      pickupCodes.add(order.code.slice(-4));
-    }
+    // Every order, live or finished — the column is unique across the whole
+    // table, not just among the ones a counter is working on.
+    pickupCodes.add(order.pickupCode);
     if (order.reservation?.activeSlot) {
       heldSlots.add(slotKey(order.reservation.tableId, order.reservation.activeSlot));
     }
@@ -371,7 +375,8 @@ function planOrder(input: {
     : new Date(plan.now - rng.int(1, HISTORY_DAYS) * DAY_MS - rng.int(0, 600) * MINUTE_MS);
 
   const readyAt = new Date(createdAt.getTime() + prepMin * MINUTE_MS);
-  const code = freshCode(rng, status, input.codes, input.pickupCodes);
+  const code = freshCode(rng, input.codes);
+  const pickupCode = freshPickupCode(rng, input.pickupCodes);
   const seating =
     table === null ? null : planSeating(table, rng, status, createdAt, plan.now, input.heldSlots);
 
@@ -412,6 +417,7 @@ function planOrder(input: {
 
   return {
     code,
+    pickupCode,
     userId: customer.id,
     serviceMode: seating ? ServiceMode.DineIn : ServiceMode.Pickup,
     status,
@@ -662,26 +668,40 @@ function isLive(status: OrderStatus): boolean {
 }
 
 /** `AMR-` + 8 digits, the format `order-code.ts` generates and the column
- *  allows — avoiding both codes already planned and pickup codes already live
- *  at this branch. */
-function freshCode(
-  rng: Random,
-  status: OrderStatus,
-  codes: ReadonlySet<string>,
-  pickupCodes: ReadonlySet<string>,
-): string {
+ *  allows, avoiding the codes already planned in this run. */
+function freshCode(rng: Random, codes: ReadonlySet<string>): string {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     let digits = '';
     for (let i = 0; i < 8; i += 1) {
       digits += String(rng.int(0, 9));
     }
     const code = `AMR-${digits}`;
-    if (codes.has(code) || (isLive(status) && pickupCodes.has(digits.slice(-4)))) {
-      continue;
+    if (!codes.has(code)) {
+      return code;
     }
-    return code;
   }
   throw new Error('Could not allocate a seed order code');
+}
+
+/**
+ * The collection code — six digits, unrelated to the order code, unique across
+ * the run.
+ *
+ * Drawn from the seed's own deterministic `rng` rather than `generatePickupCode`
+ * so a seeded database is reproducible; the *shape* is the application's, taken
+ * from the shared constant rather than a literal six written here.
+ */
+function freshPickupCode(rng: Random, pickupCodes: ReadonlySet<string>): string {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    let digits = '';
+    for (let i = 0; i < PICKUP_CODE_LENGTH; i += 1) {
+      digits += String(rng.int(0, 9));
+    }
+    if (!pickupCodes.has(digits)) {
+      return digits;
+    }
+  }
+  throw new Error('Could not allocate a seed pickup code');
 }
 
 // ── writing ─────────────────────────────────────────────────────────────────
@@ -829,6 +849,7 @@ async function writeOrder(
     await tx.order.create({
       data: {
         code: order.code,
+        pickupCode: order.pickupCode,
         userId: order.userId,
         branchId,
         reservationId,

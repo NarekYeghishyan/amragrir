@@ -53,6 +53,14 @@ export interface ThemeColors {
   scrim: string;
   /** Success, "open", deposit credited. */
   good: string;
+  /** A state that went wrong and is still the customer's to act on: a declined
+   *  card, an unpaid order, the cancel button. Theme-aware, unlike
+   *  `spot.destructive` — that one is the fixed red of a log-out row, this one
+   *  has to stay legible on both backgrounds. */
+  danger: string;
+  /** Soft fill behind a `danger` state — the failed-payment card, the
+   *  cancelled-order disc. */
+  dangerSoft: string;
   shadow: string;
 }
 
@@ -75,6 +83,8 @@ export const palette: Record<ThemeName, ThemeColors> = {
     glass: 'rgba(246,245,242,0.78)',
     scrim: 'rgba(26,23,18,0.42)',
     good: '#12A150',
+    danger: '#D64524',
+    dangerSoft: '#FDEAE4',
     shadow: 'rgba(60,40,15,0.12)',
   },
   dark: {
@@ -93,6 +103,8 @@ export const palette: Record<ThemeName, ThemeColors> = {
     glass: 'rgba(16,14,11,0.72)',
     scrim: 'rgba(0,0,0,0.62)',
     good: '#2EC76F',
+    danger: '#F26B48',
+    dangerSoft: 'rgba(242,107,72,0.16)',
     shadow: 'rgba(0,0,0,0.55)',
   },
 };

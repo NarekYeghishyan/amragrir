@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { api } from '@/lib/api';
 import { parseLanguage, t } from '@/lib/language';
 import { formatAmd } from '@/lib/format';
+import { favoriteIds } from '@/lib/favorites';
 import { restaurantPath, searchPath } from '@/lib/site';
 import { RestaurantCard } from '@/components/RestaurantCard';
 
@@ -51,8 +52,13 @@ export default async function SearchPage({ params, searchParams }: Props) {
     );
   }
 
-  const results = await api.search(q, language);
+  // In parallel: the hearts do not depend on the results, and a searcher should
+  // not wait for one read to finish before the other starts.
+  const [results, favorites] = await Promise.all([api.search(q, language), favoriteIds(language)]);
   const empty = results.restaurants.length === 0 && results.dishes.length === 0;
+
+  // A heart pressed here comes back to the same query.
+  const returnTo = searchPath(language, q);
 
   return (
     <>
@@ -65,7 +71,13 @@ export default async function SearchPage({ params, searchParams }: Props) {
           <h2>{label('restaurants')}</h2>
           <div className="grid">
             {results.restaurants.map((restaurant) => (
-              <RestaurantCard key={restaurant.id} restaurant={restaurant} language={language} />
+              <RestaurantCard
+                key={restaurant.id}
+                restaurant={restaurant}
+                language={language}
+                isFavorite={favorites.has(restaurant.restaurantId)}
+                returnTo={returnTo}
+              />
             ))}
           </div>
         </>

@@ -91,6 +91,7 @@ describe('RestaurantsService.list', () => {
     expect(page).toBe(1);
     expect(items[0]).toMatchObject({
       id: 'branch-1',
+      restaurantId: 'rest-1',
       slug: 'sunny-table',
       name: 'Sunny Table',
       rating: 4.8,
@@ -100,6 +101,32 @@ describe('RestaurantsService.list', () => {
       services: ['pickup', 'dinein', 'reserve'],
       reservationsEnabled: true,
     });
+  });
+
+  /**
+   * A row carries both ids, and they are not interchangeable.
+   *
+   * `id` is the branch — what a basket is opened against and what the card's
+   * link resolves. `restaurantId` is the business, and it is the one a heart
+   * sends to `POST /favorites`, because that is what a favourite is stored
+   * against (DATABASE.md §13). Asserted separately because the two were the
+   * same field for a long time and a card that favourited a *branch* would have
+   * looked right until a chain's second address appeared.
+   */
+  it('names the branch and the business separately', async () => {
+    const base = branchRow();
+    const { service } = build([
+      branchRow({
+        id: 'branch-9',
+        restaurantId: 'rest-9',
+        restaurant: { ...base.restaurant, id: 'rest-9' },
+      }),
+    ]);
+
+    const { items } = await service.list(query(), Language.Hy);
+
+    expect(items[0]!.id).toBe('branch-9');
+    expect(items[0]!.restaurantId).toBe('rest-9');
   });
 
   it('omits distance when the caller sends no coordinates', async () => {
@@ -236,14 +263,33 @@ describe('RestaurantsService.list', () => {
       expect(findMany.mock.calls[0]![0].where.restaurant.ratingAvg).toEqual({ gte: 4.5 });
     });
 
-    it('filters by declared service', async () => {
+    it('filters by declared service, asking each branch and not just its parent', async () => {
+      // Services are answered per branch now. Filtering the restaurant alone
+      // would hand back branches that have withdrawn the very service somebody
+      // filtered for, and hide the ones that added it — so the filter mirrors
+      // `resolveBranchOffering`: an overriding branch is matched on its own
+      // array, and every other on its restaurant's.
       const { service, findMany } = build([branchRow()]);
 
       await service.list(query({ service: ['reserve'] }), Language.Hy);
 
-      expect(findMany.mock.calls[0]![0].where.restaurant.services).toEqual({
-        hasSome: ['reserve'],
-      });
+      expect(findMany.mock.calls[0]![0].where.OR).toEqual([
+        { servicesOverridden: true, services: { hasSome: ['reserve'] } },
+        { servicesOverridden: false, restaurant: { services: { hasSome: ['reserve'] } } },
+      ]);
+    });
+
+    it('keeps the service filter out of the restaurant clause the search shares', async () => {
+      // `q` builds its own OR *inside* `where.restaurant`, so the two must not
+      // collide — the service filter is a top-level OR precisely so they don't.
+      const { service, findMany } = build([branchRow()]);
+
+      await service.list(query({ service: ['reserve'], q: 'sunny' }), Language.Hy);
+
+      const where = findMany.mock.calls[0]![0].where;
+      expect(where.restaurant.services).toBeUndefined();
+      expect(where.restaurant.OR).toBeDefined();
+      expect(where.OR).toHaveLength(2);
     });
 
     it('filters to open branches when openNow is set', async () => {

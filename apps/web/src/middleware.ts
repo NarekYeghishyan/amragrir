@@ -37,5 +37,12 @@ export function middleware(request: NextRequest) {
 export const config = {
   // Everything except Next's own assets and the files that must stay at the
   // root — a crawler looks for /robots.txt, not /ru/robots.txt.
-  matcher: ['/((?!_next|robots.txt|sitemap.xml|favicon.ico).*)'],
+  //
+  // `notifications-sw.js` is in that list for a stricter reason than the
+  // crawler ones: **a service worker's scope is its own URL path.** Rewritten
+  // to `/ru/notifications-sw.js` it would not merely 404 (which is what it did
+  // before this entry existed) — even served, it could only ever control
+  // `/ru/`, so an alert would work in one language and silently not in the
+  // others.
+  matcher: ['/((?!_next|robots.txt|sitemap.xml|favicon.ico|notifications-sw.js).*)'],
 };

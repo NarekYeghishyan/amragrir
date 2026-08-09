@@ -17,3 +17,20 @@
 export const THEME_KEY = 'amragrir.theme';
 
 export type Theme = 'light' | 'dark';
+
+/**
+ * Which of the two schemes the page is *showing*, as opposed to which one was
+ * chosen.
+ *
+ * `tokens.css` answers this in CSS — `:root[data-theme='…']` beats the media
+ * query — and anything that has to hand the answer to something outside CSS
+ * has to work it out the same way round. The location picker's map is that
+ * thing: it is a frame on another origin, which cannot inherit a single one of
+ * this page's colours and has to be *told* in its URL.
+ */
+export function themeShown(chosen: string | undefined, prefersDark: boolean): Theme {
+  if (chosen === 'dark' || chosen === 'light') {
+    return chosen;
+  }
+  return prefersDark ? 'dark' : 'light';
+}

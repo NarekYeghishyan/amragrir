@@ -3,13 +3,30 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { LANGUAGES, parseLanguage, t } from '@/lib/language';
-import { SITE_URL, cartPath, homePath, searchPath } from '@/lib/site';
+import {
+  SITE_URL,
+  basketApiPath,
+  cartPath,
+  geocodeApiPath,
+  homePath,
+  notificationsApiPath,
+  notificationsStreamPath,
+  ordersPath,
+  profilePath,
+  searchPath,
+} from '@/lib/site';
 import { BrandMark, Wordmark } from '@/components/Brand';
+import { AREAS } from '@/lib/locations';
+import { LocationPicker } from '@/components/LocationPicker';
 import { SearchBar } from '@/components/SearchBar';
+import { LanguageSwitch } from '@/components/LanguageSwitch';
 import { Footer } from '@/components/Footer';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { THEME_KEY } from '@/lib/theme';
 import { BasketButton } from '@/components/BasketButton';
+import { NotificationBell, type StatusCopy } from '@/components/NotificationBell';
+import { RouteProgress } from '@/components/RouteProgress';
+import { ORDER_STATUS_COPY } from '@/lib/notification-watch';
 import '../globals.css';
 
 export const metadata: Metadata = {
@@ -32,12 +49,9 @@ export function generateStaticParams() {
 
 export default async function LangLayout({
   children,
-  modal,
   params,
 }: {
   children: ReactNode;
-  /** The intercepted checkout drawer, or nothing. See `@modal/default.tsx`. */
-  modal: ReactNode;
   params: Promise<{ lang: string }>;
 }) {
   const { lang } = await params;
@@ -49,6 +63,15 @@ export default async function LangLayout({
   }
 
   const label = t(language);
+
+  // The eight status sentences, resolved here so the bell can draw a line
+  // without the three dictionaries being shipped to the browser to do it.
+  const statusCopy = Object.fromEntries(
+    Object.entries(ORDER_STATUS_COPY).map(([status, keys]) => [
+      status,
+      { title: label(keys.title), body: label(keys.body) },
+    ]),
+  ) as StatusCopy;
 
   return (
     // suppressHydrationWarning: the script below sets data-theme on <html>
@@ -64,6 +87,11 @@ export default async function LangLayout({
         />
       </head>
       <body>
+        {/* Says a page is on its way, from the frame the link is pressed —
+            every screen here is server-rendered, so without it the browser
+            shows the old page unchanged and the press looks lost. What fills
+            the page itself is each route's `loading.tsx`. */}
+        <RouteProgress label={label('loading')} />
         <header className="site">
           <div className="inner">
             {/* The visible mark is the logotype; the translated name is the
@@ -73,31 +101,97 @@ export default async function LangLayout({
               <BrandMark />
               <Wordmark />
             </Link>
+            {/* The design's location control. Translated here and handed over as
+                strings: it renders in the browser (see the component) and has no
+                dictionary there. */}
+            {/* One key, and it never leaves this process. The map is Yandex's
+                widget in a frame and takes no key at all; the geocoder's cannot
+                be restricted to a domain, so the browser is told only whether
+                there is one and calls this app's own route for the answers.
+                Without it the picker still takes any point on the map — the
+                point is named after the nearest district instead of by its
+                address. */}
+            <LocationPicker
+              language={language}
+              canGeocode={Boolean(process.env.YANDEX_GEOCODER_API_KEY)}
+              geocodeEndpoint={geocodeApiPath(language)}
+              labels={{
+                all: label('locAllCity'),
+                heading: label('chooseLocation'),
+                hint: label('chooseLocationHint'),
+                close: label('locClose'),
+                searchAddress: label('locSearchAddress'),
+                searching: label('locSearching'),
+                noMatches: label('locNoMatches'),
+                searchFailed: label('locSearchFailed'),
+                recent: label('locRecent'),
+                pickOnMap: label('locPickOnMap'),
+                map: label('locMap'),
+                mapCredit: label('locMapCredit'),
+                zoomIn: label('locZoomIn'),
+                zoomOut: label('locZoomOut'),
+                useCurrent: label('locUseCurrent'),
+                confirm: label('locConfirm'),
+                geoFailed: label('locGeoFailed'),
+                areas: Object.fromEntries(
+                  AREAS.map((area) => [area.id, label(area.labelKey)]),
+                ),
+              }}
+            />
             <SearchBar
               action={searchPath(language)}
               placeholder={label('searchPlaceholder')}
               label={label('search')}
             />
-            <nav className="langs" aria-label="Language">
-              {LANGUAGES.map((code) => (
-                <Link
-                  key={code}
-                  className={code === language ? 'lang current' : 'lang'}
-                  href={homePath(code)}
-                  hrefLang={code}
-                >
-                  {code.toUpperCase()}
-                </Link>
-              ))}
-            </nav>
+            {/* Links this page in each language, so a switch is a translation
+                and not a trip back to the home page. It needs the current path,
+                which a layout is never given — see the component. */}
+            <LanguageSwitch language={language} label={label('language')} />
             <ThemeToggle label={label('theme')} />
-            {/* The design's header basket. Drawn in the browser on purpose —
-                see BasketButton for why the count cannot be read here. */}
-            <BasketButton href={cartPath(language)} label={label('basket')} />
+            {/* The design's header basket, money and all. Drawn in the browser
+                on purpose — see BasketButton for why neither the count nor the
+                total can be read here. */}
+            <BasketButton
+              href={cartPath(language)}
+              endpoint={basketApiPath(language)}
+              label={label('basket')}
+            />
+            {/* Tells whoever is signed in that their order moved, on whatever
+                page they are on. Draws nothing for a signed-out visitor, and
+                nothing at all without JavaScript — see the component. */}
+            <NotificationBell
+              endpoint={notificationsApiPath(language)}
+              streamEndpoint={notificationsStreamPath(language)}
+              ordersBase={ordersPath(language)}
+              labels={{
+                bell: label('notifications'),
+                empty: label('noNotifications'),
+                hint: label('notificationsHint'),
+                enableAlerts: label('enableAlerts'),
+                alertsOn: label('alertsOn'),
+                remove: label('deleteNotification'),
+                clearAll: label('clearNotifications'),
+              }}
+              statusCopy={statusCopy}
+            />
+            {/* The artifact draws the account's initial here. This header cannot
+                know it: the session is httpOnly by design, and reading it would
+                cost the whole catalogue its pre-rendering. A neutral mark is the
+                honest version — `/profile` asks whoever presses it to sign in. */}
+            <Link className="avatar-link" href={profilePath(language)} aria-label={label('navProfile')}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="8" r="3.6" stroke="#fff" strokeWidth="2" />
+                <path
+                  d="M5 20c0-3.3 3.1-5.4 7-5.4s7 2.1 7 5.4"
+                  stroke="#fff"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </Link>
           </div>
         </header>
         <main className="wrap">{children}</main>
-        {modal}
         <Footer language={language} />
       </body>
     </html>

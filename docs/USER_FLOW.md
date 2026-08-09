@@ -30,6 +30,13 @@ Home
 
 > **Prototype gap:** the OTP entry screen needs to be added between sending and Home.
 
+**As built on the web** (`/[lang]/signin`, SCREENS.md §14c): the two branches
+are a tab pair over **one** flow, not two. Sign-up asks for the name *before*
+the code rather than as a "create profile" step after it, because
+`verify-code` takes the name with the code and upgrades the guest account in
+place — there is no second call to hang a third step off. The Apple/Google
+branch is not built on either client: `POST /auth/social` does not exist.
+
 ---
 
 ## 2. Finding a restaurant
@@ -70,14 +77,64 @@ Guests count
    ↓
 Availability check (table/capacity availability)
    ↓
-Table deposit (deposit = guests × rate, credited to bill)
+Table booked (POST /reservations) — deposit authorised, table assigned
    ↓
-Checkout → pay deposit/order
+Checkout → pay what is left after the deposit
    ↓
 Reservation confirmed (Tracking: table #, time)
 ```
 
-Rules: unavailable dates/slots are blocked; the deposit secures the table; the deposit is credited toward the final bill.
+### 3a. A table and nothing else (web, 2026-08-07)
+
+The flow above books a table **around a basket**, and until 2026-08-07 it was
+the only one: the calendar lived on the checkout, which prices a basket, so
+"Book a Table" stayed disabled until a dish was collected. `POST /reservations`
+has never wanted an order, so that was a limit of the screens rather than of the
+product — and a guest who wants a table for Saturday should not have to put a
+burger in a basket to ask for one.
+
+```
+Restaurant (basket empty)
+   ↓  "Book a Table" — posts the branch with it
+Checkout — the same screen, order summary empty
+   ↓  date & time, guests, deposit
+   ↓  (sign-in if the phone is unverified)
+POST /reservations — deposit authorised, table assigned
+   ↓
+"✓ Table booked", and "Order food ahead" → the restaurant's menu
+   ↓
+/reservations — the booking, and the button that gives it back
+```
+
+**One button and one screen, whatever is in the basket.** The press always lands
+on `/checkout`; what differs is what the checkout can draw. With food it prices
+a quote and offers the payment; with none it answers `booking` from `loadBasket`
+and offers the booking alone. The branch travels with the press because an empty
+basket names no restaurant, and without it the checkout would not know whose
+table was being asked for.
+
+**Adding food afterwards is a link, not a second flow** — "Order food ahead" in
+the empty summary goes to the menu, and once a dish is in the basket the same
+checkout prices the two together, with the deposit coming off that bill.
+
+Cancelling is the same rule either way: free until `freeCancellationUntil`, and
+after it the deposit is kept (`depositOutcomeFor` in `shared` — never an `if` on
+a screen).
+
+Rules: unavailable dates/slots are blocked; the deposit secures the table; the
+deposit is credited toward the final bill.
+
+**Three things this order gets right that are easy to get wrong.**
+
+- **The deposit is the server's number, not `guests × rate` worked out on the
+  client.** It arrives as `depositAmd` on availability and again on the quote.
+  No screen in this repo does arithmetic on money (DEVELOPMENT_GUIDE.md).
+- **Checkout charges `dueNowAmd`, not `totalAmd`.** The deposit was authorised
+  when the table was booked; asking for the total again charges it twice.
+- **The calendar here stops at the *order* horizon (7 days), not the booking one
+  (30).** This path books a table for a basket, and a booking further out than
+  an order can be scheduled would take a deposit for a meal the checkout then
+  refuses. Booking a table with no food behind it is not bound by that.
 
 ---
 
@@ -88,9 +145,11 @@ Menu (Restaurant)
    ↓  Add to cart (＋)
 Basket (review items, ±)
    ↓  Choose time
-Pre-order → "Pickup" mode
-   ↓
-Food ready at (choose ready time)
+Pre-order → "Pre-Order" mode (stored as `pickup`)
+   ↓  where `dinein`: Takeaway / Eat at the Restaurant (both live, no deposit)
+   ↓  where `reserve`: Takeaway only — "Eat at the Restaurant" is drawn
+   ↓  dead and switches to Dine-in, where the table is booked
+Food ready at (choose ready time — pickup only; dine-in takes the table's hour)
    ↓
 Checkout (summary + payment method)
    ↓
@@ -112,12 +171,27 @@ Tracking: Confirmed → Preparing → Almost ready → Ready
    ↓ (countdown, start 8:00 min)
 Pickup code / QR ready
    ↓
-User arrives → shows code at the counter (or sits at table #)
+User arrives → shows the code at the counter (or sits at table #)
+   ↓
+Staff scan or type it → API checks it → order is `completed`
    ↓
 Done → Home
 ```
 
 The active order is available from the **Orders** tab (card with timer → Tracking).
+
+**The last step is the only thing that closes an order.** The back office cannot
+mark one collected on its own: `ready → completed` carries the guest's six-digit
+code, and the API compares it with `orders.pickup_code` before anything is
+written (BUSINESS_LOGIC.md §5). No staff screen shows that code, so a counter
+genuinely has to be told it — which is the point. The guest's screen carries it
+as digits *and* as a scannable QR, so the ordinary case is one gesture rather
+than six digits read aloud across a queue.
+
+A guest who cannot show it — flat phone, a friend sent to collect — cannot have
+the order closed today. There is no staff override. That is a deliberate choice
+and the note in BUSINESS_LOGIC.md §5 says what would replace it if a real
+counter proves it too rigid.
 
 ---
 
@@ -154,6 +228,17 @@ Profile or Settings
    ↓
 Language: hy / ru / en  (switch on the fly)
 Dark mode: toggle (light / dark)
+```
+
+On the **web** the switch is in the header of every screen, not in Settings,
+because there the language is part of the URL. Switching it is a move to *the
+same page* in the other language — `/r/dolmama` → `/ru/r/dolmama`,
+`/search?q=…` and the home filters kept — never a trip back to the home page.
+
+```
+any page, any language
+   ↓ HY / RU / EN
+same page, same query, other language
 ```
 
 ---
@@ -297,10 +382,8 @@ it the line is plain text, exactly as a name in an order's history is without
 
 The jump to an **order** carries the code rather than the id, because the board
 finds an order by searching for its code — and because a code is what somebody
-reads off the entry and then recognises on the card they land on. It is the full
-code, not the four-digit pickup code a counter says out loud: that one is only
-unique among a branch's *active* orders, so a link built from it would
-eventually mean two different orders. The board then moves itself to the stage
+reads off the entry and then recognises on the card they land on. It is the order code and never the pickup code: the board is not sent that one
+at all, and a link is a thing that gets pasted into a chat. The board then moves itself to the stage
 holding that order, since a link was sent somewhere specific and landing on an
 empty **Active** tab is landing next to the answer. Typing a code by hand is
 different and still behaves as it did — you stay where you are, and the counts
@@ -341,11 +424,16 @@ The same flow as §4 and §5, on `apps/web`. It is written separately because th
 mechanics differ: there is no client state anywhere in it.
 
 ```
-Restaurant (＋ per dish) → Basket → Pre-order → [Sign in] → Checkout → Order → Home
-                                        ↑                                  ↓
-                                   dine-in only:                       Orders list
+Restaurant (＋ per dish) → Basket → Checkout → [Sign in] → Order → Home
+                                        ↑                     ↓
+                                   dine-in only:          Orders list
                                    book a table
 ```
+
+**Checkout is one screen.** Mode, pickup type, table booking, ready time and
+payment are all on it, with the order summary sticky beside them — the refreshed
+web artifact draws it that way, and `/preorder`, which used to be the first
+half, now redirects there.
 
 1. **＋ on a dish** posts to a Server Action. That first deliberate act is what
    creates the guest account — not the page view before it. A dish from a
@@ -355,28 +443,76 @@ Restaurant (＋ per dish) → Basket → Pre-order → [Sign in] → Checkout �
    removal and coupon are each a form post. The server's `canOrder` decides
    whether the flow may continue, so the web never offers a step the API will
    refuse.
-3. **Pre-order** picks Pickup or Dine-in and a ready time. Switching away from
+3. **Checkout** picks Pickup or Table booking and a ready time. Switching away from
    dine-in drops any table booking, since a pickup order attached to a table is
-   an order nobody is sitting for. Dine-in must book first: date, guests and
-   slot come from `GET /restaurants/{id}/availability`, and `POST /reservations`
-   takes the deposit.
+   an order nobody is sitting for; switching *to* dine-in drops the pickup
+   ending for the mirror-image reason, and coming back starts from take-away
+   rather than a remembered choice the place may since have stopped offering.
+   What a pre-order offers depends on how the place seats people
+   (BUSINESS_LOGIC.md §2): where **`dinein`** is declared both **Takeaway / Eat
+   at the Restaurant** are live and the food is paid for as an ordinary
+   pre-order with no deposit, and where **`reserve`** is declared only Takeaway
+   is — the second is still drawn, dead, and
+   pressing it switches to Dine-in and opens the calendar, which is the only way
+   to a seat there. The quote says which (`pickupOptions`,
+   `eatInRequiresBooking`), so the screen cannot offer what the API would refuse.
+   Dine-in must book first: date, guests and slot come from
+   `GET /restaurants/{id}/availability`, and `POST /reservations` takes the
+   deposit.
 4. **Sign in** happens at the first step that needs a verified phone — booking a
    table, or paying. The guest's own token is presented to `verify-code`, so the
    account they already have is upgraded and the basket survives; without it the
    API would create a second account and orphan everything collected.
-5. **Checkout** is card-only on the web, and paying is final: an order can be
-   cancelled only while unpaid. `POST /orders` then `POST /payments`, both with
-   an idempotency key derived from the basket, so a double-submitted form joins
-   the first attempt rather than starting a second.
-6. **The order page** is both the confirmation and the tracker: pickup code,
-   status steps and a countdown, refreshing itself every ten seconds.
+5. **Paying** is card-only on the web, and final: an order can be cancelled only
+   while unpaid. `POST /orders` then `POST /payments`, both with an idempotency
+   key derived from the basket, so a double-submitted form joins the first
+   attempt rather than starting a second. The button sits in the summary column
+   and owns the payment form by `form="…"`, so it is still one native POST.
+6. **The order page** is both the confirmation and the tracker: the pickup code
+   as digits and a scannable QR, status steps and a countdown, refreshing itself
+   every ten seconds. The code has to survive a reload and still be there twenty
+   minutes later at the counter, which is why this is a route and not a toast.
+
+**Getting back to it.** `/profile` opens with whatever is still in flight —
+every active order, above the history, each row a link into its tracker — so the
+account screen answers "where is my food" before it answers "what did I eat".
+Nothing is drawn there when nothing is cooking.
+
+**Ordering it again.** `/profile` lists the last five past orders with a
+**Reorder** button, which rebuilds the basket from that order's ids and
+quantities and lands on `/cart` — priced from scratch by `POST /cart/quote`, so
+a dish that has changed price or left the menu is caught there rather than
+carried over. It replaces whatever was in the basket, by the same
+one-restaurant-per-basket rule as step 1, and then the flow above continues
+unchanged from step 2.
+
+**Signing out** revokes the refresh token, then drops the session and the
+basket. The basket goes because it belongs to the session that is ending;
+leaving it would hand the next person at that browser the last one's order.
+
+**Saying where you are** (the header's location control) is a preference, not a
+step: it survives signing out, and the only thing it changes is what
+`GET /restaurants` is asked — coordinates, so a card can say how far away it is
+and the "near me" chip has something to sort by. The control opens a dialog over
+a map where any point can be tapped, with address search and the browser's own
+position on offer, and a ✕ on the badge that names the pending place for going
+back to the whole city. **Nothing is stored until "confirm"**, so a point tried
+and abandoned costs nothing; closing it — ✕, Escape or the scrim — leaves the
+previous choice standing. Confirmed points are also kept in this browser's
+`localStorage` and offered back at the top of the dialog next time.
+
+This is the one preference **JavaScript is required for**: the district chips
+that answered it without one were removed on 2026-08-06, and everything left in
+the dialog needs a browser. It is off the ordering path — a visitor who never
+answers browses the whole city and orders exactly as anyone else does; what they
+lose is the distance on a card and the "near me" sort.
 
 **Transition map:**
 
 ```
-Restaurant → Basket → Pre-order → Checkout → Order
-                ↑         ↓  (dine-in)         ↓
-             Restaurant  Reservation        Orders → Order
+Restaurant → Basket → Checkout → Order
+     ↑          ↑         ↓  (dine-in)  ↓
+  order panel  Restaurant Reservation  Orders → Order
                           ↓
                        Sign in → back to wherever it was needed
 ```

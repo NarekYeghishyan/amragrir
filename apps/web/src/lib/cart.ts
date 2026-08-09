@@ -1,4 +1,10 @@
-import { ORDER_MAX_ITEM_QTY, ORDER_MAX_LINES, ServiceMode } from '@amragrir/shared';
+import {
+  ORDER_MAX_ITEM_QTY,
+  ORDER_MAX_LINES,
+  PickupOption,
+  RESERVATION_MAX_GUESTS,
+  ServiceMode,
+} from '@amragrir/shared';
 
 /**
  * The basket, and the rules about what may be in one.
@@ -31,9 +37,32 @@ export interface Cart {
    *  without a lookup. */
   slug: string;
   serviceMode: ServiceMode;
+  /**
+   * Where a pickup order ends up — absent means take-away, which is what the
+   * API defaults to and what every pickup restaurant offers.
+   *
+   * Optional rather than always written, so a basket cookie minted before this
+   * existed still parses into a basket that orders exactly what it always did.
+   * Meaningless on a dine-in basket, and dropped when the mode changes.
+   */
+  pickupOption?: PickupOption;
   items: CartLine[];
   /** Set once a table is booked; `dine_in` is refused without it. */
   reservationId?: string;
+  /**
+   * The table the customer is *asking* for, ISO, before anything is booked —
+   * and the party it is for.
+   *
+   * Stored because the checkout's date-and-time field is a native
+   * `datetime-local` rather than a grid of links, so its value is only ever in
+   * the page until something posts it. Anything that reloads the screen — a
+   * change of party size, a trip through `/signin`, a refused slot — would
+   * otherwise hand back an empty field and make the customer type the time
+   * again. Dropped with the booking when the mode changes: neither means
+   * anything on a pickup basket.
+   */
+  reservedFor?: string;
+  guests?: number;
   couponCode?: string;
   /** Chosen ready time, ISO. Absent means "as soon as possible". */
   readyAt?: string;
@@ -48,6 +77,9 @@ export interface Cart {
    */
   nonce: string;
 }
+
+/** The party the booking field starts on — two people, the commonest table. */
+export const DEFAULT_GUESTS = 2;
 
 export const EMPTY: Cart = {
   branchId: '',
@@ -124,8 +156,24 @@ export function parseCart(raw: string | undefined): Cart | null {
     serviceMode: candidate.serviceMode as ServiceMode,
     items,
     nonce: typeof candidate.nonce === 'string' ? candidate.nonce : newNonce(),
+    // Checked against the vocabulary like every other field here: the cookie is
+    // httpOnly, but a person with devtools can still write one, and an unknown
+    // value would be refused at `POST /orders` three screens later.
+    ...(Object.values(PickupOption).includes(candidate.pickupOption as PickupOption)
+      ? { pickupOption: candidate.pickupOption as PickupOption }
+      : {}),
     ...(typeof candidate.reservationId === 'string'
       ? { reservationId: candidate.reservationId }
+      : {}),
+    ...(typeof candidate.reservedFor === 'string' ? { reservedFor: candidate.reservedFor } : {}),
+    // Bounded like every other number here: the picker stops at
+    // `RESERVATION_MAX_GUESTS`, so a cookie naming a party of forty is an
+    // edited one, and `POST /reservations` would refuse it anyway.
+    ...(typeof candidate.guests === 'number' &&
+    Number.isInteger(candidate.guests) &&
+    candidate.guests >= 1 &&
+    candidate.guests <= RESERVATION_MAX_GUESTS
+      ? { guests: candidate.guests }
       : {}),
     ...(typeof candidate.couponCode === 'string' ? { couponCode: candidate.couponCode } : {}),
     ...(typeof candidate.readyAt === 'string' ? { readyAt: candidate.readyAt } : {}),
@@ -191,20 +239,47 @@ export function removeItem(cart: Cart, menuItemId: string): Cart {
  *
  * Switching away from dine-in must forget the booking: leaving a stale
  * `reservationId` on a pickup basket would attach the order to a table nobody
- * is sitting at, and `POST /orders` rejects the pair anyway.
+ * is sitting at, and `POST /orders` rejects the pair anyway. The table that was
+ * only being *asked* for goes with it — `reservedFor` and `guests` describe a
+ * dine-in intention and mean nothing on a basket being collected at a counter.
+ *
+ * Switching *to* dine-in must forget the pickup ending, for the mirror-image
+ * reason: food brought to a table is neither taken away nor collected, the API
+ * refuses a basket carrying both, and the database refuses the row underneath
+ * it. Coming back to pickup starts from take-away again, which is the safe
+ * default rather than a remembered choice the restaurant may since have
+ * withdrawn.
  */
 export function setServiceMode(cart: Cart, serviceMode: ServiceMode): Cart {
-  if (serviceMode === ServiceMode.DineIn) {
-    return { ...cart, serviceMode };
-  }
-  const { reservationId: _dropped, ...rest } = cart;
-  return { ...rest, serviceMode };
+  const {
+    reservationId: _booking,
+    reservedFor: _asked,
+    guests: _party,
+    pickupOption: _ending,
+    ...rest
+  } = cart;
+  return serviceMode === ServiceMode.DineIn
+    ? {
+        ...rest,
+        serviceMode,
+        ...(cart.reservationId ? { reservationId: cart.reservationId } : {}),
+        ...(cart.reservedFor ? { reservedFor: cart.reservedFor } : {}),
+        ...(cart.guests ? { guests: cart.guests } : {}),
+      }
+    : { ...rest, serviceMode };
+}
+
+/** Take it away, or eat it here. Only meaningful on a pickup basket, which is
+ *  the only place the screen offers it. */
+export function setPickupOption(cart: Cart, pickupOption: PickupOption): Cart {
+  return { ...cart, pickupOption };
 }
 
 /** The shape `POST /cart/quote` and `POST /orders` both take. */
 export function toBasket(cart: Cart): {
   branchId: string;
   serviceMode: ServiceMode;
+  pickupOption?: PickupOption;
   items: CartLine[];
   reservationId?: string;
   couponCode?: string;
@@ -213,6 +288,12 @@ export function toBasket(cart: Cart): {
     branchId: cart.branchId,
     serviceMode: cart.serviceMode,
     items: cart.items.map((line) => ({ menuItemId: line.menuItemId, qty: line.qty })),
+    // Sent only on a pickup basket. The API refuses the pair outright, so this
+    // is what stops a basket that somehow kept an ending across a mode change
+    // from turning into a 422 at the payment.
+    ...(cart.serviceMode === ServiceMode.Pickup && cart.pickupOption
+      ? { pickupOption: cart.pickupOption }
+      : {}),
     ...(cart.reservationId ? { reservationId: cart.reservationId } : {}),
     ...(cart.couponCode ? { couponCode: cart.couponCode } : {}),
   };

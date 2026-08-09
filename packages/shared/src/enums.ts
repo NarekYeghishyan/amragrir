@@ -50,6 +50,18 @@ export type ServiceMode = (typeof ServiceMode)[keyof typeof ServiceMode];
  * because that is what the design and the seeded data use. Keeping both here
  * makes the difference explicit; the two were previously spelled inconsistently
  * across the API and the database with nothing to reconcile them.
+ *
+ * **`eat_in` was here and is deliberately gone.** Eating where the food was
+ * cooked is not something a place declares any more — it is what every counter
+ * that does not take bookings does, and what no restaurant that does take them
+ * offers outside its booking flow. The rule derives it from `reserve` instead,
+ * so there is no switch to set it inconsistently with (BUSINESS_LOGIC.md §2).
+ * `PickupOption.EatIn` keeps the string: what a guest *chose* is still recorded
+ * per order, because the kitchen plates it rather than bagging it.
+ *
+ * Not every combination of these is a restaurant that can exist — see
+ * `service-offering.ts`, which holds the rules and is what both the API and the
+ * back office check against.
  */
 export const RestaurantService = {
   Pickup: 'pickup',

@@ -4,6 +4,7 @@ import {
   type OrderStatus,
   type PaymentMethod,
   type PaymentStatus,
+  type PickupOption,
   type ServiceMode,
 } from '@amragrir/shared';
 
@@ -17,6 +18,21 @@ import {
  */
 function base(): string {
   return process.env.API_URL ?? 'http://localhost:3000/v1';
+}
+
+/**
+ * The same API, addressed as a WebSocket.
+ *
+ * Derived from `API_URL` rather than configured separately, because a second
+ * variable is a second thing to get wrong — and the one failure it produces is
+ * a stream that silently never connects while every REST call keeps working.
+ *
+ * **Server-side only, like everything else here.** The browser never opens this
+ * socket: it has no token to authenticate with (the session is httpOnly), which
+ * is the whole reason `notifications/stream` exists to hold it on its behalf.
+ */
+export function apiWsUrl(path: string): string {
+  return base().replace(/^http/, 'ws') + path;
 }
 
 /**
@@ -107,7 +123,7 @@ async function authed<T>(
   path: string,
   token: string,
   options: {
-    method?: 'GET' | 'POST';
+    method?: 'GET' | 'POST' | 'DELETE';
     body?: unknown;
     language?: Language;
     query?: Record<string, string | number | undefined>;
@@ -168,6 +184,8 @@ async function messageFrom(response: Response, path: string): Promise<string> {
 
 export interface RestaurantListItem {
   id: string;
+  /** The business, where `id` is the branch. A heart saves the restaurant. */
+  restaurantId: string;
   slug: string;
   name: string;
   cuisine: string | null;
@@ -232,6 +250,7 @@ export interface Category {
 export interface SearchResults {
   restaurants: {
     id: string;
+    restaurantId: string;
     slug: string;
     name: string;
     cuisine: string | null;
@@ -266,6 +285,38 @@ export interface AuthResult extends TokenPair {
   user: { id: string; phone: string | null; isGuest: boolean; phoneVerified: boolean };
 }
 
+/** `GET /me` — the account behind the profile page. */
+export interface MeProfile {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+  language: string;
+  isGuest: boolean;
+  phoneVerified: boolean;
+  rewardPoints: number;
+  ordersCount: number;
+  couponsCount: number;
+}
+
+/** `GET /favorites` — already shaped like a restaurant card. */
+export interface FavoriteRestaurant {
+  restaurantId: string;
+  branchId: string | null;
+  slug: string;
+  name: string;
+  cuisine: string | null;
+  priceLevel: number | null;
+  rating: number;
+  reviewsCount: number;
+  coverUrl: string | null;
+  prepMin: number | null;
+  isOpen: boolean;
+  services: string[];
+  addedAt: string;
+}
+
 export interface QuoteLine {
   menuItemId: string;
   name: string;
@@ -279,6 +330,21 @@ export interface Quote {
   branchId: string;
   restaurantName: string;
   serviceMode: ServiceMode;
+  /** Where this pickup basket ends up, resolved by the API — take-away when the
+   *  basket said nothing. Null on a dine-in basket. */
+  pickupOption: PickupOption | null;
+  /** The endings this restaurant offers. Fewer than two is not a choice, so the
+   *  pre-order screen draws the buttons only when there are both — or when the
+   *  field below says to draw the other one dead. */
+  pickupOptions: PickupOption[];
+  /** True where eating in exists but is reached by booking a table. The
+   *  pre-order screen still draws "eat at the restaurant", dimmed, and pressing
+   *  it switches the basket to dine-in rather than choosing an ending. */
+  eatInRequiresBooking: boolean;
+  /** Whether a table can be booked here right now — `reserve` declared **and**
+   *  bookings not paused. False makes dine-in a dead end, so checkout draws no
+   *  booking mode at all rather than one leading to "does not take bookings". */
+  reservationsEnabled: boolean;
   items: QuoteLine[];
   /** Lines the kitchen cannot serve. Reported rather than thrown, so the basket
    *  can mark the offending row instead of showing an error page. */
@@ -305,12 +371,40 @@ export interface OrderItem {
   lineTotalAmd: number;
 }
 
+/**
+ * A row of `GET /orders`, which is **not** an `Order`.
+ *
+ * The list is a summary: it counts the dishes rather than listing them, and it
+ * carries neither the branch nor the payment. This app used to type the list as
+ * `Order[]`, which compiled and then handed a page `undefined` the moment it
+ * touched `items` — the fields the orders list happened to read were the ones
+ * the two shapes share. Mirrors `API_DOCUMENTATION.md` § "List orders".
+ */
+export interface OrderSummary {
+  id: string;
+  code: string;
+  restaurantName: string;
+  coverUrl: string | null;
+  /** When it was placed, ISO. The detail shape calls this `createdAt`. */
+  date: string;
+  /** Dishes, not lines — "3 items" means three things to eat. */
+  itemsCount: number;
+  totalAmd: number;
+  status: OrderStatus;
+  readyAt: string | null;
+  secondsLeft: number | null;
+  scheduled: boolean;
+}
+
 export interface Order {
   id: string;
   code: string;
   pickupCode: string;
   status: OrderStatus;
   serviceMode: ServiceMode;
+  /** How this pickup order ends — null on a dine-in order, and on orders placed
+   *  before the choice existed. */
+  pickupOption: PickupOption | null;
   restaurantName: string;
   branch: { id: string; name: string | null; address: string | null };
   items: OrderItem[];
@@ -349,10 +443,24 @@ export interface Reservation {
   id: string;
   status: string;
   branch: { id: string; name: string | null; address: string | null };
+  restaurantName: string;
   reservedFor: string;
+  /** Yerevan's clock and calendar, formatted by the API — the restaurant's day,
+   *  not the reader's, and the same instant `reservedFor` names. */
+  localTime: string;
+  localDate: string;
   guests: number;
-  depositAmd: number;
   tableNo: string | null;
+  depositAmd: number;
+  depositStatus: string | null;
+  /** True once the deposit has come off a bill rather than being held or kept. */
+  depositCredited: boolean;
+  /** While this is in the future, cancelling returns the deposit in full. */
+  freeCancellationUntil: string | null;
+  /** The order this table carries, when the booking was made with a basket.
+   *  Null for a table booked on its own. */
+  orderId: string | null;
+  createdAt: string;
 }
 
 export interface BasketInput {
@@ -361,6 +469,25 @@ export interface BasketInput {
   items: { menuItemId: string; qty: number }[];
   reservationId?: string;
   couponCode?: string;
+}
+
+/**
+ * One line in the bell.
+ *
+ * `title` and `body` are null for everything the app can draw itself, which is
+ * every `order` notification: the words come from this app's dictionary, so a
+ * visitor reading in Russian sees Russian even for a notification raised while
+ * they were reading Armenian. They are populated only where the server wrote
+ * the prose — a promo, a system note — and there the API's copy is all there is.
+ */
+export interface NotificationItem {
+  id: string;
+  type: 'order' | 'reservation' | 'promo' | 'referral' | 'system';
+  title: string | null;
+  body: string | null;
+  payload: { orderId?: string; code?: string; status?: OrderStatus } | null;
+  isRead: boolean;
+  createdAt: string;
 }
 
 // ── endpoints ───────────────────────────────────────────────────────────────
@@ -405,15 +532,42 @@ export const api = {
 
   refresh: (refreshToken: string) => post<TokenPair>('/auth/refresh', { refreshToken }),
 
+  /** Revokes the refresh token server-side. Dropping the cookie alone would
+   *  leave a token that still works for anyone who had copied it. */
+  logout: (refreshToken: string) => post<void>('/auth/logout', { refreshToken }),
+
+  me: (token: string, language: Language) => authed<MeProfile>('/me', token, { language }),
+
+  favorites: (token: string, language: Language) =>
+    authed<{ items: FavoriteRestaurant[] }>('/favorites', token, { language }),
+
+  /** Idempotent server-side, so a double-submitted heart adds one favourite. */
+  addFavorite: (restaurantId: string, token: string, language: Language) =>
+    authed<{ favorited: true }>('/favorites', token, {
+      method: 'POST',
+      body: { restaurantId },
+      language,
+    }),
+
+  /** Also idempotent: removing one that is gone leaves the caller where they
+   *  asked to be, and answers 204. */
+  removeFavorite: (restaurantId: string, token: string, language: Language) =>
+    authed<void>(`/favorites/${encodeURIComponent(restaurantId)}`, token, {
+      method: 'DELETE',
+      language,
+    }),
+
   sendCode: (phone: string, language: Language) =>
     post<{ sent: true; expiresIn: number }>('/auth/send-code', { phone }, language),
 
   /** The caller's guest token goes along so the account they already have is
-   *  upgraded — without it, everything collected while browsing is orphaned. */
-  verifyCode: (phone: string, code: string, token: string, language: Language) =>
+   *  upgraded — without it, everything collected while browsing is orphaned.
+   *  `name` comes from the sign-up tab and is only used for an account that
+   *  has none yet; see `AuthService.verifyCode`. */
+  verifyCode: (phone: string, code: string, token: string, language: Language, name?: string) =>
     authed<AuthResult>('/auth/verify-code', token, {
       method: 'POST',
-      body: { phone, code },
+      body: { phone, code, ...(name ? { name } : {}) },
       language,
     }),
 
@@ -445,7 +599,7 @@ export const api = {
     authed<Order>(`/orders/${encodeURIComponent(id)}`, token, { language }),
 
   orders: (status: 'active' | 'past', token: string, language: Language) =>
-    authed<{ items: Order[]; total: number }>('/orders', token, {
+    authed<{ items: OrderSummary[]; total: number }>('/orders', token, {
       query: { status },
       language,
     }),
@@ -455,6 +609,28 @@ export const api = {
       method: 'POST',
       language,
     }),
+
+  /**
+   * The bell. No `language` is passed and that is not an omission: an `order`
+   * notification carries `{ orderId, code, status }` and no prose, so there is
+   * nothing on it for the API to translate — the header renders it from the
+   * same dictionary the tracking page uses. See API_DOCUMENTATION.md,
+   * "Notifications".
+   */
+  notifications: (token: string) =>
+    authed<{ items: NotificationItem[]; unread: number }>('/notifications', token),
+
+  /** Clears the badge in one call — what opening the panel means. */
+  readAllNotifications: (token: string) =>
+    authed<{ read: number }>('/notifications/read-all', token, { method: 'POST' }),
+
+  /** The cross on a line. A real delete — see DATABASE.md §12. */
+  deleteNotification: (id: string, token: string) =>
+    authed<void>(`/notifications/${encodeURIComponent(id)}`, token, { method: 'DELETE' }),
+
+  /** Empties the bell, unread ones included. */
+  clearNotifications: (token: string) =>
+    authed<{ deleted: number }>('/notifications', token, { method: 'DELETE' }),
 
   createReservation: (
     body: { branchId: string; reservedFor: string; guests: number },
@@ -467,6 +643,26 @@ export const api = {
     language,
     idempotencyKey,
   }),
+
+  /** The visitor's own bookings. `upcoming` is every active status, `past`
+   *  every terminal one — the API decides which is which, so the screen cannot
+   *  disagree with the panel about whether a booking is over. */
+  reservations: (status: 'upcoming' | 'past', token: string, language: Language) =>
+    authed<{ items: Reservation[]; total: number; page: number }>('/reservations', token, {
+      query: { status },
+      language,
+    }),
+
+  reservation: (id: string, token: string, language: Language) =>
+    authed<Reservation>(`/reservations/${encodeURIComponent(id)}`, token, { language }),
+
+  /** Whether the deposit comes back is the server's decision (`depositOutcomeFor`
+   *  in `shared`), not this client's — the reply carries the settled booking. */
+  cancelReservation: (id: string, token: string, language: Language) =>
+    authed<Reservation>(`/reservations/${encodeURIComponent(id)}/cancel`, token, {
+      method: 'POST',
+      language,
+    }),
 };
 
 /** The two auth calls that carry no bearer at all. */
@@ -483,5 +679,7 @@ async function post<T>(path: string, body?: unknown, language?: Language): Promi
   if (!response.ok) {
     throw new ApiError(response.status, await messageFrom(response, path));
   }
-  return (await response.json()) as T;
+  // `POST /auth/logout` answers 204 with no body at all, like the authed calls
+  // above — asking for JSON there would throw on success.
+  return (response.status === 204 ? undefined : await response.json()) as T;
 }

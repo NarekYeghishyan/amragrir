@@ -13,9 +13,15 @@ import {
   MAX_IMAGE_UPLOAD_BYTES,
   MAX_IMAGE_UPLOAD_MB,
 } from '@amragrir/shared';
-import { MENU_PHOTO_DIR, publicUrlFor, sniffImageType, storedNameFor } from './uploads';
+import {
+  COVER_PHOTO_DIR,
+  MENU_PHOTO_DIR,
+  publicUrlFor,
+  sniffImageType,
+  storedNameFor,
+} from './uploads';
 
-/** What an upload answers with: the URL to store on the dish. */
+/** What an upload answers with: the URL to store on the dish or the restaurant. */
 export interface StoredUpload {
   url: string;
 }
@@ -49,7 +55,33 @@ export class UploadsService {
    * of the three things went wrong — an upload that fails identically for "too
    * big", "not an image" and "nothing arrived" is one somebody retries blind.
    */
-  async saveMenuPhoto(bytes: Buffer | undefined, tooLarge: boolean): Promise<StoredUpload> {
+  saveMenuPhoto(bytes: Buffer | undefined, tooLarge: boolean): Promise<StoredUpload> {
+    return this.save(bytes, tooLarge, MENU_PHOTO_DIR);
+  }
+
+  /**
+   * Stores one restaurant cover and returns its URL.
+   *
+   * The same bytes, the same refusals and the same limit as a dish — a cover is
+   * drawn larger, but "larger" is a rendering decision and a second size limit
+   * here would be a number to keep in step with a stylesheet. What differs is
+   * the permission in front of it (`restaurant:write`, not `menu:write`) and
+   * the directory underneath, and both of those are decided by the caller
+   * rather than by the bytes.
+   */
+  saveRestaurantCover(bytes: Buffer | undefined, tooLarge: boolean): Promise<StoredUpload> {
+    return this.save(bytes, tooLarge, COVER_PHOTO_DIR);
+  }
+
+  /** What both uploads actually do: refuse, then write under `dir`. Private
+   *  because the directory is not the caller's to choose — an endpoint picks
+   *  which kind of image it is accepting, and a string parameter reaching the
+   *  controller would be a path this disk takes from a request. */
+  private async save(
+    bytes: Buffer | undefined,
+    tooLarge: boolean,
+    dir: string,
+  ): Promise<StoredUpload> {
     if (tooLarge || (bytes?.length ?? 0) > MAX_IMAGE_UPLOAD_BYTES) {
       throw new PayloadTooLargeException(`Photo is larger than ${MAX_IMAGE_UPLOAD_MB} MB`);
     }
@@ -69,11 +101,11 @@ export class UploadsService {
     // and a URL on this origin, and two restaurants both uploading `photo.jpg`
     // would be one overwriting the other.
     const name = storedNameFor(type, randomUUID());
-    const dir = join(this.root, MENU_PHOTO_DIR);
+    const target = join(this.root, dir);
 
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, name), bytes);
+    await mkdir(target, { recursive: true });
+    await writeFile(join(target, name), bytes);
 
-    return { url: publicUrlFor(this.baseUrl, `${MENU_PHOTO_DIR}/${name}`) };
+    return { url: publicUrlFor(this.baseUrl, `${dir}/${name}`) };
   }
 }

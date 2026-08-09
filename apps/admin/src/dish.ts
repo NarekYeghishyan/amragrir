@@ -96,6 +96,10 @@ function whole(value: string, least: number): number | null {
  * minutes. The ceilings (`10,000,000` dram, `480` minutes) are the API's and are
  * left to it — it answers with a sentence this would only be paraphrasing.
  *
+ * `0` minutes passes, and is not the same as leaving the box empty: a bottle of
+ * water is handed over rather than cooked, and blank would make the branch's
+ * average stand in and promise a wait that is not there.
+ *
  * The photograph is deliberately **not** here. A dish being edited already has
  * one and this cannot take it away; a dish being added has to have one, which is
  * the add form's own rule.
@@ -104,7 +108,7 @@ export function dishFormValid(form: DishForm): boolean {
   return (
     form.hy.trim() !== '' &&
     whole(form.priceAmd, 0) !== null &&
-    (form.prepMin.trim() === '' || whole(form.prepMin, 1) !== null)
+    (form.prepMin.trim() === '' || whole(form.prepMin, 0) !== null)
   );
 }
 

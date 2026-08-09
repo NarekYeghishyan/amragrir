@@ -33,9 +33,13 @@ const POLL_MS = 60_000;
 export function notificationHeadline(t: Translate, item: StaffNotification): string {
   switch (item.type) {
     case StaffNotificationType.PrepDue:
-      return item.payload?.pickupCode === undefined
+      // The order's name. It used to be the pickup code, and a bell left open
+      // on a counter is the last place that belongs — see `PrepDuePayload`.
+      // Rows written before the switch carry `code` too, so nothing older
+      // falls back to the nameless line for want of the field.
+      return item.payload?.code === undefined
         ? t('notificationPrepDue')
-        : t('notificationPrepDueCode', { code: item.payload.pickupCode });
+        : t('notificationPrepDueCode', { code: item.payload.code });
   }
 }
 

@@ -1,0 +1,1488 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics="">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{opacity:.82}
+::-webkit-scrollbar{width:0;height:0}
+:root{
+ --stage:#e9e6df;--bg:#F6F5F2;--card:#FFFFFF;--ink:#1A1712;--ink2:rgba(26,23,18,.56);
+ --ink3:rgba(26,23,18,.32);--line:rgba(26,23,18,.09);--accent:#EA5B12;--accent2:#FF8A3D;
+ --accentSoft:#FFF0E6;--chip:#F1EFEA;--ph1:#EFE7DD;--ph2:#E6DACB;--good:#12A150;
+ --danger:#D64524;--dangerSoft:#FDEAE4;
+ --shadow:rgba(60,40,15,.12);--glass:rgba(246,245,242,.78);
+}
+.theme-dark{
+ --stage:#0a0908;--bg:#100E0B;--card:#1B1815;--ink:#F6F3EE;--ink2:rgba(246,243,238,.6);
+ --ink3:rgba(246,243,238,.34);--line:rgba(246,243,238,.1);--accent:#FF6A1F;--accent2:#FF9A52;
+ --accentSoft:rgba(255,106,31,.15);--chip:#26221D;--ph1:#241F19;--ph2:#2F2820;--good:#2EC76F;
+ --danger:#F26B48;--dangerSoft:rgba(242,107,72,.16);
+ --shadow:rgba(0,0,0,.55);--glass:rgba(16,14,11,.72);
+}
+@keyframes scIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes shimmer{0%{background-position:-360px 0}100%{background-position:360px 0}}
+@keyframes checkPop{0%{transform:scale(.4);opacity:0}55%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+input[type=range]{-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:var(--chip);outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:24px;height:24px;border-radius:12px;background:var(--accent);border:3px solid var(--card);box-shadow:0 2px 8px var(--shadow);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:12px;background:var(--accent);border:3px solid var(--card);box-shadow:0 2px 8px var(--shadow);cursor:pointer}
+.screen{animation:scIn .32s cubic-bezier(.22,.61,.36,1)}
+.skel{background:linear-gradient(90deg,var(--ph1) 0,var(--ph2) 40%,var(--ph1) 80%);background-size:720px 100%;animation:shimmer 1.3s infinite linear}
+</style>
+</helmet>
+
+<div class="{{ themeClass }}" style="min-height:100vh;background:var(--stage);display:flex;flex-direction:column;align-items:center;padding:34px 16px 46px;transition:background .3s">
+  <div style="{{ tweakVars }}">
+
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:22px;flex-wrap:wrap;justify-content:center">
+    <svg width="34" height="34" viewBox="0 0 76 76" fill="none" style="flex:none"><path d="M36 6c-13 0-23 9.6-23 23 0 15.5 23 41 23 41s23-25.5 23-41C59 15.6 49 6 36 6Z" fill="var(--accent)"></path><g stroke="#fff" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M25 16v8M30 16v9M35 16v8" stroke-width="2.8"></path><path d="M25 24c0 3.4 2.2 5 5 5s5-1.6 5-5" stroke-width="2.8"></path><path d="M30 29v21" stroke-width="3.6"></path><path d="M46 50V34" stroke-width="3.6"></path></g><path d="M46 16c-3.4 0-5.2 3.4-5.2 7.6s1.8 6.4 5.2 6.4V16Z" fill="#fff"></path><circle cx="58" cy="20" r="11" fill="#fff" stroke="var(--accent)" stroke-width="3"></circle><path d="M58 15v5l3.4 2.2" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <div style="font-weight:700;font-size:15px;color:var(--ink);letter-spacing:-.3px">amragrir<span style="color:var(--accent)">.am</span></div>
+    <div style="width:1px;height:16px;background:var(--line)"></div>
+    <div style="font-size:12.5px;color:var(--ink2)">{{ L.brandTag }}</div>
+    <button onClick="{{ toggleDark }}" style-active="transform:scale(.93)" style="border:1px solid var(--line);background:var(--card);color:var(--ink);height:32px;padding:0 14px;border-radius:16px;font-size:12.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">
+      <span>{{ darkIcon }}</span><span>{{ darkLabel }}</span>
+    </button>
+  </div><x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ dark }}" hint-size="402px,874px">
+
+    <div style="height:100%;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);color:var(--ink);position:relative">
+      <div style="flex:1;overflow-y:auto;overflow-x:hidden">
+
+        <!-- ============ HOME ============ -->
+        <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+        <div class="screen" style="padding:58px 20px 24px">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+            <div>
+              <div style="font-size:13px;color:var(--ink2);font-weight:500">{{ L.greeting }}</div>
+              <div style="font-size:27px;line-height:1.15;font-weight:700;letter-spacing:-.6px;margin-top:5px;max-width:250px;text-wrap:pretty">{{ L.question }}</div>
+            </div>
+            <button onClick="{{ toggleDark }}" style-active="transform:scale(.9)" style="flex:none;width:46px;height:46px;border-radius:23px;border:1px solid var(--line);background:var(--card);font-size:19px;cursor:pointer;box-shadow:0 3px 10px var(--shadow)">{{ darkIcon }}</button>
+          </div>
+
+          <button onClick="{{ goSearch }}" style-active="transform:scale(.985)" style="margin-top:18px;width:100%;height:52px;border-radius:16px;border:1px solid var(--line);background:var(--card);display:flex;align-items:center;gap:11px;padding:0 16px;cursor:pointer;box-shadow:0 4px 14px var(--shadow)">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--ink3)" stroke-width="2"></circle><path d="M20 20l-3.2-3.2" stroke="var(--ink3)" stroke-width="2" stroke-linecap="round"></path></svg>
+            <span style="color:var(--ink2);font-size:15.5px">{{ L.searchPh }}</span>
+          </button>
+
+          <div style="display:flex;align-items:center;gap:6px;margin-top:16px;color:var(--ink2)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 21s7-5.7 7-11a7 7 0 10-14 0c0 5.3 7 11 7 11z" stroke="var(--accent)" stroke-width="2"></path><circle cx="12" cy="10" r="2.4" stroke="var(--accent)" stroke-width="2"></circle></svg>
+            <span style="font-size:13.5px;font-weight:500;color:var(--ink)">{{ L.location }}</span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style="margin-top:1px"><path d="M6 9l6 6 6-6" stroke="var(--ink3)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </div>
+
+          <div style="display:flex;gap:10px;overflow-x:auto;margin:20px -20px 0;padding:2px 20px 4px">
+            <sc-for list="{{ categories }}" as="c" hint-placeholder-count="6">
+              <button onClick="{{ c.onClick }}" style-active="transform:scale(.92)" style="{{ c.style }}">
+                <span style="font-size:22px">{{ c.emoji }}</span>
+                <span style="font-size:12.5px;font-weight:600">{{ c.name }}</span>
+              </button>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;gap:8px;overflow-x:auto;margin:14px -20px 0;padding:0 20px 4px;align-items:center">
+            <button onClick="{{ openFilters }}" style-active="transform:scale(.9)" style="{{ nearMe.style }}">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M3 5h18M6 12h12M10 19h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="9" cy="5" r="2.3" fill="var(--card)" stroke="currentColor" stroke-width="2"></circle><circle cx="15" cy="12" r="2.3" fill="var(--card)" stroke="currentColor" stroke-width="2"></circle></svg>
+              <sc-if value="{{ filtersActive }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;top:-2px;right:-2px;min-width:17px;height:17px;border-radius:9px;background:var(--accent);color:#fff;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid var(--bg)">{{ filterCountBadge }}</span></sc-if>
+            </button>
+            <sc-for list="{{ filtersRest }}" as="f" hint-placeholder-count="5">
+              <button onClick="{{ f.onClick }}" style-active="transform:scale(.94)" style="{{ f.style }}"><span style="font-size:14px;line-height:1">{{ f.icon }}</span>{{ f.label }}</button>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:26px">
+            <div style="font-size:19px;font-weight:700;letter-spacing:-.4px">{{ L.nearby }}</div>
+            <a href="#" onClick="{{ goSearch }}" style="font-size:13.5px;font-weight:600">{{ L.seeAll }}</a>
+          </div>
+
+          <sc-if value="{{ loaded }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:18px;margin-top:16px">
+              <sc-for list="{{ restaurants }}" as="r" hint-placeholder-count="3">
+                <div onClick="{{ r.onClick }}" style-active="transform:scale(.985)" style="border-radius:22px;background:var(--card);overflow:hidden;box-shadow:0 8px 22px var(--shadow);cursor:pointer;border:1px solid var(--line)">
+                  <div style="height:162px;position:relative;background:repeating-linear-gradient(135deg,var(--ph1) 0 13px,var(--ph2) 13px 26px);display:flex;align-items:flex-end;padding:12px">
+                    <div style="position:absolute;top:12px;left:12px;display:flex;align-items:center;gap:6px;background:var(--glass);backdrop-filter:blur(8px);padding:5px 10px;border-radius:20px;font-size:12px;font-weight:700;color:{{ r.statusColor }}">
+                      <span style="width:7px;height:7px;border-radius:4px;background:{{ r.statusColor }}"></span>{{ r.statusLabel }}
+                    </div>
+                    <div style="position:absolute;top:11px;right:12px;width:34px;height:34px;border-radius:17px;background:var(--glass);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center">
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 20s-7-4.6-7-9.6A4.4 4.4 0 0112 7a4.4 4.4 0 017 3.4c0 5-7 9.6-7 9.6z" stroke="var(--ink2)" stroke-width="2"></path></svg>
+                    </div>
+                    <span style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.5px;color:var(--ink2);background:var(--glass);padding:4px 8px;border-radius:6px">{{ r.photo }}</span>
+                  </div>
+                  <div style="padding:14px 15px 15px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+                      <div style="font-size:17px;font-weight:700;letter-spacing:-.3px">{{ r.name }}</div>
+                      <div style="display:flex;align-items:center;gap:4px;font-size:13.5px;font-weight:700"><span style="color:#F5A623">★</span>{{ r.rating }}</div>
+                    </div>
+                    <div style="font-size:13px;color:var(--ink2);margin-top:3px">{{ r.meta }}</div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap">
+                      <div style="display:flex;align-items:center;gap:5px;background:var(--accentSoft);color:var(--accent);font-size:12px;font-weight:700;padding:6px 10px;border-radius:12px">⏱ {{ r.prep }}</div>
+                      <sc-for list="{{ r.services }}" as="svc" hint-placeholder-count="2">
+                        <div style="background:var(--chip);color:var(--ink2);font-size:12px;font-weight:600;padding:6px 10px;border-radius:12px">{{ svc }}</div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ notLoaded }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:18px;margin-top:16px">
+              <sc-for list="{{ three }}" as="n" hint-placeholder-count="3">
+                <div style="border-radius:22px;background:var(--card);overflow:hidden;border:1px solid var(--line)">
+                  <div class="skel" style="height:162px"></div>
+                  <div style="padding:15px">
+                    <div class="skel" style="height:16px;width:55%;border-radius:6px"></div>
+                    <div class="skel" style="height:12px;width:75%;border-radius:6px;margin-top:10px"></div>
+                    <div class="skel" style="height:28px;width:60%;border-radius:12px;margin-top:14px"></div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+        </sc-if>
+
+        <!-- ============ SEARCH ============ -->
+        <sc-if value="{{ isSearch }}" hint-placeholder-val="{{ false }}">
+        <div class="screen" style="padding:58px 20px 24px">
+          <div style="font-size:27px;font-weight:700;letter-spacing:-.6px">{{ L.searchTitle }}</div>
+          <div style="margin-top:16px;width:100%;height:52px;border-radius:16px;border:1px solid var(--line);background:var(--card);display:flex;align-items:center;gap:11px;padding:0 16px;box-shadow:0 4px 14px var(--shadow)">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--accent)" stroke-width="2"></circle><path d="M20 20l-3.2-3.2" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"></path></svg>
+            <span style="color:var(--ink2);font-size:15.5px">{{ L.searchPh }}</span>
+          </div>
+          <div style="font-size:14px;font-weight:700;margin-top:24px;color:var(--ink2);text-transform:uppercase;letter-spacing:.4px">{{ L.browseCuisine }}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px">
+            <sc-for list="{{ browse }}" as="c" hint-placeholder-count="6">
+              <button onClick="{{ c.onClick }}" style-active="transform:scale(.96)" style="display:flex;align-items:center;gap:11px;padding:15px;border-radius:16px;border:1px solid var(--line);background:var(--card);cursor:pointer;text-align:left">
+                <span style="font-size:24px">{{ c.emoji }}</span>
+                <span style="font-size:15px;font-weight:600;color:var(--ink)">{{ c.name }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="font-size:14px;font-weight:700;margin-top:24px;color:var(--ink2);text-transform:uppercase;letter-spacing:.4px">{{ L.popularNear }}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:9px;margin-top:14px">
+            <sc-for list="{{ popular }}" as="p" hint-placeholder-count="5">
+              <div style="background:var(--chip);color:var(--ink);font-size:13.5px;font-weight:600;padding:9px 14px;border-radius:20px">{{ p }}</div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ RESTAURANT DETAIL ============ -->
+        <sc-if value="{{ isRestaurant }}" hint-placeholder-val="{{ false }}">
+        <div class="screen">
+          <div style="height:270px;position:relative;background:repeating-linear-gradient(135deg,var(--ph1) 0 15px,var(--ph2) 15px 30px)">
+            <div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,.28) 0,transparent 34%,transparent 60%,rgba(0,0,0,.34))"></div>
+            <button onClick="{{ back }}" style-active="transform:scale(.9)" style="position:absolute;top:56px;left:16px;width:42px;height:42px;border-radius:21px;background:var(--glass);backdrop-filter:blur(10px);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer">
+              <svg width="12" height="20" viewBox="0 0 12 20" fill="none"><path d="M9 2L2 10l7 8" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <div style="position:absolute;top:56px;right:16px;display:flex;gap:10px">
+              <div style="width:42px;height:42px;border-radius:21px;background:var(--glass);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 20s-7-4.6-7-9.6A4.4 4.4 0 0112 7a4.4 4.4 0 017 3.4c0 5-7 9.6-7 9.6z" stroke="var(--ink)" stroke-width="2"></path></svg></div>
+            </div>
+            <span style="position:absolute;bottom:82px;left:20px;font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.6px;color:#fff;background:rgba(0,0,0,.35);padding:5px 9px;border-radius:6px">{{ restPhoto }}</span>
+          </div>
+
+          <div style="margin-top:-58px;position:relative;background:var(--bg);border-radius:26px 26px 0 0;padding:22px 20px 0">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+              <div>
+                <div style="font-size:25px;font-weight:800;letter-spacing:-.5px">{{ restName }}</div>
+                <div style="font-size:13.5px;color:var(--ink2);margin-top:4px">{{ restMeta }}</div>
+              </div>
+              <div style="flex:none;text-align:center;background:var(--card);border:1px solid var(--line);border-radius:15px;padding:8px 12px;box-shadow:0 4px 12px var(--shadow)">
+                <div style="font-size:16px;font-weight:800"><span style="color:#F5A623">★</span> {{ restRating }}</div>
+                <div style="font-size:10.5px;color:var(--ink2);margin-top:1px">{{ L.reviewsWord }}</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:5px;background:var(--accentSoft);color:var(--accent);font-size:12.5px;font-weight:700;padding:7px 11px;border-radius:12px">⏱ {{ restPrep }} {{ L.prepWord }}</div>
+              <div style="background:var(--chip);color:var(--ink2);font-size:12.5px;font-weight:600;padding:7px 11px;border-radius:12px">📍 {{ restDist }}</div>
+              <div style="background:var(--chip);color:var(--good);font-size:12.5px;font-weight:700;padding:7px 11px;border-radius:12px">{{ L.openNow }}</div>
+            </div>
+
+            <div style="display:flex;gap:9px;overflow-x:auto;margin:20px 0 6px;padding-bottom:4px">
+              <sc-for list="{{ menuTabs }}" as="m" hint-placeholder-count="4">
+                <button onClick="{{ m.onClick }}" style-active="transform:scale(.95)" style="{{ m.style }}">{{ m.label }}</button>
+              </sc-for>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:14px;padding-bottom:120px">
+              <sc-for list="{{ dishes }}" as="d" hint-placeholder-count="3">
+                <div style="display:flex;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:12px;box-shadow:0 5px 16px var(--shadow)">
+                  <div style="flex:none;width:104px;height:104px;border-radius:15px;background:repeating-linear-gradient(135deg,var(--ph1) 0 11px,var(--ph2) 11px 22px);position:relative;overflow:hidden;display:flex;align-items:flex-end;padding:6px">
+                    <span style="font-family:ui-monospace,Menlo,monospace;font-size:8px;letter-spacing:.4px;color:var(--ink2);background:var(--glass);padding:2px 5px;border-radius:4px">{{ d.photo }}</span>
+                  </div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:16px;font-weight:700;letter-spacing:-.2px">{{ d.name }}</div>
+                    <div style="font-size:12.5px;color:var(--ink2);margin-top:3px;line-height:1.35;text-wrap:pretty">{{ d.desc }}</div>
+                    <div style="font-size:11px;color:var(--ink3);margin-top:6px">{{ d.calLabel }} · {{ d.prep }}</div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:9px">
+                      <div style="font-size:16px;font-weight:800">{{ d.priceLabel }}</div>
+                      <button onClick="{{ d.add }}" style-active="transform:scale(.85)" style="width:38px;height:38px;border-radius:19px;border:none;background:var(--accent);color:#fff;font-size:22px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 5px 14px var(--shadow)">＋</button>
+                    </div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <sc-if value="{{ hasCart }}" hint-placeholder-val="{{ false }}">
+            <div style="position:sticky;bottom:0;padding:14px 20px 30px;background:linear-gradient(to top,var(--bg) 62%,transparent)">
+              <button onClick="{{ goBasket }}" style-active="transform:scale(.98)" style="width:100%;height:56px;border-radius:18px;border:none;background:var(--accent);color:#fff;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:0 20px;box-shadow:0 12px 26px var(--shadow)">
+                <span style="display:flex;align-items:center;gap:9px"><span style="background:rgba(255,255,255,.25);min-width:26px;height:26px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:13.5px;padding:0 7px">{{ cartCount }}</span>{{ L.viewBasket }}</span>
+                <span>{{ cartTotal }}</span>
+              </button>
+            </div>
+          </sc-if>
+        </div>
+        </sc-if>
+
+        <!-- ============ PRE-ORDER ============ -->
+        <sc-if value="{{ isPreorder }}" hint-placeholder-val="{{ false }}">
+        <div class="screen" style="padding:58px 20px 130px">
+          <button onClick="{{ back }}" style-active="transform:scale(.92)" style="width:42px;height:42px;border-radius:21px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer">
+            <svg width="12" height="20" viewBox="0 0 12 20" fill="none"><path d="M9 2L2 10l7 8" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </button>
+          <div style="font-size:27px;font-weight:800;letter-spacing:-.6px;margin-top:16px">{{ L.whenHow }}</div>
+          <div style="font-size:14px;color:var(--ink2);margin-top:4px">{{ restName }} · {{ restPrep }} {{ L.prepTimeWord }}</div>
+
+          <div style="font-size:13px;font-weight:700;margin-top:26px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2)">{{ L.howLikeIt }}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+            <button onClick="{{ setPickup }}" style-active="transform:scale(.97)" style="{{ pickupStyle }}">
+              <span style="font-size:26px">🥡</span>
+              <span style="font-size:16px;font-weight:700">{{ L.pickup }}</span>
+              <span style="font-size:12px;opacity:.75">{{ L.pickupSub }}</span>
+            </button>
+            <button onClick="{{ setDine }}" style-active="transform:scale(.97)" style="{{ dineStyle }}">
+              <span style="font-size:26px">🍽️</span>
+              <span style="font-size:16px;font-weight:700">{{ L.dineIn }}</span>
+              <span style="font-size:12px;opacity:.75">{{ L.dineSub }}</span>
+            </button>
+          </div>
+
+          <sc-if value="{{ showReserve }}" hint-placeholder-val="{{ false }}">
+            <div style="animation:scIn .3s">
+              <div style="font-size:13px;font-weight:700;margin-top:26px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2)">{{ L.dateWord }}</div>
+              <div style="margin-top:12px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;box-shadow:0 4px 14px var(--shadow)">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                  <button onClick="{{ prevMonth }}" style-active="transform:scale(.9)" style="{{ prevStyle }}">
+                    <svg width="9" height="15" viewBox="0 0 12 20" fill="none"><path d="M9 2L2 10l7 8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                  </button>
+                  <div style="font-size:15px;font-weight:800;letter-spacing:-.2px">{{ monthLabel }}</div>
+                  <button onClick="{{ nextMonth }}" style-active="transform:scale(.9)" style="{{ nextStyle }}">
+                    <svg width="9" height="15" viewBox="0 0 12 20" fill="none"><path d="M3 2l7 8-7 8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                  </button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px">
+                  <sc-for list="{{ weekdayHeads }}" as="w" hint-placeholder-count="7">
+                    <div style="text-align:center;font-size:10.5px;font-weight:700;color:var(--ink3);text-transform:uppercase">{{ w }}</div>
+                  </sc-for>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
+                  <sc-for list="{{ calCells }}" as="c" hint-placeholder-count="35">
+                    <button onClick="{{ c.onClick }}" disabled="{{ c.disabled }}" style-active="transform:scale(.88)" style="{{ c.style }}">{{ c.day }}</button>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="font-size:13px;font-weight:700;margin-top:22px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2)">{{ L.reservationTime }}</div>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px">
+                <sc-for list="{{ reserveTimes }}" as="t" hint-placeholder-count="8">
+                  <button onClick="{{ t.onClick }}" style-active="transform:scale(.93)" style="{{ t.style }}">{{ t.label }}</button>
+                </sc-for>
+              </div>
+              <div style="font-size:13px;font-weight:700;margin-top:22px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2)">{{ L.guests }}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;align-items:center">
+                <sc-for list="{{ guestChips }}" as="g" hint-placeholder-count="4">
+                  <button onClick="{{ g.onClick }}" style-active="transform:scale(.9)" style="{{ g.style }}">{{ g.label }}</button>
+                </sc-for>
+                <div style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:6px 8px;box-shadow:0 3px 10px var(--shadow)">
+                  <button onClick="{{ guestDec }}" style-active="transform:scale(.85)" style="width:34px;height:34px;border-radius:12px;border:1px solid var(--line);background:var(--chip);color:var(--ink);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:0">−</button>
+                  <div style="text-align:center;min-width:44px">
+                    <div style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums">{{ guests }}</div>
+                    <div style="font-size:9.5px;color:var(--ink2);text-transform:uppercase;letter-spacing:.3px">{{ L.guestsWord }}</div>
+                  </div>
+                  <button onClick="{{ guestInc }}" style-active="transform:scale(.85)" style="width:34px;height:34px;border-radius:12px;border:none;background:var(--accent);color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:0">＋</button>
+                </div>
+              </div>
+
+              <div style="margin-top:22px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px 18px;box-shadow:0 4px 14px var(--shadow)">
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <div style="display:flex;align-items:center;gap:9px">
+                    <span style="font-size:20px">🪑</span>
+                    <div>
+                      <div style="font-size:15px;font-weight:800">{{ L.tableDeposit }}</div>
+                      <div style="font-size:11.5px;color:var(--ink2);margin-top:1px">{{ depositBreakdown }}</div>
+                    </div>
+                  </div>
+                  <div style="text-align:right">
+                    <div style="font-size:19px;font-weight:800;color:var(--accent)">{{ depositLabel }}</div>
+                    <div style="font-size:10.5px;color:var(--good);font-weight:700">{{ L.appliedToBill }}</div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+                  <span style="font-size:14px;line-height:1.3">ℹ️</span>
+                  <div style="font-size:12px;color:var(--ink2);line-height:1.4;text-wrap:pretty">{{ L.depositNote }}</div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showReadyAt }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:13px;font-weight:700;margin-top:26px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2)">{{ L.foodReadyAt }}</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px">
+            <sc-for list="{{ readyTimes }}" as="t" hint-placeholder-count="8">
+              <button onClick="{{ t.onClick }}" style-active="transform:scale(.93)" style="{{ t.style }}">{{ t.label }}</button>
+            </sc-for>
+          </div>
+          </sc-if>
+
+          <div style="margin-top:22px;background:var(--accentSoft);border-radius:18px;padding:16px 18px;display:flex;align-items:center;gap:13px">
+            <div style="font-size:26px">⚡</div>
+            <div>
+              <div style="font-size:14.5px;font-weight:700;color:var(--accent)">{{ readySummary }}</div>
+              <div style="font-size:12.5px;color:var(--ink2);margin-top:2px">{{ L.kitchenNote }}</div>
+            </div>
+          </div>
+
+          <div style="position:sticky;bottom:0;padding:14px 20px 30px;background:linear-gradient(to top,var(--bg) 62%,transparent)">
+            <button onClick="{{ goCheckout }}" style-active="transform:scale(.98)" style="width:100%;height:56px;border-radius:18px;border:none;background:var(--accent);color:#fff;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 12px 26px var(--shadow)">{{ L.continueCheckout }} · {{ cartTotal }}</button>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ CHECKOUT ============ -->
+        <sc-if value="{{ isCheckout }}" hint-placeholder-val="{{ false }}">
+        <div class="screen" style="padding:58px 20px 130px">
+          <button onClick="{{ back }}" style-active="transform:scale(.92)" style="width:42px;height:42px;border-radius:21px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer">
+            <svg width="12" height="20" viewBox="0 0 12 20" fill="none"><path d="M9 2L2 10l7 8" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </button>
+          <div style="font-size:27px;font-weight:800;letter-spacing:-.6px;margin-top:16px">{{ L.checkout }}</div>
+
+          <div style="margin-top:20px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 16px;box-shadow:0 5px 16px var(--shadow)">
+            <sc-for list="{{ cartLines }}" as="l" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)">
+                <div style="flex:none;width:22px;height:22px;border-radius:7px;background:var(--accentSoft);color:var(--accent);font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center">{{ l.qty }}</div>
+                <div style="flex:1;font-size:15px;font-weight:600">{{ l.name }}</div>
+                <div style="font-size:15px;font-weight:700">{{ l.total }}</div>
+              </div>
+            </sc-for>
+            <div style="display:flex;justify-content:space-between;padding:14px 0 6px"><span style="color:var(--ink2);font-size:14px">{{ L.subtotal }}</span><span style="font-size:14px;font-weight:600">{{ cartTotal }}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:0 0 14px"><span style="color:var(--ink2);font-size:14px">{{ L.service }}</span><span style="font-size:14px;font-weight:600">{{ serviceLabel }}</span></div>
+          </div>
+
+          <div style="margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:16px;box-shadow:0 5px 16px var(--shadow)">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span style="color:var(--ink2);font-size:14px">{{ readyRowLabel }}</span>
+              <span style="font-size:15px;font-weight:700;color:var(--accent)">⚡ {{ readyRowTime }}</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+              <span style="color:var(--ink2);font-size:14px">{{ methodLabel }}</span>
+              <span style="font-size:15px;font-weight:700">{{ methodDetail }}</span>
+            </div>
+            <sc-if value="{{ isDine }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+                <span style="color:var(--ink2);font-size:14px">🪑 {{ L.tableDeposit }}</span>
+                <span style="font-size:15px;font-weight:700">{{ depositLabel }}</span>
+              </div>
+              <div style="font-size:11.5px;color:var(--good);font-weight:600;margin-top:6px">✓ {{ L.depositCredit }}</div>
+            </sc-if>
+          </div>
+
+          <div style="font-size:13px;font-weight:700;margin-top:24px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2)">{{ L.payment }}</div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
+            <sc-for list="{{ payments }}" as="p" hint-placeholder-count="4">
+              <button onClick="{{ p.onClick }}" style-active="transform:scale(.99)" style="{{ p.style }}">
+                <span style="font-size:22px;width:26px;text-align:center">{{ p.icon }}</span>
+                <span style="flex:1;text-align:left;font-size:15.5px;font-weight:600">{{ p.label }}</span>
+                <span style="{{ p.dotStyle }}"></span>
+              </button>
+            </sc-for>
+          </div>
+
+          <div style="position:sticky;bottom:0;padding:14px 20px 30px;background:linear-gradient(to top,var(--bg) 62%,transparent)">
+            <button onClick="{{ placeOrder }}" style-active="transform:scale(.98)" style="width:100%;height:56px;border-radius:18px;border:none;background:var(--accent);color:#fff;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 12px 26px var(--shadow);display:flex;align-items:center;justify-content:center;gap:9px">{{ payLabel }} · {{ grandTotal }}</button>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ ORDER TRACKING ============ -->
+        <sc-if value="{{ isTracking }}" hint-placeholder-val="{{ false }}">
+        <div class="screen" style="padding:58px 20px 30px;min-height:100%;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:14px">
+            <button onClick="{{ back }}" style-active="transform:scale(.92)" style="width:42px;height:42px;border-radius:21px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none">
+              <svg width="12" height="20" viewBox="0 0 12 20" fill="none"><path d="M9 2L2 10l7 8" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <div style="flex:1;min-width:0">
+              <div style="{{ trkBadge }}"><span style="{{ trkPulse }}"></span>{{ trkStatusLabel }}</div>
+              <div style="font-size:22px;font-weight:800;letter-spacing:-.5px;margin-top:4px">{{ restName }}</div>
+            </div>
+            <div style="{{ trkIconWrap }}">{{ trkIcon }}</div>
+          </div>
+
+          <div style="font-size:13.5px;color:var(--ink2);margin-top:12px;line-height:1.45;text-wrap:pretty">{{ trkStatusDesc }}</div>
+
+          <sc-if value="{{ trkUnpaid }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:18px;background:var(--accentSoft);border:1px solid var(--accent);border-radius:22px;padding:20px;display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:17px;font-weight:800">{{ L.track.unpaidTitle }}</div>
+              <div style="font-size:13.5px;color:var(--ink2);line-height:1.45;text-wrap:pretty">{{ L.track.unpaidDesc }}</div>
+              <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:10px;padding-top:12px;border-top:1px solid var(--line)"><span style="color:var(--ink2);font-size:14px">{{ L.total }}</span><span style="font-size:22px;font-weight:800">{{ grandTotal }}</span></div>
+            </div>
+            <button onClick="{{ payAgain }}" style-active="transform:scale(.98)" style="margin-top:14px;width:100%;height:56px;border-radius:18px;border:none;background:var(--accent);color:#fff;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 12px 26px var(--shadow)">{{ L.track.payNow }} · {{ grandTotal }}</button>
+            <button onClick="{{ cancelOrder }}" style-active="transform:scale(.98)" style="margin-top:10px;width:100%;height:52px;border-radius:16px;border:1px solid var(--danger);background:transparent;color:var(--danger);font-size:15px;font-weight:700;cursor:pointer">{{ L.track.cancelOrder }}</button>
+          </sc-if>
+
+          <sc-if value="{{ trkFailed }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:18px;background:var(--dangerSoft);border:1px solid var(--danger);border-radius:22px;padding:20px;display:flex;gap:14px;align-items:flex-start">
+              <div style="font-size:28px;flex:none;line-height:1">⚠️</div>
+              <div>
+                <div style="font-size:17px;font-weight:800;color:var(--danger)">{{ L.track.retryTitle }}</div>
+                <div style="font-size:13.5px;color:var(--ink2);line-height:1.45;margin-top:4px;text-wrap:pretty">{{ L.track.retryDesc }}</div>
+              </div>
+            </div>
+            <button onClick="{{ payAgain }}" style-active="transform:scale(.98)" style="margin-top:14px;width:100%;height:56px;border-radius:18px;border:none;background:var(--accent);color:#fff;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 12px 26px var(--shadow)">{{ L.track.retry }}</button>
+            <button onClick="{{ cancelOrder }}" style-active="transform:scale(.98)" style="margin-top:10px;width:100%;height:52px;border-radius:16px;border:1px solid var(--danger);background:transparent;color:var(--danger);font-size:15px;font-weight:700;cursor:pointer">{{ L.track.cancelOrder }}</button>
+          </sc-if>
+
+          <sc-if value="{{ trkCancelled }}" hint-placeholder-val="{{ false }}">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:8px;padding:40px 0">
+              <div style="width:96px;height:96px;border-radius:48px;background:var(--dangerSoft);color:var(--danger);display:flex;align-items:center;justify-content:center;font-size:42px;font-weight:800">✕</div>
+              <div style="font-size:20px;font-weight:800;margin-top:6px">{{ L.track.status.cancelled }}</div>
+              <div style="font-size:14px;color:var(--ink2);max-width:250px;text-wrap:pretty">{{ L.track.statusDesc.cancelled }}</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ trkProgress }}" hint-placeholder-val="{{ true }}">
+            <sc-if value="{{ trkPreorderNote }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:16px;background:var(--accentSoft);border-radius:16px;padding:14px 16px;display:flex;align-items:center;gap:12px">
+                <span style="font-size:22px">📅</span>
+                <div>
+                  <div style="font-size:14px;font-weight:800">{{ L.track.preorderAccepted }}</div>
+                  <div style="font-size:12.5px;color:var(--ink2);margin-top:2px">{{ L.track.cookStartsAt }} {{ trkCookTime }}</div>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ trkShowRing }}" hint-placeholder-val="{{ true }}">
+              <div style="margin:24px auto 6px;position:relative;width:236px;height:236px;display:flex;align-items:center;justify-content:center">
+                <svg width="236" height="236" viewBox="0 0 236 236" style="position:absolute;transform:rotate(-90deg)">
+                  <circle cx="118" cy="118" r="110" fill="none" stroke="var(--chip)" stroke-width="14"></circle>
+                  <circle cx="118" cy="118" r="110" fill="none" stroke="var(--accent)" stroke-width="14" stroke-linecap="round" stroke-dasharray="{{ ringCirc }}" stroke-dashoffset="{{ ringOffset }}" style="transition:stroke-dashoffset 1s linear"></circle>
+                </svg>
+                <div style="text-align:center">
+                  <div style="font-size:12px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.6px">{{ L.readyIn }}</div>
+                  <div style="font-size:52px;font-weight:800;letter-spacing:-1.5px;line-height:1;margin-top:4px;font-variant-numeric:tabular-nums">{{ countdownText }}</div>
+                  <div style="font-size:13px;color:var(--ink2);margin-top:6px">{{ L.arrives }} {{ readyTime }}</div>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ trkShowBadge }}" hint-placeholder-val="{{ false }}">
+              <div style="margin:30px auto 12px;width:150px;height:150px;border-radius:75px;background:var(--good);display:flex;align-items:center;justify-content:center;font-size:62px;animation:checkPop .5s cubic-bezier(.22,.9,.36,1)">{{ trkBigIcon }}</div>
+            </sc-if>
+
+            <div style="display:flex;justify-content:space-between;margin:22px 4px 0">
+              <sc-for list="{{ steps }}" as="st" hint-placeholder-count="5">
+                <div style="flex:1;text-align:center">
+                  <div style="{{ st.dot }}"></div>
+                  <div style="{{ st.text }}">{{ st.label }}</div>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="margin-top:24px;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:18px;display:flex;align-items:center;gap:16px;box-shadow:0 6px 18px var(--shadow)">
+              <div style="flex:none;width:96px;height:96px;border-radius:14px;background:#fff;padding:9px;border:1px solid var(--line)">
+                <div style="width:100%;height:100%;background-image:repeating-linear-gradient(0deg,#111 0 4px,transparent 4px 8px),repeating-linear-gradient(90deg,#111 0 4px,transparent 4px 8px);opacity:.92;border-radius:4px"></div>
+              </div>
+              <div>
+                <div style="font-size:15px;font-weight:800">{{ L.pickupCodeWord }} · {{ pickupCode }}</div>
+                <div style="font-size:12.5px;color:var(--ink2);margin-top:4px;line-height:1.4;text-wrap:pretty">{{ L.showCounter }} {{ tableNote }}</div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;align-items:center;margin-top:14px;font-size:12px;color:var(--ink3);line-height:1.4"><span>🔒</span><span style="text-wrap:pretty">{{ L.track.noRefundNote }}</span></div>
+          </sc-if>
+
+          <div style="margin-top:22px;padding-top:16px;border-top:1px dashed var(--line)">
+            <div style="font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);margin-bottom:9px">{{ L.track.reviewStatus }}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:7px">
+              <sc-for list="{{ statusChips }}" as="c" hint-placeholder-count="8">
+                <button onClick="{{ c.onClick }}" style-active="transform:scale(.94)" style="{{ c.style }}">{{ c.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+
+          <button onClick="{{ goHome }}" style-active="transform:scale(.98)" style="margin-top:22px;margin-bottom:6px;width:100%;height:54px;border-radius:18px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:16px;font-weight:700;cursor:pointer">{{ trkDoneLabel }}</button>
+        </div>
+        </sc-if>
+
+        <!-- ============ BASKET ============ -->
+        <sc-if value="{{ isBasket }}" hint-placeholder-val="{{ false }}">
+        <div class="screen" style="padding:58px 20px 130px;min-height:100%;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:14px">
+            <button onClick="{{ back }}" style-active="transform:scale(.92)" style="width:42px;height:42px;border-radius:21px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none">
+              <svg width="12" height="20" viewBox="0 0 12 20" fill="none"><path d="M9 2L2 10l7 8" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <div>
+              <div style="font-size:27px;font-weight:800;letter-spacing:-.6px">{{ L.basket }}</div>
+              <div style="font-size:13.5px;color:var(--ink2);margin-top:1px">{{ restName }}</div>
+            </div>
+          </div>
+
+          <sc-if value="{{ hasCart }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:18px;background:var(--card);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 6px 18px var(--shadow)">
+              <div style="height:140px;position:relative;background:repeating-linear-gradient(135deg,var(--ph1) 0 13px,var(--ph2) 13px 26px);display:flex;align-items:flex-end;padding:12px">
+                <div style="position:absolute;top:11px;right:12px;display:flex;align-items:center;gap:4px;background:var(--glass);backdrop-filter:blur(8px);padding:5px 10px;border-radius:20px;font-size:12.5px;font-weight:800"><span style="color:#F5A623">★</span>{{ restRating }}</div>
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.5px;color:var(--ink2);background:var(--glass);padding:4px 8px;border-radius:6px">{{ restPhoto }}</span>
+              </div>
+              <div style="padding:13px 15px 15px">
+                <div style="font-size:18px;font-weight:800;letter-spacing:-.3px">{{ restName }}</div>
+                <div style="font-size:12.5px;color:var(--ink2);margin-top:3px">{{ restMeta }}</div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+                  <span style="display:inline-flex;align-items:center;gap:4px;background:var(--accentSoft);color:var(--accent);font-size:11.5px;font-weight:700;padding:5px 9px;border-radius:11px">⏱ {{ restPrep }}</span>
+                  <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--ink2)">📍 {{ restDist }}</span>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">
+              <sc-for list="{{ basketLines }}" as="l" hint-placeholder-count="2">
+                <div style="display:flex;gap:13px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:11px;box-shadow:0 4px 14px var(--shadow)">
+                  <div style="flex:none;width:66px;height:66px;border-radius:13px;background:repeating-linear-gradient(135deg,var(--ph1) 0 10px,var(--ph2) 10px 20px)"></div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:15px;font-weight:700;letter-spacing:-.2px">{{ l.name }}</div>
+                    <div style="font-size:12.5px;color:var(--ink2);margin-top:2px">{{ l.priceEach }} {{ L.each }}</div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+                    <div style="font-size:15px;font-weight:800">{{ l.total }}</div>
+                    <div style="display:flex;align-items:center;gap:10px">
+                      <button onClick="{{ l.dec }}" style-active="transform:scale(.85)" style="width:30px;height:30px;border-radius:15px;border:1px solid var(--line);background:var(--chip);color:var(--ink);font-size:19px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:0">−</button>
+                      <span style="min-width:16px;text-align:center;font-size:15px;font-weight:700">{{ l.qty }}</span>
+                      <button onClick="{{ l.inc }}" style-active="transform:scale(.85)" style="width:30px;height:30px;border-radius:15px;border:none;background:var(--accent);color:#fff;font-size:19px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:0">＋</button>
+                    </div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+
+            <button onClick="{{ goRestaurant }}" style-active="transform:scale(.99)" style="margin-top:14px;width:100%;height:46px;border-radius:14px;border:1px dashed var(--line);background:transparent;color:var(--accent);font-size:14px;font-weight:700;cursor:pointer">{{ L.addMoreItems }}</button>
+
+            <div style="margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 4px 14px var(--shadow)">
+              <div style="display:flex;justify-content:space-between;padding-bottom:10px"><span style="color:var(--ink2);font-size:14px">{{ L.subtotal }}</span><span style="font-size:14px;font-weight:600">{{ cartTotal }}</span></div>
+              <div style="display:flex;justify-content:space-between;padding-bottom:12px;border-bottom:1px solid var(--line)"><span style="color:var(--ink2);font-size:14px">{{ L.service }}</span><span style="font-size:14px;font-weight:600">{{ serviceLabel }}</span></div>
+              <div style="display:flex;justify-content:space-between;padding-top:12px"><span style="font-size:15px;font-weight:700">{{ L.total }}</span><span style="font-size:16px;font-weight:800">{{ grandTotal }}</span></div>
+            </div>
+
+            <div style="position:sticky;bottom:0;margin-top:auto;padding:16px 0 30px;background:linear-gradient(to top,var(--bg) 62%,transparent)">
+              <button onClick="{{ goPreorder }}" style-active="transform:scale(.98)" style="width:100%;height:56px;border-radius:18px;border:none;background:var(--accent);color:#fff;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 12px 26px var(--shadow)">{{ L.chooseTime }} · {{ grandTotal }}</button>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ emptyCart }}" hint-placeholder-val="{{ true }}">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;padding-bottom:60px">
+              <div style="font-size:56px;animation:floaty 2.4s infinite">🧺</div>
+              <div style="font-size:19px;font-weight:800;margin-top:6px">{{ L.emptyTitle }}</div>
+              <div style="font-size:14px;color:var(--ink2);max-width:230px;text-wrap:pretty">{{ L.emptyDesc }}</div>
+              <button onClick="{{ goHome }}" style-active="transform:scale(.96)" style="margin-top:14px;height:48px;padding:0 24px;border-radius:16px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 8px 20px var(--shadow)">{{ L.browse }}</button>
+            </div>
+          </sc-if>
+        </div>
+        </sc-if>
+
+        <!-- ============ ORDERS ============ -->
+        <sc-if value="{{ isOrders }}" hint-placeholder-val="{{ false }}">
+        <div class="screen" style="padding:58px 20px 24px">
+          <div style="font-size:27px;font-weight:800;letter-spacing:-.6px">{{ L.ordersTitle }}</div>
+
+          <sc-if value="{{ hasPlaced }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:13px;font-weight:700;margin-top:22px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2)">{{ L.active }}</div>
+            <div onClick="{{ goTracking }}" style-active="transform:scale(.985)" style="margin-top:12px;border-radius:22px;background:var(--card);border:1px solid var(--line);padding:16px;cursor:pointer;box-shadow:0 8px 22px var(--shadow);position:relative;overflow:hidden">
+              <div style="position:absolute;top:0;left:0;right:0;height:4px;background:var(--chip)"><div style="height:100%;width:{{ activeFill }};background:var(--accent);border-radius:0 3px 3px 0;transition:width 1s linear"></div></div>
+              <div style="display:flex;align-items:center;gap:14px">
+                <div style="flex:none;width:62px;height:62px;border-radius:14px;background:repeating-linear-gradient(135deg,var(--ph1) 0 10px,var(--ph2) 10px 20px)"></div>
+                <div style="flex:1">
+                  <div style="font-size:12px;font-weight:700;color:var(--accent);display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:4px;background:var(--accent);animation:floaty 1.3s infinite"></span>{{ L.preparing }}</div>
+                  <div style="font-size:17px;font-weight:800;margin-top:3px">{{ restName }}</div>
+                  <div style="font-size:12.5px;color:var(--ink2);margin-top:2px">{{ activeItems }} · {{ L.arrives }} {{ readyTime }}</div>
+                </div>
+                <div style="text-align:right;flex:none">
+                  <div style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.5px">{{ countdownText }}</div>
+                  <div style="font-size:10.5px;color:var(--ink2);text-transform:uppercase;letter-spacing:.4px">{{ L.readyInShort }}</div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ noActive }}" hint-placeholder-val="{{ true }}">
+            <div style="margin-top:20px;border-radius:22px;background:var(--card);border:1px dashed var(--line);padding:26px 20px;text-align:center">
+              <div style="font-size:38px">🕒</div>
+              <div style="font-size:15px;font-weight:700;margin-top:6px">{{ L.noActive }}</div>
+              <div style="font-size:13px;color:var(--ink2);margin-top:3px">{{ L.noActiveDesc }}</div>
+            </div>
+          </sc-if>
+
+          <div style="font-size:13px;font-weight:700;margin-top:26px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2)">{{ L.pastOrders }}</div>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">
+            <sc-for list="{{ pastOrders }}" as="o" hint-placeholder-count="2">
+              <div style="display:flex;gap:13px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:11px;box-shadow:0 4px 14px var(--shadow)">
+                <div style="flex:none;width:58px;height:58px;border-radius:13px;background:repeating-linear-gradient(135deg,var(--ph1) 0 10px,var(--ph2) 10px 20px)"></div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:15px;font-weight:700">{{ o.name }}</div>
+                  <div style="font-size:12px;color:var(--ink2);margin-top:2px">{{ o.date }} · {{ o.items }}</div>
+                  <div style="font-size:13px;font-weight:700;margin-top:4px">{{ o.total }}</div>
+                </div>
+                <button onClick="{{ o.reorder }}" style-active="transform:scale(.93)" style="flex:none;height:36px;padding:0 15px;border-radius:18px;border:1px solid var(--accent);background:var(--accentSoft);color:var(--accent);font-size:13px;font-weight:700;cursor:pointer">{{ L.reorder }}</button>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ FAVORITES ============ -->
+        <sc-if value="{{ isFavorites }}" hint-placeholder-val="{{ false }}">
+        <div class="screen" style="padding:58px 20px 24px">
+          <div style="font-size:27px;font-weight:800;letter-spacing:-.6px">{{ L.favoritesTitle }}</div>
+          <div style="display:flex;flex-direction:column;gap:16px;margin-top:18px">
+            <sc-for list="{{ favorites }}" as="r" hint-placeholder-count="2">
+              <div onClick="{{ r.onClick }}" style-active="transform:scale(.985)" style="display:flex;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:12px;cursor:pointer;box-shadow:0 5px 16px var(--shadow)">
+                <div style="flex:none;width:88px;height:88px;border-radius:14px;background:repeating-linear-gradient(135deg,var(--ph1) 0 11px,var(--ph2) 11px 22px)"></div>
+                <div style="flex:1">
+                  <div style="font-size:16px;font-weight:700">{{ r.name }}</div>
+                  <div style="font-size:12.5px;color:var(--ink2);margin-top:3px">{{ r.meta }}</div>
+                  <div style="display:flex;gap:7px;margin-top:10px"><div style="background:var(--accentSoft);color:var(--accent);font-size:12px;font-weight:700;padding:5px 9px;border-radius:11px">⏱ {{ r.prep }}</div><div style="font-size:13px;font-weight:700;margin-top:4px"><span style="color:#F5A623">★</span> {{ r.rating }}</div></div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ PROFILE ============ -->
+        <sc-if value="{{ isProfile }}" hint-placeholder-val="{{ false }}">
+        <div class="screen" style="padding:58px 20px 24px">
+          <div style="display:flex;align-items:center;gap:15px">
+            <div style="width:66px;height:66px;border-radius:33px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;font-weight:800;box-shadow:0 8px 20px var(--shadow)">A</div>
+            <div>
+              <div style="font-size:22px;font-weight:800;letter-spacing:-.4px">Aram Petrosyan</div>
+              <div style="font-size:13.5px;color:var(--ink2);margin-top:2px">aram@amragrir.am</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:12px;margin-top:20px">
+            <div style="flex:1;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:15px;text-align:center;box-shadow:0 4px 14px var(--shadow)"><div style="font-size:22px;font-weight:800;color:var(--accent)">340</div><div style="font-size:12px;color:var(--ink2);margin-top:2px">{{ L.rewardPts }}</div></div>
+            <div style="flex:1;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:15px;text-align:center;box-shadow:0 4px 14px var(--shadow)"><div style="font-size:22px;font-weight:800">28</div><div style="font-size:12px;color:var(--ink2);margin-top:2px">{{ L.ordersStat }}</div></div>
+            <div style="flex:1;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:15px;text-align:center;box-shadow:0 4px 14px var(--shadow)"><div style="font-size:22px;font-weight:800">3</div><div style="font-size:12px;color:var(--ink2);margin-top:2px">{{ L.couponsStat }}</div></div>
+          </div>
+          <div onClick="{{ goReferral }}" style-active="transform:scale(.985)" style="margin-top:20px;border-radius:20px;padding:18px;cursor:pointer;background:linear-gradient(115deg,var(--accent),var(--accent2));position:relative;overflow:hidden;box-shadow:0 10px 24px var(--shadow);display:flex;align-items:center;gap:14px">
+            <div style="position:absolute;right:-24px;top:-24px;width:110px;height:110px;border-radius:55px;background:rgba(255,255,255,.14)"></div>
+            <span style="font-size:30px;position:relative">🎁</span>
+            <div style="flex:1;position:relative">
+              <div style="font-size:16px;font-weight:800;color:#fff">{{ L.ref.rowTitle }}</div>
+              <div style="font-size:12.5px;color:rgba(255,255,255,.9);margin-top:2px">{{ L.ref.rowSub }}</div>
+            </div>
+            <svg width="9" height="15" viewBox="0 0 8 14" style="position:relative"><path d="M1 1l6 6-6 6" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </div>
+
+          <div style="margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:15px 16px;display:flex;align-items:center;gap:13px;box-shadow:0 5px 16px var(--shadow)">
+            <span style="font-size:19px;width:24px;text-align:center">🌐</span>
+            <span style="flex:1;font-size:15.5px;font-weight:500">{{ L.language }}</span>
+            <div style="display:flex;gap:3px;background:var(--chip);border-radius:15px;padding:3px">
+              <sc-for list="{{ langBtns }}" as="lb" hint-placeholder-count="3">
+                <button onClick="{{ lb.onClick }}" style-active="transform:scale(.9)" style="{{ lb.style }}">{{ lb.code }}</button>
+              </sc-for>
+            </div>
+          </div>
+          <div style="margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 5px 16px var(--shadow)">
+            <sc-for list="{{ profileRows }}" as="row" hint-placeholder-count="5">
+              <div onClick="{{ row.onClick }}" style-active="transform:scale(.99)" style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid var(--line);cursor:pointer">
+                <span style="font-size:19px;width:24px;text-align:center">{{ row.icon }}</span>
+                <span style="flex:1;font-size:15.5px;font-weight:500">{{ row.label }}</span>
+                <svg width="8" height="14" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6" stroke="var(--ink3)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ REFERRAL ============ -->
+        <sc-if value="{{ isReferral }}" hint-placeholder-val="{{ false }}">
+        <div class="screen" style="padding:58px 20px 40px">
+          <button onClick="{{ back }}" style-active="transform:scale(.92)" style="width:42px;height:42px;border-radius:21px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer">
+            <svg width="12" height="20" viewBox="0 0 12 20" fill="none"><path d="M9 2L2 10l7 8" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </button>
+
+          <div style="margin-top:18px;border-radius:24px;padding:26px 22px;background:linear-gradient(135deg,var(--accent),var(--accent2));position:relative;overflow:hidden;box-shadow:0 14px 30px var(--shadow)">
+            <div style="position:absolute;right:-30px;top:-30px;width:150px;height:150px;border-radius:75px;background:rgba(255,255,255,.14)"></div>
+            <div style="position:absolute;left:-24px;bottom:-40px;width:110px;height:110px;border-radius:55px;background:rgba(255,255,255,.1)"></div>
+            <div style="position:relative">
+              <div style="font-size:44px;animation:floaty 2.6s infinite">🎁</div>
+              <div style="font-size:26px;font-weight:800;color:#fff;margin-top:10px;letter-spacing:-.5px">{{ L.ref.heroTitle }}</div>
+              <div style="font-size:13.5px;color:rgba(255,255,255,.92);margin-top:8px;line-height:1.45;text-wrap:pretty">{{ L.ref.heroSub }}</div>
+            </div>
+          </div>
+
+          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2);margin-top:24px">{{ L.ref.yourCode }}</div>
+          <div style="margin-top:11px;display:flex;gap:10px;align-items:stretch">
+            <div style="flex:1;min-width:0;background:var(--card);border:2px dashed var(--accent);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:16px 14px;font-size:14.5px;font-weight:700;color:var(--accent);word-break:break-all;text-align:center">{{ referralLink }}</div>
+            <button onClick="{{ copyCode }}" style-active="transform:scale(.94)" style="flex:none;width:96px;border-radius:16px;border:none;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px var(--shadow)">{{ copyLabel }}</button>
+          </div>
+
+          <button onClick="{{ copyCode }}" style-active="transform:scale(.98)" style="margin-top:12px;width:100%;height:54px;border-radius:16px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:15.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12v6a2 2 0 002 2h12a2 2 0 002-2v-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M12 3v12m0-12L8 7m4-4l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            {{ L.ref.share }}
+          </button>
+
+          <div style="display:flex;gap:12px;margin-top:16px">
+            <div style="flex:1;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;text-align:center;box-shadow:0 4px 14px var(--shadow)">
+              <div style="font-size:26px;font-weight:800;color:var(--accent)">{{ invitedCount }}</div>
+              <div style="font-size:12px;color:var(--ink2);margin-top:2px">{{ L.ref.invited }}</div>
+            </div>
+            <div style="flex:1;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;text-align:center;box-shadow:0 4px 14px var(--shadow)">
+              <div style="font-size:26px;font-weight:800;color:var(--good)">{{ earnedLabel }}</div>
+              <div style="font-size:12px;color:var(--ink2);margin-top:2px">{{ L.ref.earned }}</div>
+            </div>
+          </div>
+
+          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2);margin-top:26px">{{ L.ref.how }}</div>
+          <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
+            <sc-for list="{{ refSteps }}" as="st" hint-placeholder-count="3">
+              <div style="display:flex;gap:13px;align-items:flex-start">
+                <div style="flex:none;width:30px;height:30px;border-radius:15px;background:var(--accentSoft);color:var(--accent);font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:center">{{ st.n }}</div>
+                <div style="font-size:14px;color:var(--ink);line-height:1.4;padding-top:4px;text-wrap:pretty">{{ st.text }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ SETTINGS ============ -->
+        <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+        <div class="screen" style="padding:58px 20px 40px">
+          <div style="display:flex;align-items:center;gap:14px">
+            <button onClick="{{ back }}" style-active="transform:scale(.92)" style="width:42px;height:42px;border-radius:21px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none">
+              <svg width="12" height="20" viewBox="0 0 12 20" fill="none"><path d="M9 2L2 10l7 8" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <div style="font-size:27px;font-weight:800;letter-spacing:-.6px">{{ L.set.title }}</div>
+          </div>
+
+          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2);margin-top:24px">{{ L.set.prefs }}</div>
+          <div style="margin-top:12px;background:var(--card);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 5px 16px var(--shadow)">
+            <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid var(--line)">
+              <span style="font-size:19px;width:24px;text-align:center">{{ darkIcon }}</span>
+              <span style="flex:1;font-size:15.5px;font-weight:500">{{ L.set.darkMode }}</span>
+              <button onClick="{{ toggleDark }}" style-active="transform:scale(.96)" style="{{ darkTrack }}"><span style="{{ darkKnob }}"></span></button>
+            </div>
+            <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid var(--line)">
+              <span style="font-size:19px;width:24px;text-align:center">🔔</span>
+              <span style="flex:1;font-size:15.5px;font-weight:500">{{ L.set.notifications }}</span>
+              <button onClick="{{ toggleNotif }}" style-active="transform:scale(.96)" style="{{ notifTrack }}"><span style="{{ notifKnob }}"></span></button>
+            </div>
+            <div style="display:flex;align-items:center;gap:13px;padding:15px 16px">
+              <span style="font-size:19px;width:24px;text-align:center">✉️</span>
+              <span style="flex:1;font-size:15.5px;font-weight:500">{{ L.set.promos }}</span>
+              <button onClick="{{ togglePromo }}" style-active="transform:scale(.96)" style="{{ promoTrack }}"><span style="{{ promoKnob }}"></span></button>
+            </div>
+          </div>
+
+          <div style="margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:15px 16px;display:flex;align-items:center;gap:13px;box-shadow:0 5px 16px var(--shadow)">
+            <span style="font-size:19px;width:24px;text-align:center">🌐</span>
+            <span style="flex:1;font-size:15.5px;font-weight:500">{{ L.language }}</span>
+            <div style="display:flex;gap:3px;background:var(--chip);border-radius:15px;padding:3px">
+              <sc-for list="{{ langBtns }}" as="lb" hint-placeholder-count="3">
+                <button onClick="{{ lb.onClick }}" style-active="transform:scale(.9)" style="{{ lb.style }}">{{ lb.code }}</button>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2);margin-top:24px">{{ L.set.account }}</div>
+          <div style="margin-top:12px;background:var(--card);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 5px 16px var(--shadow)">
+            <sc-for list="{{ accountRows }}" as="row" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid var(--line)">
+                <span style="font-size:19px;width:24px;text-align:center">{{ row.icon }}</span>
+                <span style="flex:1;font-size:15.5px;font-weight:500">{{ row.label }}</span>
+                <svg width="8" height="14" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6" stroke="var(--ink3)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2);margin-top:24px">{{ L.set.about }}</div>
+          <div style="margin-top:12px;background:var(--card);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 5px 16px var(--shadow)">
+            <sc-for list="{{ aboutRows }}" as="row" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid var(--line)">
+                <span style="font-size:19px;width:24px;text-align:center">{{ row.icon }}</span>
+                <span style="flex:1;font-size:15.5px;font-weight:500">{{ row.label }}</span>
+                <svg width="8" height="14" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6" stroke="var(--ink3)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              </div>
+            </sc-for>
+          </div>
+
+          <button style-active="transform:scale(.98)" style="margin-top:20px;width:100%;height:52px;border-radius:16px;border:1px solid var(--line);background:var(--card);color:#E23755;font-size:15.5px;font-weight:700;cursor:pointer">{{ L.set.logout }}</button>
+          <div style="text-align:center;font-size:12px;color:var(--ink3);margin-top:16px">{{ L.set.version }}</div>
+        </div>
+        </sc-if>
+
+      </div>
+
+      <!-- ============ BOTTOM NAV ============ -->
+      <sc-if value="{{ showTabBar }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:none;display:flex;justify-content:space-around;align-items:center;padding:10px 8px 30px;background:var(--glass);backdrop-filter:blur(18px) saturate(180%);border-top:1px solid var(--line)">
+        <button onClick="{{ goHome }}" style-active="transform:scale(.9)" style="background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;color:{{ navHome }};padding:4px 12px">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M4 11l8-7 8 7v8a1.5 1.5 0 01-1.5 1.5H5.5A1.5 1.5 0 014 19v-8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>
+          <span style="font-size:10.5px;font-weight:600">{{ L.navHome }}</span>
+        </button>
+        <button onClick="{{ goSearch }}" style-active="transform:scale(.9)" style="background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;color:{{ navSearch }};padding:4px 12px">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle><path d="M20 20l-3.2-3.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+          <span style="font-size:10.5px;font-weight:600">{{ L.navSearch }}</span>
+        </button>
+        <button onClick="{{ goOrders }}" style-active="transform:scale(.9)" style="background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;color:{{ navOrders }};padding:4px 12px">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M6 3h12l-1 18H7L6 3z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M9 8h6M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+          <span style="font-size:10.5px;font-weight:600">{{ L.navOrders }}</span>
+        </button>
+        <button onClick="{{ goFavorites }}" style-active="transform:scale(.9)" style="background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;color:{{ navFav }};padding:4px 12px">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 20s-7-4.6-7-9.6A4.4 4.4 0 0112 7a4.4 4.4 0 017 3.4c0 5-7 9.6-7 9.6z" stroke="currentColor" stroke-width="2"></path></svg>
+          <span style="font-size:10.5px;font-weight:600">{{ L.navFavorites }}</span>
+        </button>
+        <button onClick="{{ goProfile }}" style-active="transform:scale(.9)" style="background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;color:{{ navProfile }};padding:4px 12px">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"></circle><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+          <span style="font-size:10.5px;font-weight:600">{{ L.navProfile }}</span>
+        </button>
+      </div>
+      </sc-if>
+
+      <!-- ============ FILTER SHEET ============ -->
+      <sc-if value="{{ showFilters }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;inset:0;z-index:40;display:flex;flex-direction:column;justify-content:flex-end">
+        <div onClick="{{ closeFilters }}" style="position:absolute;inset:0;background:rgba(0,0,0,.42);animation:fadeIn .2s"></div>
+        <div style="position:relative;background:var(--bg);border-radius:26px 26px 0 0;max-height:88%;display:flex;flex-direction:column;box-shadow:0 -10px 40px rgba(0,0,0,.3);animation:sheetUp .32s cubic-bezier(.22,.61,.36,1)">
+          <div style="padding:14px 20px 6px;flex:none">
+            <div style="width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px"></div>
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div style="font-size:21px;font-weight:800;letter-spacing:-.4px">{{ L.flt.title }}</div>
+              <button onClick="{{ closeFilters }}" style-active="transform:scale(.9)" style="width:34px;height:34px;border-radius:17px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center">✕</button>
+            </div>
+          </div>
+
+          <div style="overflow-y:auto;padding:14px 20px 12px;flex:1">
+            <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2)">{{ L.flt.sortBy }}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:11px">
+              <sc-for list="{{ sortOpts }}" as="o" hint-placeholder-count="4">
+                <button onClick="{{ o.onClick }}" style-active="transform:scale(.95)" style="{{ o.style }}">{{ o.label }}</button>
+              </sc-for>
+            </div>
+
+            <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:22px">
+              <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2)">{{ L.flt.price }}</div>
+              <div style="font-size:14px;font-weight:800;color:var(--accent)">{{ priceLabel }}</div>
+            </div>
+            <input type="range" min="4000" max="24000" step="1000" value="{{ priceMax }}" onInput="{{ setPrice }}" style="width:100%;margin-top:12px">
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink3);margin-top:4px"><span>{{ priceMin }}</span><span>{{ priceMaxCap }}</span></div>
+
+            <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:20px">
+              <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2)">{{ L.flt.distance }}</div>
+              <div style="font-size:14px;font-weight:800;color:var(--accent)">{{ distLabel }}</div>
+            </div>
+            <input type="range" min="0.5" max="5" step="0.5" value="{{ distMax }}" onInput="{{ setDist }}" style="width:100%;margin-top:12px">
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink3);margin-top:4px"><span>0.5 {{ L.km }}</span><span>5 {{ L.km }}</span></div>
+
+            <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2);margin-top:22px">{{ L.flt.rating }}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:11px">
+              <sc-for list="{{ ratingOpts }}" as="o" hint-placeholder-count="4">
+                <button onClick="{{ o.onClick }}" style-active="transform:scale(.95)" style="{{ o.style }}"><span>{{ o.icon }}</span>{{ o.label }}</button>
+              </sc-for>
+            </div>
+
+            <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2);margin-top:22px">{{ L.flt.dietary }}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:11px">
+              <sc-for list="{{ dietOpts }}" as="o" hint-placeholder-count="4">
+                <button onClick="{{ o.onClick }}" style-active="transform:scale(.95)" style="{{ o.style }}"><span>{{ o.icon }}</span>{{ o.label }}</button>
+              </sc-for>
+            </div>
+
+            <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2);margin-top:22px">{{ L.flt.service }}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:11px">
+              <sc-for list="{{ svcOpts }}" as="o" hint-placeholder-count="3">
+                <button onClick="{{ o.onClick }}" style-active="transform:scale(.95)" style="{{ o.style }}"><span>{{ o.icon }}</span>{{ o.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="flex:none;display:flex;gap:12px;align-items:center;padding:14px 20px 30px;border-top:1px solid var(--line);background:var(--bg)">
+            <button onClick="{{ resetFilters }}" style-active="transform:scale(.97)" style="flex:none;height:52px;padding:0 20px;border-radius:16px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:15px;font-weight:700;cursor:pointer">{{ L.flt.reset }}</button>
+            <button onClick="{{ closeFilters }}" style-active="transform:scale(.98)" style="flex:1;height:52px;border-radius:16px;border:none;background:var(--accent);color:#fff;font-size:15.5px;font-weight:700;cursor:pointer;box-shadow:0 10px 24px var(--shadow)">{{ L.flt.show }} · {{ resultCount }}</button>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ============ AUTH GATE ============ -->
+      <sc-if value="{{ notAuthed }}" hint-placeholder-val="{{ true }}">
+      <div style="position:absolute;inset:0;z-index:60;background:var(--bg);display:flex;flex-direction:column;overflow-y:auto">
+        <div style="height:230px;flex:none;position:relative;background:linear-gradient(150deg,var(--accent),var(--accent2));display:flex;flex-direction:column;justify-content:flex-end;padding:0 24px 26px">
+          <div style="position:absolute;right:-40px;top:-40px;width:190px;height:190px;border-radius:95px;background:rgba(255,255,255,.13)"></div>
+          <div style="position:absolute;left:30px;top:64px;width:70px;height:70px;border-radius:35px;background:rgba(255,255,255,.1)"></div>
+          <div style="position:relative;display:flex;align-items:center;gap:10px">
+            <svg width="38" height="38" viewBox="0 0 76 76" fill="none" style="flex:none"><path d="M36 6c-13 0-23 9.6-23 23 0 15.5 23 41 23 41s23-25.5 23-41C59 15.6 49 6 36 6Z" fill="#fff"></path><g stroke="var(--accent)" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M25 16v8M30 16v9M35 16v8" stroke-width="2.8"></path><path d="M25 24c0 3.4 2.2 5 5 5s5-1.6 5-5" stroke-width="2.8"></path><path d="M30 29v21" stroke-width="3.6"></path><path d="M46 50V34" stroke-width="3.6"></path></g><path d="M46 16c-3.4 0-5.2 3.4-5.2 7.6s1.8 6.4 5.2 6.4V16Z" fill="var(--accent)"></path><circle cx="58" cy="20" r="11" fill="var(--accent)" stroke="#fff" stroke-width="3"></circle><path d="M58 15v5l3.4 2.2" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            <div style="color:#fff;font-weight:800;font-size:18px;letter-spacing:-.3px">amragrir.am</div>
+          </div>
+          <div style="position:relative;color:#fff;font-size:24px;font-weight:800;letter-spacing:-.5px;margin-top:12px;max-width:260px;text-wrap:pretty">{{ L.auth.tagline }}</div>
+        </div>
+
+        <div style="flex:1;padding:22px 24px 30px">
+          <div style="display:flex;gap:4px;background:var(--chip);border-radius:15px;padding:4px">
+            <button onClick="{{ setLogin }}" style-active="transform:scale(.97)" style="{{ loginTab }}">{{ L.auth.login }}</button>
+            <button onClick="{{ setRegister }}" style-active="transform:scale(.97)" style="{{ registerTab }}">{{ L.auth.register }}</button>
+          </div>
+
+          <sc-if value="{{ isRegister }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:20px">
+              <div style="font-size:12.5px;font-weight:700;color:var(--ink2);margin-bottom:8px">{{ L.auth.name }}</div>
+              <input value="{{ name }}" onInput="{{ setName }}" placeholder="{{ L.auth.namePh }}" style="{{ inputStyle }}">
+            </div>
+          </sc-if>
+
+          <div style="margin-top:18px">
+            <div style="font-size:12.5px;font-weight:700;color:var(--ink2);margin-bottom:8px">{{ L.auth.phone }}</div>
+            <div style="display:flex;align-items:center;height:52px;border-radius:14px;border:1px solid var(--line);background:var(--card);padding:0 8px 0 14px;box-sizing:border-box">
+              <span style="font-size:15.5px;font-weight:700;color:var(--ink)">+374</span>
+              <div style="width:1px;height:24px;background:var(--line);margin:0 12px"></div>
+              <input value="{{ phone }}" onInput="{{ setPhone }}" type="tel" placeholder="{{ L.auth.phonePh }}" style="flex:1;height:100%;border:none;background:transparent;color:var(--ink);font-size:15.5px;outline:none;letter-spacing:.5px">
+            </div>
+          </div>
+
+          <div style="font-size:12.5px;color:var(--ink3);margin-top:12px;line-height:1.4;text-wrap:pretty">{{ L.auth.otpNote }}</div>
+
+          <button onClick="{{ submitAuth }}" style-active="transform:scale(.98)" style="margin-top:20px;width:100%;height:54px;border-radius:16px;border:none;background:var(--accent);color:#fff;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 12px 26px var(--shadow)">{{ submitLabel }}</button>
+
+          <div style="display:flex;align-items:center;gap:12px;margin:22px 0">
+            <div style="flex:1;height:1px;background:var(--line)"></div>
+            <div style="font-size:12px;color:var(--ink3);font-weight:600">{{ L.auth.or }}</div>
+            <div style="flex:1;height:1px;background:var(--line)"></div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ socials }}" as="sn" hint-placeholder-count="2">
+              <button onClick="{{ sn.onClick }}" style-active="transform:scale(.98)" style="width:100%;height:52px;border-radius:16px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px"><span style="font-size:18px">{{ sn.icon }}</span>{{ sn.label }}</button>
+            </sc-for>
+          </div>
+
+          <div style="text-align:center;font-size:11.5px;color:var(--ink3);margin-top:22px;line-height:1.5;text-wrap:pretty">{{ L.auth.terms }}</div>
+          <button onClick="{{ skipAuth }}" style-active="transform:scale(.98)" style="margin:16px auto 0;display:block;border:none;background:transparent;color:var(--ink2);font-size:13.5px;font-weight:700;cursor:pointer">{{ L.auth.guest }}</button>
+        </div>
+      </div>
+      </sc-if>
+
+    </div>
+  </x-import>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;820px&quot;,&quot;height&quot;:&quot;1020px&quot;},&quot;signature&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;Amber&quot;,&quot;options&quot;:[&quot;Amber&quot;,&quot;Coral&quot;,&quot;Forest&quot;,&quot;Indigo&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Feel&quot;},&quot;surface&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;Warm cream&quot;,&quot;options&quot;:[&quot;Warm cream&quot;,&quot;Paper white&quot;,&quot;Cool slate&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Feel&quot;},&quot;depth&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;Soft &amp; floaty&quot;,&quot;options&quot;:[&quot;Soft &amp; floaty&quot;,&quot;Crisp &amp; flat&quot;,&quot;Bold shadows&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Feel&quot;}}">
+class Component extends DCLogic {
+  state = {
+    dark: false, lang: 'hy', screen: 'home', tab: 'home', loaded: false,
+    authed: false, authMode: 'login', phone: '', name: '',
+    categoryIdx: -1, filterIdxs: [0, 1, 2], menuCat: 'Popular',
+    showFilters: false, sortBy: 0, priceMax: 12000, distMax: 3, minRating: 0, dietary: [], svcFilters: [],
+    cart: {}, mode: 'pickup', guests: 2, reserveTs: null, calY: null, calM: null,
+    reserveTime: '12:30', readyTime: '12:30', payment: 'apple',
+    secondsLeft: 480, placed: false, refCopied: false, notif: true, promoEmails: false,
+    orderStatus: 'confirmed', payFailed: false,
+  };
+
+  CATS = ['🍕','🍔','🥗','🍣','🥩','🍜','🥐','🥙','🍝','🥤','🍰'];
+  MENUKEYS = ['Popular','Mains','Sides','Drinks'];
+  PAYIDS = ['apple','google','card'];
+  RESTAURANTS = [
+    { id:'sunny', name:'Sunny Table', rating:'4.8', reviews:'1.2k', distKm:'0.4', prepMin:12, price:'$$', open:true, reserve:true, photo:'MEDITERRANEAN PLATTER', svc:['pickup','dinein','reserve'] },
+    { id:'noba', name:'Noba Sushi', rating:'4.9', reviews:'880', distKm:'0.7', prepMin:18, price:'$$$', open:true, reserve:true, photo:'SUSHI SELECTION', svc:['pickup','reserve'] },
+    { id:'flame', name:'Flame & Co.', rating:'4.7', reviews:'640', distKm:'1.1', prepMin:22, price:'$$$', open:true, reserve:false, photo:'GRILLED STEAK', svc:['pickup','dinein'] },
+    { id:'green', name:'Greenhouse', rating:'4.6', reviews:'510', distKm:'0.9', prepMin:9, price:'$$', open:false, reserve:false, photo:'POWER BOWL', svc:['pickup'] },
+  ];
+  DISHES = [
+    { id:'d1', cat:'Popular', calKcal:520, prepMin:12, price:14.5, photo:'LEMON CHICKEN' },
+    { id:'d2', cat:'Popular', calKcal:610, prepMin:8, price:11.0, photo:'FALAFEL WRAP' },
+    { id:'d3', cat:'Mains', calKcal:640, prepMin:15, price:18.0, photo:'HARISSA SALMON' },
+    { id:'d4', cat:'Sides', calKcal:430, prepMin:7, price:6.5, photo:'TRUFFLE FRIES' },
+    { id:'d5', cat:'Drinks', calKcal:90, prepMin:2, price:4.0, photo:'ORANGE SODA' },
+  ];
+
+  I18N = {
+    en: {
+      code:'EN', brandTag:'Order now. Eat exactly when you arrive.', dark:'Dark', light:'Light',
+      navHome:'Home', navSearch:'Search', navOrders:'Orders', navFavorites:'Favorites', navProfile:'Profile',
+      greeting:'Good afternoon, Aram', question:'What would you like to eat today?',
+      searchPh:'Search restaurants, cuisine or dishes…', location:'Yerevan · Northern Ave',
+      nearby:'Nearby restaurants', seeAll:'See all', promoTag:'SKIP THE LINE',
+      promoLine1:'Pre-order your lunch.', promoLine2:'Ready when you arrive.', orderAhead:'Order ahead',
+      open:'Open', closed:'Closed', km:'km', min:'min', kcal:'kcal',
+      cats:['Pizza','Burgers','Healthy','Sushi','Grill','Asian','Breakfast','Lunch','Pasta','Drinks','Desserts'],
+      filters:['Near Me','Ready in 15 min','Open Now','Reserve Table','Pickup','Dine In','Special Offers','Highest Rated'],
+      svc:{ pickup:'Pickup', dinein:'Dine-in', reserve:'Reserve' },
+      restCuisine:{ sunny:'Mediterranean', noba:'Japanese · Sushi', flame:'Grill · Steak', green:'Healthy · Bowls' },
+      reviewsWord:'reviews', prepWord:'prep', prepTimeWord:'prep time', openNow:'Open now',
+      menuTabs:['Popular','Mains','Sides','Drinks'],
+      dishNames:['Charred Lemon Chicken','Smashed Falafel Wrap','Harissa Salmon','Truffle Fries','Blood Orange Soda'],
+      dishDescs:['Free-range chicken, charred lemon, herb yogurt.','Crispy falafel, tahini, quick-pickled slaw.','Roasted salmon, harissa glaze, charred greens.','Hand-cut fries, truffle oil, aged parmesan.','House-made, lightly sparkling, not too sweet.'],
+      basket:'Basket', each:'each', addMoreItems:'＋ Add more items', subtotal:'Subtotal', service:'Service', total:'Total',
+      chooseTime:'Choose time', viewBasket:'View basket', continueCheckout:'Continue to checkout',
+      emptyTitle:'Your basket is empty', emptyDesc:'Find something nearby and pre-order it for the moment you arrive.', browse:'Browse restaurants',
+      whenHow:'When & how', howLikeIt:'How would you like it?', pickup:'Pickup', pickupSub:'Grab & go at counter',
+      dineIn:'Dine In', dineSub:'Reserve a table', reservationTime:'Reservation time', guests:'Guests', foodReadyAt:'Food ready at',
+      kitchenNote:"We'll time the kitchen so it's fresh the moment you arrive.",
+      readyForPickup:'Ready for pickup at', tableFor:'Table for', foodReady:'food ready',
+      dateWord:'Date', today:'Today', tomorrow:'Tomorrow', tableDeposit:'Table deposit', appliedToBill:'credited to bill',
+      depositNote:'The deposit secures your table and is fully credited toward your final check — not an extra charge.',
+      depositCredit:'Credited toward your final check', perGuest:'per guest',
+      checkout:'Checkout', readyAt:'Ready at', pickupWord:'Pickup', tableWord:'Table', atCounter:'At counter', guestsWord:'guests', payment:'Payment',
+      payNames:['Apple Pay','Google Pay','Credit Card'], pay:'Pay', placeOrder:'Place order', payNow:'Pay now',
+      orderConfirmed:'Order confirmed', readyIn:'Ready in', arrives:'arrives',
+      steps:['Confirmed','Preparing','Almost ready','Ready'],
+      track:{ status:{ created:'Awaiting payment', paid:'Payment received', confirmed:'Order confirmed', preparing:'Preparing your food', almost_ready:'Almost ready', ready:'Ready for pickup', completed:'Completed', cancelled:'Order cancelled' }, statusDesc:{ created:'Your order is saved but not paid yet.', paid:"We've received your payment.", confirmed:'The kitchen accepted your order.', preparing:'Your food is being cooked fresh.', almost_ready:'Final touches — almost done.', ready:'Come pick it up at the counter.', completed:'Enjoy your meal!', cancelled:'This order was cancelled before payment.' }, stageLabels:['Confirmed','Preparing','Almost','Ready','Done'], unpaidTitle:'You have an unpaid order', unpaidDesc:'Complete payment to send it to the kitchen. Nothing is prepared until you pay.', payNow:'Pay now', cancelOrder:'Cancel order', noRefundNote:"Paid orders can't be cancelled or refunded.", cannotCancel:'Cancellation unavailable', retryTitle:'Payment failed', retryDesc:'Your card was declined. Your order is saved — try another method.', retry:'Retry payment', preorderAccepted:'Pre-order accepted', cookStartsAt:'Cooking starts', reviewStatus:'Preview status', backToOrders:'Back to orders' },
+      pickupCodeWord:'Pickup code', showCounter:'Show this at the counter.', pickupExpress:'Pickup at the express counter.',
+      tableReserved:'Your table #12 is reserved for', done:'Done',
+      ordersTitle:'Orders', active:'Active', preparing:'Preparing', readyInShort:'ready in',
+      noActive:'No active orders', noActiveDesc:"Pre-order and it'll show up here with a live countdown.",
+      pastOrders:'Past orders', reorder:'Reorder', pastDates:['Yesterday','Mar 12','Mar 08'], item:'item', items:'items',
+      searchTitle:'Search', browseCuisine:'Browse by cuisine', popularNear:'Popular near you',
+      popular:['Lunch deals','Sushi','Poke bowls','Ramen','Cold brew','Vegan'],
+      favoritesTitle:'Favorites', rewardPts:'Reward pts', ordersStat:'Orders', couponsStat:'Coupons', language:'Language',
+      flt:{ title:'Filters', sortBy:'Sort by', sort:['Recommended','Nearest','Fastest','Top rated'], price:'Price per person', distance:'Max distance', rating:'Minimum rating', any:'Any', dietary:'Dietary', diet:['Vegetarian','Vegan','Halal','Gluten-free'], service:'Service', svc:['Pickup','Dine-in','Reserve'], reset:'Reset', show:'Show', results:'results' },
+      profileRows:['Payment methods','Favorite restaurants','Order history','Rewards & coupons','Settings'],
+      ref:{ rowTitle:'Refer & earn 2%', rowSub:'Invite friends, you both save', heroTitle:'Give 2%, get 2%', heroSub:'Share your code. When a friend places their first order, you both get 2% off your next one.', yourCode:'Your invite link', copy:'Copy', copied:'Copied!', share:'Share invite', invited:'Friends joined', earned:'Discount earned', how:'How it works', steps:['Share your personal code with a friend','They get 2% off their first order','You get 2% off your next order — stackable up to 25%'] },
+      set:{ title:'Settings', prefs:'Preferences', darkMode:'Dark mode', notifications:'Push notifications', promos:'Promotional emails', account:'Account', editProfile:'Edit profile', payments:'Payment methods', addresses:'Delivery addresses', about:'About', help:'Help center', terms:'Terms of Service', privacy:'Privacy policy', logout:'Log out', version:'Version 2.4.0' },
+      auth:{ tagline:'Great food, ready right when you arrive.', login:'Log in', register:'Sign up', name:'Full name', namePh:'Aram Petrosyan', phone:'Phone number', phonePh:'99 123 456', otpNote:"We'll text you a one-time code to verify your number.", continueBtn:'Continue', or:'OR', continueWith:'Continue with', terms:'By continuing you agree to our Terms of Service and Privacy Policy.', guest:'Continue as guest' },
+    },
+    ru: {
+      code:'RU', brandTag:'Закажите сейчас. Ешьте точно по прибытии.', dark:'Тёмная', light:'Светлая',
+      navHome:'Главная', navSearch:'Поиск', navOrders:'Заказы', navFavorites:'Избранное', navProfile:'Профиль',
+      greeting:'Добрый день, Арам', question:'Что бы вы хотели поесть сегодня?',
+      searchPh:'Поиск ресторанов, кухни или блюд…', location:'Ереван · Северный пр.',
+      nearby:'Рестораны рядом', seeAll:'Все', promoTag:'БЕЗ ОЧЕРЕДИ',
+      promoLine1:'Закажите обед заранее.', promoLine2:'Готово к вашему приходу.', orderAhead:'Заказать заранее',
+      open:'Открыто', closed:'Закрыто', km:'км', min:'мин', kcal:'ккал',
+      cats:['Пицца','Бургеры','Здоровое','Суши','Гриль','Азиатская','Завтрак','Обед','Паста','Напитки','Десерты'],
+      filters:['Рядом','Готово за 15 мин','Открыто','Столик','Навынос','В зале','Акции','Высокий рейтинг'],
+      svc:{ pickup:'Навынос', dinein:'В зале', reserve:'Столик' },
+      restCuisine:{ sunny:'Средиземноморская', noba:'Японская · Суши', flame:'Гриль · Стейк', green:'Здоровая · Боулы' },
+      reviewsWord:'отзывов', prepWord:'готовка', prepTimeWord:'время готовки', openNow:'Открыто сейчас',
+      menuTabs:['Популярное','Основные','Гарниры','Напитки'],
+      dishNames:['Курица с лимоном','Ролл с фалафелем','Лосось с харисой','Картофель с трюфелем','Апельсиновая газировка'],
+      dishDescs:['Фермерская курица, обугленный лимон, йогурт с травами.','Хрустящий фалафель, тахини, маринованный салат.','Запечённый лосось, глазурь из харисы, зелень.','Картофель фри, трюфельное масло, пармезан.','Домашняя, слегка газированная, не слишком сладкая.'],
+      basket:'Корзина', each:'за шт.', addMoreItems:'＋ Добавить ещё', subtotal:'Сумма', service:'Сервис', total:'Итого',
+      chooseTime:'Выбрать время', viewBasket:'Корзина', continueCheckout:'Перейти к оплате',
+      emptyTitle:'Корзина пуста', emptyDesc:'Найдите что-то рядом и закажите заранее к вашему приходу.', browse:'Смотреть рестораны',
+      whenHow:'Когда и как', howLikeIt:'Как вам удобнее?', pickup:'Навынос', pickupSub:'Забрать у стойки',
+      dineIn:'В зале', dineSub:'Забронировать столик', reservationTime:'Время брони', guests:'Гости', foodReadyAt:'Еда готова к',
+      kitchenNote:'Мы рассчитаем время, чтобы блюдо было свежим к вашему приходу.',
+      readyForPickup:'Готово к выдаче в', tableFor:'Столик на', foodReady:'еда готова',
+      dateWord:'Дата', today:'Сегодня', tomorrow:'Завтра', tableDeposit:'Депозит за столик', appliedToBill:'зачтётся в счёт',
+      depositNote:'Депозит закрепляет столик и полностью засчитывается в итоговый счёт — не дополнительная плата.',
+      depositCredit:'Засчитывается в итоговый счёт', perGuest:'за гостя',
+      checkout:'Оформление', readyAt:'Готово к', pickupWord:'Навынос', tableWord:'Столик', atCounter:'У стойки', guestsWord:'гостей', payment:'Оплата',
+      payNames:['Apple Pay','Google Pay','Банковская карта'], pay:'Оплатить', placeOrder:'Оформить заказ', payNow:'Оплатить',
+      orderConfirmed:'Заказ подтверждён', readyIn:'Готово через', arrives:'к',
+      steps:['Принят','Готовится','Почти готово','Готово'],
+      track:{ status:{ created:'Ожидает оплаты', paid:'Оплата получена', confirmed:'Заказ подтверждён', preparing:'Готовим ваш заказ', almost_ready:'Почти готово', ready:'Готово к выдаче', completed:'Завершён', cancelled:'Заказ отменён' }, statusDesc:{ created:'Заказ сохранён, но ещё не оплачен.', paid:'Мы получили вашу оплату.', confirmed:'Кухня приняла ваш заказ.', preparing:'Ваше блюдо готовится.', almost_ready:'Последние штрихи — почти готово.', ready:'Заберите у стойки.', completed:'Приятного аппетита!', cancelled:'Заказ отменён до оплаты.' }, stageLabels:['Принят','Готовим','Почти','Готово','Готов'], unpaidTitle:'У вас есть неоплаченный заказ', unpaidDesc:'Оплатите, чтобы отправить его на кухню. До оплаты ничего не готовится.', payNow:'Оплатить', cancelOrder:'Отменить заказ', noRefundNote:'Оплаченные заказы нельзя отменить или вернуть.', cannotCancel:'Отмена недоступна', retryTitle:'Платёж не прошёл', retryDesc:'Карта отклонена. Заказ сохранён — попробуйте другой способ.', retry:'Повторить оплату', preorderAccepted:'Предзаказ принят', cookStartsAt:'Готовка начнётся', reviewStatus:'Просмотр статуса', backToOrders:'К заказам' },
+      pickupCodeWord:'Код получения', showCounter:'Покажите на стойке.', pickupExpress:'Получение на экспресс-стойке.',
+      tableReserved:'Ваш столик №12 забронирован на', done:'Готово',
+      ordersTitle:'Заказы', active:'Активные', preparing:'Готовится', readyInShort:'готово через',
+      noActive:'Нет активных заказов', noActiveDesc:'Закажите заранее — заказ появится здесь с таймером.',
+      pastOrders:'История заказов', reorder:'Повторить', pastDates:['Вчера','12 мар','08 мар'], item:'поз.', items:'поз.',
+      searchTitle:'Поиск', browseCuisine:'По кухне', popularNear:'Популярное рядом',
+      popular:['Обеды','Суши','Поке','Рамен','Колд брю','Веган'],
+      favoritesTitle:'Избранное', rewardPts:'Баллы', ordersStat:'Заказы', couponsStat:'Купоны', language:'Язык',
+      flt:{ title:'Фильтры', sortBy:'Сортировка', sort:['Рекомендуемые','Ближайшие','Быстрые','Топ рейтинг'], price:'Цена на человека', distance:'Макс. расстояние', rating:'Мин. рейтинг', any:'Любой', dietary:'Питание', diet:['Вегетарианское','Веган','Халяль','Без глютена'], service:'Формат', svc:['Навынос','В зале','Столик'], reset:'Сбросить', show:'Показать', results:'рестор.' },
+      profileRows:['Способы оплаты','Любимые рестораны','История заказов','Награды и купоны','Настройки'],
+      ref:{ rowTitle:'Приглашай и получи 2%', rowSub:'Приведи друга — экономите оба', heroTitle:'Дай 2%, получи 2%', heroSub:'Поделись кодом. Когда друг сделает первый заказ, вы оба получите 2% на следующий.', yourCode:'Ваша ссылка', copy:'Копия', copied:'Скопировано!', share:'Поделиться', invited:'Друзей пришло', earned:'Скидка накоплена', how:'Как это работает', steps:['Поделись личным кодом с другом','Он получит 2% на первый заказ','Ты получишь 2% на следующий — до 25%'] },
+      set:{ title:'Настройки', prefs:'Предпочтения', darkMode:'Тёмная тема', notifications:'Push-уведомления', promos:'Рекламные письма', account:'Аккаунт', editProfile:'Редактировать профиль', payments:'Способы оплаты', addresses:'Адреса доставки', about:'О приложении', help:'Помощь', terms:'Условия использования', privacy:'Политика конфиденциальности', logout:'Выйти', version:'Версия 2.4.0' },
+      auth:{ tagline:'Вкусная еда, готовая к вашему приходу.', login:'Вход', register:'Регистрация', name:'Имя и фамилия', namePh:'Арам Петросян', phone:'Номер телефона', phonePh:'99 123 456', otpNote:'Мы отправим одноразовый код для подтверждения номера.', continueBtn:'Продолжить', or:'ИЛИ', continueWith:'Продолжить с', terms:'Продолжая, вы соглашаетесь с Условиями и Политикой конфиденциальности.', guest:'Продолжить как гость' },
+    },
+    hy: {
+      code:'ՀՅ', brandTag:'Պատվիրիր հիմա։ Կեր հենց ժամանելուդ պահին։', dark:'Մուգ', light:'Բաց',
+      navHome:'Գլխավոր', navSearch:'Որոնում', navOrders:'Պատվերներ', navFavorites:'Ընտրված', navProfile:'Պրոֆիլ',
+      greeting:'Բարի օր, Արամ', question:'Ի՞նչ կցանկանաս ուտել այսօր',
+      searchPh:'Փնտրիր ռեստորան, խոհանոց կամ ուտեստ…', location:'Երևան · Հյուսիսային պող.',
+      nearby:'Մոտակա ռեստորանները', seeAll:'Բոլորը', promoTag:'ԱՌԱՆՑ ՀԵՐԹԻ',
+      promoLine1:'Պատվիրիր ճաշդ նախապես։', promoLine2:'Պատրաստ՝ ժամանելուդ պահին։', orderAhead:'Պատվիրել նախապես',
+      open:'Բաց', closed:'Փակ', km:'կմ', min:'ր', kcal:'կկալ',
+      cats:['Պիցցա','Բուրգեր','Առողջ','Սուշի','Գրիլ','Ասիական','Նախաճաշ','Ճաշ','Մակարոն','Ըմպելիք','Աղանդեր'],
+      filters:['Մոտակա','Պատրաստ 15 ր','Բաց է','Ամրագրել սեղան','Տանել','Տեղում','Առաջարկներ','Բարձր վարկանիշ'],
+      svc:{ pickup:'Տանել', dinein:'Տեղում', reserve:'Ամրագրում' },
+      restCuisine:{ sunny:'Միջերկրածովյան', noba:'Ճապոնական · Սուշի', flame:'Գրիլ · Սթեյք', green:'Առողջ · Բոուլ' },
+      reviewsWord:'կարծիք', prepWord:'պատրաստում', prepTimeWord:'պատրաստման ժամանակ', openNow:'Բաց է հիմա',
+      menuTabs:['Հանրաճանաչ','Հիմնական','Կողմնակի','Ըմպելիք'],
+      dishNames:['Հավ լիմոնով','Ֆալաֆելով փաթաթան','Սաղմոն հարիսայով','Կարտոֆիլ թրյուֆելով','Նարնջի գազավորված'],
+      dishDescs:['Ֆերմերային հավ, խորոված լիմոն, յոգուրտ խոտաբույսերով։','Խրթխրթան ֆալաֆել, թահինի, թթու կաղամբ։','Թխած սաղմոն, հարիսայի սոուս, կանաչի։','Ձեռքով կտրված կարտոֆիլ, թրյուֆել, պարմեզան։','Տնական, թեթև գազավորված, ոչ շատ քաղցր։'],
+      basket:'Զամբյուղ', each:'հատը', addMoreItems:'＋ Ավելացնել ևս', subtotal:'Ընդամենը', service:'Սպասարկում', total:'Վերջնական',
+      chooseTime:'Ընտրել ժամ', viewBasket:'Զամբյուղ', continueCheckout:'Անցնել վճարման',
+      emptyTitle:'Զամբյուղը դատարկ է', emptyDesc:'Գտիր մոտակա տեղ և պատվիրիր նախապես՝ ժամանելուդ պահին։', browse:'Դիտել ռեստորանները',
+      whenHow:'Ե՞րբ և ինչպես', howLikeIt:'Ինչպե՞ս է հարմար', pickup:'Տանել', pickupSub:'Վերցնել վահանակից',
+      dineIn:'Տեղում', dineSub:'Ամրագրել սեղան', reservationTime:'Ամրագրման ժամ', guests:'Հյուրեր', foodReadyAt:'Ուտեստը պատրաստ՝',
+      kitchenNote:'Կհաշվարկենք ժամանակը, որ ուտեստը թարմ լինի ժամանելուդ պահին։',
+      readyForPickup:'Պատրաստ ստանալու՝', tableFor:'Սեղան', foodReady:'ուտեստը՝',
+      dateWord:'Ամսաթիվ', today:'Այսօր', tomorrow:'Փաղը', tableDeposit:'Սեղանի կանխավճար', appliedToBill:'կհաշվվի հաշվին',
+      depositNote:'Կանխավճարը ամրագրում է սեղանը և ամբողջությամբ հաշվվում է վերջնական հաշվին՝ ոչ թե լրացուցիչ վճար։',
+      depositCredit:'Հաշվվում է վերջնական հաշվին', perGuest:'մեկ հյուրի',
+      checkout:'Վճարում', readyAt:'Պատրաստ՝', pickupWord:'Տանել', tableWord:'Սեղան', atCounter:'Վահանակի մոտ', guestsWord:'հյուր', payment:'Վճարում',
+      payNames:['Apple Pay','Google Pay','Բանկային քարտ'], pay:'Վճարել', placeOrder:'Ձևակերպել', payNow:'Վճարել հիմա',
+      orderConfirmed:'Պատվերը հաստատված է', readyIn:'Պատրաստ՝', arrives:'ժամը',
+      steps:['Հաստատված','Պատրաստվում է','Շուտով պատրաստ','Պատրաստ'],
+      track:{ status:{ created:'Սպասում է վճարման', paid:'Վճարումն ստացվեց', confirmed:'Պատվերը հաստատված է', preparing:'Պատրաստում ենք', almost_ready:'Գրեթե պատրաստ է', ready:'Պատրաստ է ստանալու', completed:'Ավարտված', cancelled:'Պատվերը չեղարկված է' }, statusDesc:{ created:'Պատվերը պահված է, բայց դեռ վճարված չէ։', paid:'Ստացանք ձեր վճարումը։', confirmed:'Խոհանոցն ընդունեց պատվերը։', preparing:'Ուտեստը պատրաստվում է։', almost_ready:'Վերջին շտրիխները՝ գրեթե պատրաստ է։', ready:'Վերցրեք վահանակից։', completed:'Բարի ախորժակ։', cancelled:'Պատվերը չեղարկվել է մինչ վճարումը։' }, stageLabels:['Հաստատ.','Պատր.','Գրեթե','Պատրաստ','Ավարտ'], unpaidTitle:'Դուք ունեք չվճարված պատվեր', unpaidDesc:'Վճարեք՝ խոհանոց ուղարկելու համար։ Մինչ վճարումը ոչինչ չի պատրաստվում։', payNow:'Վճարել հիմա', cancelOrder:'Չեղարկել պատվերը', noRefundNote:'Վճարված պատվերները հնարավոր չէ չեղարկել կամ վերադարձնել։', cannotCancel:'Չեղարկումն անհասանելի է', retryTitle:'Վճարումը ձախողվեց', retryDesc:'Քարտը մերժվեց։ Պատվերը պահված է՝ փորձեք այլ եղանակ։', retry:'Կրկնել վճարումը', preorderAccepted:'Նախնական պատվերն ընդունված է', cookStartsAt:'Պատրաստումը կսկսվի', reviewStatus:'Դիտել կարգավիճակը', backToOrders:'Դեպի պատվերներ' },
+      pickupCodeWord:'Ստացման կոդ', showCounter:'Ցույց տուր վահանակի մոտ։', pickupExpress:'Ստացումը՝ էքսպրես վահանակից։',
+      tableReserved:'Ձեր #12 սեղանն ամրագրված է', done:'Պատրաստ է',
+      ordersTitle:'Պատվերներ', active:'Ընթացիկ', preparing:'Պատրաստվում է', readyInShort:'պատրաստ՝',
+      noActive:'Ընթացիկ պատվեր չկա', noActiveDesc:'Պատվիրիր նախապես, և այն կհայտնվի այստեղ՝ հաշվարկով։',
+      pastOrders:'Անցյալ պատվերներ', reorder:'Կրկնել', pastDates:['Երեկ','12 մար','08 մար'], item:'հատ', items:'հատ',
+      searchTitle:'Որոնում', browseCuisine:'Ըստ խոհանոցի', popularNear:'Հանրաճանաչ մոտակայքում',
+      popular:['Ճաշի առաջարկ','Սուշի','Պոկե','Ռամեն','Սառը սուրճ','Վեգան'],
+      favoritesTitle:'Ընտրված', rewardPts:'Միավոր', ordersStat:'Պատվեր', couponsStat:'Կտրոն', language:'Լեզու',
+      flt:{ title:'Զտիչներ', sortBy:'Դասավորել', sort:['Առաջարկվող','Մոտակա','Արագ','Բարձր վարկանիշ'], price:'Գին մեկ անձի', distance:'Առավ. հեռավորություն', rating:'Նվազ. վարկանիշ', any:'Ցանկացած', dietary:'Սնունդ', diet:['Բուսակեր','Վեգան','Հալալ','Առանց գլյուտեն'], service:'Ձևաչափ', svc:['Տանել','Տեղում','Ամրագրում'], reset:'Զրոյացնել', show:'Ցուցադրել', results:'ռեստ.' },
+      profileRows:['Վճարման եղանակներ','Սիրելի ռեստորաններ','Պատվերների պատմություն','Պարգևներ և կտրոններ','Կարգավորումներ'],
+      ref:{ rowTitle:'Հրավիրիր և ստացիր 2%', rowSub:'Հրավիրիր ընկերոջ՝ երկուսդ էլ խնայում եք', heroTitle:'Տուր 2%, ստացիր 2%', heroSub:'Կիսվիր կոդով։ Երբ ընկերդ անի առաջին պատվերը, երկուսդ էլ կստանաք 2% հաջորդի համար։', yourCode:'Քո հղումը', copy:'Պատճենել', copied:'Պատճենվեց', share:'Կիսվել', invited:'Միացած ընկերներ', earned:'Կուտակած զեղչ', how:'Ինչպես է աշխատում', steps:['Կիսվիր անձնական կոդով ընկերոջ հետ','Նա կստանա 2% առաջին պատվերին','Դու կստանաս 2% հաջորդին՝ մինչև 25%'] },
+      set:{ title:'Կարգավորումներ', prefs:'Նախապատվություններ', darkMode:'Մուգ տեսք', notifications:'Push ծանուցումներ', promos:'Գովազդային նամակներ', account:'Հաշիվ', editProfile:'Խմբագրել պրոֆիլը', payments:'Վճարման եղանակներ', addresses:'Առաքման հասցեներ', about:'Հավելվածի մասին', help:'Օգնության կենտրոն', terms:'Օգտագործման պայմաններ', privacy:'Գաղտնիության քաղաքականություն', logout:'Դուրս գալ', version:'Տարբերակ 2.4.0' },
+      auth:{ tagline:'Համեղ ուտեստ՝ պատրաստ հենց այն պահին, երբ կժամանես։', login:'Մուտք', register:'Գրանցում', name:'Անուն, ազգանուն', namePh:'Արամ Պետրոսյան', phone:'Հեռախոսահամար', phonePh:'99 123 456', otpNote:'Մենք կուղարկենք միանվագյա կոդ՝ համարը հաստատելու համար։', continueBtn:'Շարունակել', or:'ԿԱՄ', continueWith:'Շարունակել՝', terms:'Շարունակելով՝ դուք համաձայն եք պայմաններին և գաղտնիության քաղաքականությանը։', guest:'Շարունակել որպես հյուր' },
+    },
+  };
+
+  componentDidMount() {
+    this._to = setTimeout(() => this.setState({ loaded: true }), 950);
+    this._iv = setInterval(() => {
+      const s = this.state;
+      if (s.screen === 'tracking' && (s.orderStatus === 'preparing' || s.orderStatus === 'almost_ready')) {
+        if (s.secondsLeft > 1) this.setState(st => ({ secondsLeft: st.secondsLeft - 1 }));
+        else this.setState({ orderStatus: 'ready' });
+      }
+    }, 1000);
+  }
+  componentWillUnmount() { clearTimeout(this._to); clearInterval(this._iv); }
+
+  add = (id) => this.setState(s => ({ cart: { ...s.cart, [id]: (s.cart[id] || 0) + 1 } }));
+  dec = (id) => this.setState(s => { const c = { ...s.cart }; if (!c[id]) return {}; c[id]--; if (c[id] <= 0) delete c[id]; return { cart: c }; });
+  restObj() { return this.RESTAURANTS.find(r => r.id === (this.state.restId || 'sunny')) || this.RESTAURANTS[0]; }
+  openRest = (id) => this.setState({ restId: id, screen: 'restaurant', menuCat: 'Popular' });
+
+  pill(selected) {
+    const base = { padding:'12px 6px', borderRadius:14, fontSize:15, fontWeight:700, textAlign:'center', cursor:'pointer', transition:'transform .12s, background .15s', userSelect:'none', whiteSpace:'nowrap' };
+    return selected
+      ? { ...base, background:'var(--accent)', color:'#fff', border:'1px solid var(--accent)', boxShadow:'0 6px 16px var(--shadow)' }
+      : { ...base, background:'var(--card)', color:'var(--ink)', border:'1px solid var(--line)' };
+  }
+  guestCircle(selected) {
+    const base = { width:46, height:46, borderRadius:23, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:800, cursor:'pointer', transition:'transform .12s', flex:'none' };
+    return selected
+      ? { ...base, background:'var(--accent)', color:'#fff', border:'1px solid var(--accent)', boxShadow:'0 6px 16px var(--shadow)' }
+      : { ...base, background:'var(--card)', color:'var(--ink)', border:'1px solid var(--line)' };
+  }
+  datePill(selected) {
+    const base = { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minWidth:64, padding:'11px 8px', borderRadius:14, cursor:'pointer', transition:'transform .12s', whiteSpace:'nowrap' };
+    return selected
+      ? { ...base, background:'var(--accent)', color:'#fff', border:'1px solid var(--accent)', boxShadow:'0 6px 16px var(--shadow)' }
+      : { ...base, background:'var(--card)', color:'var(--ink)', border:'1px solid var(--line)' };
+  }
+  modeCard(selected) {
+    return { display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:'18px 10px', borderRadius:18, cursor:'pointer', transition:'transform .12s',
+      background: selected ? 'var(--accent)' : 'var(--card)', color: selected ? '#fff' : 'var(--ink)',
+      border: selected ? '1px solid var(--accent)' : '1px solid var(--line)', boxShadow: selected ? '0 10px 24px var(--shadow)' : '0 3px 10px var(--shadow)' };
+  }
+  catChip(selected) {
+    return { display:'flex', flexDirection:'column', alignItems:'center', gap:4, minWidth:66, padding:'12px 6px', borderRadius:16, cursor:'pointer', transition:'transform .12s',
+      background: selected ? 'var(--accentSoft)' : 'var(--card)', border: selected ? '1px solid var(--accent)' : '1px solid var(--line)', color: selected ? 'var(--accent)' : 'var(--ink)' };
+  }
+  filterChip(selected) {
+    return { display:'inline-flex', alignItems:'center', gap:6, padding:'9px 14px', borderRadius:20, fontSize:13, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap', transition:'transform .12s',
+      background: selected ? 'var(--accent)' : 'var(--chip)', color: selected ? '#fff' : 'var(--ink2)', border:'none' };
+  }
+  filterCircle(selected) {
+    return { flex:'none', width:40, height:40, borderRadius:20, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', transition:'transform .12s',
+      background: selected ? 'var(--accent)' : 'var(--card)', color: selected ? '#fff' : 'var(--ink2)', border: selected ? '1px solid var(--accent)' : '1px solid var(--line)', boxShadow:'0 3px 10px var(--shadow)' };
+  }
+  menuTab(selected) {
+    return { padding:'9px 16px', borderRadius:20, fontSize:14, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap', transition:'transform .12s',
+      background: selected ? 'var(--ink)' : 'var(--chip)', color: selected ? 'var(--bg)' : 'var(--ink2)', border:'none' };
+  }
+
+  renderVals() {
+    const s = this.state, r = this.restObj();
+    const t = this.I18N[s.lang] || this.I18N.en;
+    const money = n => (Math.round(n * 400 / 10) * 10).toLocaleString('en-US').replace(/,/g, ' ') + ' ֏';
+    const tabs = ['home','search','orders','favorites','profile'];
+    const cartCount = Object.values(s.cart).reduce((a, b) => a + b, 0);
+    const cartTotal = this.DISHES.reduce((a, d) => a + (s.cart[d.id] || 0) * d.price, 0);
+    const grand = cartTotal + 0.9;
+    const serviceLabel = money(0.9);
+
+    const filtersActiveCount = (s.sortBy !== 0 ? 1 : 0) + (s.priceMax !== 12000 ? 1 : 0) + (s.distMax !== 3 ? 1 : 0) + (s.minRating !== 0 ? 1 : 0) + s.dietary.length + s.svcFilters.length;
+    const resultCount = Math.max(1, this.RESTAURANTS.filter(x => parseFloat(x.rating) >= s.minRating && parseFloat(x.distKm) <= s.distMax).length + (filtersActiveCount === 0 ? 8 : 0));
+
+    const RESERVE = ['11:30','12:00','12:30','13:00','13:30','14:00','18:30','19:00'];
+    const READY = ['12:00','12:15','12:30','12:45','13:00','13:15','13:30','13:45'];
+    const isDine = s.mode === 'dine' && r.reserve;
+    const locale = { en:'en-US', ru:'ru-RU', hy:'hy-AM' }[s.lang] || 'en-US';
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const todayTs = today.getTime();
+    const maxDate = new Date(today); maxDate.setDate(maxDate.getDate() + 30);
+    const maxTs = maxDate.getTime();
+    const selTs = s.reserveTs || todayTs;
+    const viewY = s.calY != null ? s.calY : today.getFullYear();
+    const viewM = s.calM != null ? s.calM : today.getMonth();
+    const fmt = (opts, d) => { try { return new Intl.DateTimeFormat(locale, opts).format(d); } catch (e) { return ''; } };
+    const weekdayHeads = Array.from({ length: 7 }, (_, i) => fmt({ weekday:'short' }, new Date(2024, 0, 1 + i)) || ['Mo','Tu','We','Th','Fr','Sa','Su'][i]);
+    const monthLabel = fmt({ month:'long', year:'numeric' }, new Date(viewY, viewM, 1)) || `${viewM+1}.${viewY}`;
+    const firstDow = (new Date(viewY, viewM, 1).getDay() + 6) % 7;
+    const daysInMonth = new Date(viewY, viewM + 1, 0).getDate();
+    const dayStyle = (enabled, selected) => `height:38px;border-radius:11px;font-size:14px;font-weight:${selected?800:600};cursor:${enabled?'pointer':'default'};display:flex;align-items:center;justify-content:center;transition:transform .1s;` +
+      (selected ? 'background:var(--accent);color:#fff;border:1px solid var(--accent);box-shadow:0 5px 14px var(--shadow)'
+        : enabled ? 'background:transparent;color:var(--ink);border:1px solid transparent'
+          : 'background:transparent;color:var(--ink3);opacity:.4;border:1px solid transparent');
+    const calCells = [];
+    for (let i = 0; i < firstDow; i++) calCells.push({ day:'', disabled:true, style:'height:38px', onClick:()=>{} });
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dt = new Date(viewY, viewM, d); dt.setHours(0,0,0,0); const ts = dt.getTime();
+      const enabled = ts >= todayTs && ts <= maxTs; const selected = ts === selTs;
+      calCells.push({ day:d, disabled:!enabled, style: dayStyle(enabled, selected), onClick: enabled ? () => this.setState({ reserveTs: ts }) : () => {} });
+    }
+    const viewFirst = new Date(viewY, viewM, 1).getTime();
+    const canPrev = viewFirst > new Date(today.getFullYear(), today.getMonth(), 1).getTime();
+    const canNext = viewFirst < new Date(maxDate.getFullYear(), maxDate.getMonth(), 1).getTime();
+    const navBtn = on => `width:34px;height:34px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:${on?'var(--ink)':'var(--ink3)'};display:flex;align-items:center;justify-content:center;cursor:${on?'pointer':'default'};opacity:${on?1:.4}`;
+    const shiftMonth = dir => { let y = viewY, m = viewM + dir; if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; } this.setState({ calY: y, calM: m }); };
+    const dm2 = ts => { const d = new Date(ts); return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`; };
+    const dateSel = { dm: dm2(selTs) };
+    const gNum = Math.min(18, Math.max(1, (s.guests | 0) || 2));
+    const deposit = gNum * 5;
+    const payGlyph = { apple:'', google:'G', card:'💳' };
+
+    const navc = { home:'var(--ink3)', search:'var(--ink3)', orders:'var(--ink3)', favorites:'var(--ink3)', profile:'var(--ink3)' };
+    navc[s.tab] = 'var(--accent)';
+
+    const toggleTrack = on => `flex:none;width:50px;height:30px;border-radius:15px;border:none;cursor:pointer;padding:0;position:relative;transition:background .2s;background:${on ? 'var(--accent)' : 'var(--chip)'}`;
+    const toggleKnob = on => `position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:12px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.25);transition:transform .2s;transform:translateX(${on ? '20px' : '0'})`;
+    const authTab = on => `flex:1;height:42px;border-radius:12px;border:none;cursor:pointer;font-size:14.5px;font-weight:700;transition:all .18s;background:${on ? 'var(--card)' : 'transparent'};color:${on ? 'var(--ink)' : 'var(--ink2)'};box-shadow:${on ? '0 3px 10px var(--shadow)' : 'none'}`;
+
+    // ---- Tweak controls: reshape the whole app via CSS-var overrides ----
+    const M = s.dark ? 'd' : 'l';
+    const SIG = {
+      Amber:  { l:{'--accent':'#EA5B12','--accent2':'#FF8A3D','--accentSoft':'#FFF0E6'}, d:{'--accent':'#FF6A1F','--accent2':'#FF9A52','--accentSoft':'rgba(255,106,31,.15)'} },
+      Coral:  { l:{'--accent':'#E23755','--accent2':'#FF6B85','--accentSoft':'#FFECEF'}, d:{'--accent':'#FF5C77','--accent2':'#FF8A9E','--accentSoft':'rgba(255,92,119,.16)'} },
+      Forest: { l:{'--accent':'#157F4A','--accent2':'#34B36B','--accentSoft':'#E6F4EC'}, d:{'--accent':'#2EC77A','--accent2':'#57D998','--accentSoft':'rgba(46,199,122,.15)'} },
+      Indigo: { l:{'--accent':'#4F46E5','--accent2':'#7C74F0','--accentSoft':'#ECEBFB'}, d:{'--accent':'#7C74F0','--accent2':'#9A93F5','--accentSoft':'rgba(124,116,240,.16)'} },
+    };
+    const SURF = {
+      'Warm cream': { l:{}, d:{} },
+      'Paper white': {
+        l:{'--bg':'#F4F4F5','--card':'#FFFFFF','--ink':'#18181B','--ink2':'rgba(24,24,27,.56)','--ink3':'rgba(24,24,27,.32)','--line':'rgba(24,24,27,.09)','--chip':'#F0F0F1','--ph1':'#ECECEE','--ph2':'#E0E0E3','--glass':'rgba(244,244,245,.78)'},
+        d:{'--bg':'#0E0E10','--card':'#1A1A1D','--ink':'#F4F4F5','--ink2':'rgba(244,244,245,.6)','--ink3':'rgba(244,244,245,.34)','--line':'rgba(244,244,245,.1)','--chip':'#26262A','--ph1':'#202024','--ph2':'#2A2A2F','--glass':'rgba(14,14,16,.72)'},
+      },
+      'Cool slate': {
+        l:{'--bg':'#F1F3F6','--card':'#FFFFFF','--ink':'#16202B','--ink2':'rgba(22,32,43,.56)','--ink3':'rgba(22,32,43,.32)','--line':'rgba(22,32,43,.09)','--chip':'#EAEEF3','--ph1':'#E4E9F0','--ph2':'#D6DEE8','--glass':'rgba(241,243,246,.78)'},
+        d:{'--bg':'#0C1015','--card':'#171D24','--ink':'#EAF0F6','--ink2':'rgba(234,240,246,.6)','--ink3':'rgba(234,240,246,.34)','--line':'rgba(234,240,246,.1)','--chip':'#222A33','--ph1':'#1C242D','--ph2':'#263039','--glass':'rgba(12,16,21,.72)'},
+      },
+    };
+    const DEPTH = {
+      'Soft & floaty': { l:{}, d:{} },
+      'Crisp & flat': { l:{'--shadow':'rgba(0,0,0,.05)','--line':'rgba(0,0,0,.14)'}, d:{'--shadow':'rgba(0,0,0,.3)','--line':'rgba(255,255,255,.16)'} },
+      'Bold shadows': { l:{'--shadow':'rgba(50,35,12,.24)'}, d:{'--shadow':'rgba(0,0,0,.7)'} },
+    };
+    const sig = (SIG[this.props.signature] || SIG.Amber)[M];
+    const surf = (SURF[this.props.surface] || SURF['Warm cream'])[M];
+    const depth = (DEPTH[this.props.depth] || DEPTH['Soft & floaty'])[M];
+    const tweakVars = { display:'contents', ...sig, ...surf, ...depth };
+
+    const total = 480;
+    const R = 110, circ = 2 * Math.PI * R;
+    const prog = Math.max(0, s.secondsLeft / total);
+    const m = Math.floor(s.secondsLeft / 60), sec = s.secondsLeft % 60;
+
+    const os = s.orderStatus, tk = t.track;
+    const railIdx = { paid:-1, confirmed:0, preparing:1, almost_ready:2, ready:3, completed:4 };
+    const rIdx = railIdx[os] != null ? railIdx[os] : 0;
+    const steps = tk.stageLabels.map((label, i) => ({
+      label,
+      dot: `width:12px;height:12px;border-radius:7px;margin:0 auto 7px;background:${i <= rIdx ? 'var(--accent)' : 'var(--chip)'}`,
+      text: `font-size:10px;font-weight:${i <= rIdx ? 700 : 500};color:${i <= rIdx ? 'var(--ink)' : 'var(--ink3)'}`,
+    }));
+
+    const statusColor = { created:'var(--accent)', paid:'var(--good)', confirmed:'var(--accent)', preparing:'var(--accent)', almost_ready:'var(--accent)', ready:'var(--good)', completed:'var(--good)', cancelled:'var(--danger)' };
+    const statusIcon = { created:'⏳', paid:'✓', confirmed:'👨‍🍳', preparing:'🍳', almost_ready:'🔥', ready:'🛍️', completed:'✅', cancelled:'✕' };
+    const sc = statusColor[os];
+    const trkUnpaid = os === 'created' && !s.payFailed;
+    const trkFailed = os === 'created' && s.payFailed;
+    const trkCancelled = os === 'cancelled';
+    const trkProgress = !trkUnpaid && !trkFailed && !trkCancelled;
+    const trkShowRing = os === 'preparing' || os === 'almost_ready';
+    const trkShowBadge = os === 'ready' || os === 'completed';
+    const trkPreorderNote = os === 'paid' || os === 'confirmed';
+    const isGoodBg = sc === 'var(--good)';
+    const trkBadge = `display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:${sc}`;
+    const trkPulse = `width:8px;height:8px;border-radius:5px;background:currentColor;${['confirmed','preparing','almost_ready'].includes(os) ? 'animation:floaty 1.4s infinite' : ''}`;
+    const trkIconWrap = `width:52px;height:52px;border-radius:26px;flex:none;display:flex;align-items:center;justify-content:center;font-size:24px;background:${trkCancelled ? 'var(--dangerSoft)' : isGoodBg ? 'var(--good)' : 'var(--accentSoft)'}`;
+    const chipStyle = sel => `border:1px solid ${sel ? 'var(--accent)' : 'var(--line)'};background:${sel ? 'var(--accent)' : 'var(--card)'};color:${sel ? '#fff' : 'var(--ink2)'};font-size:11.5px;font-weight:700;padding:7px 11px;border-radius:12px;cursor:pointer;transition:transform .12s`;
+    const chipIds = ['created','paid','confirmed','preparing','almost_ready','ready','completed','cancelled'];
+    const statusChips = chipIds.map(id => ({ label: tk.status[id], style: chipStyle(id === 'created' ? (os === 'created' && !s.payFailed) : os === id), onClick: () => this.setState({ orderStatus: id, payFailed: false, secondsLeft: 480 }) }));
+    statusChips.push({ label: '⚠ ' + tk.retryTitle, style: chipStyle(trkFailed), onClick: () => this.setState({ orderStatus: 'created', payFailed: true }) });
+
+    const dotStyle = sel => `width:22px;height:22px;border-radius:12px;border:2px solid ${sel ? 'var(--accent)' : 'var(--line)'};background:${sel ? 'var(--accent)' : 'transparent'};box-shadow:${sel ? 'inset 0 0 0 3px var(--card)' : 'none'}`;
+    const payRow = sel => ({ display:'flex', alignItems:'center', gap:12, padding:'15px 16px', borderRadius:16, cursor:'pointer', transition:'transform .12s',
+      background:'var(--card)', color:'var(--ink)', border: sel ? '2px solid var(--accent)' : '1px solid var(--line)', boxShadow: sel ? '0 6px 16px var(--shadow)' : 'none' });
+
+    const langBase = { border:'none', borderRadius:13, padding:'6px 11px', fontSize:12, fontWeight:700, cursor:'pointer', transition:'transform .12s' };
+    const langBtns = ['en','ru','hy'].map(code => ({
+      code: this.I18N[code].code, onClick: () => this.setState({ lang: code }),
+      style: s.lang === code ? { ...langBase, background:'var(--accent)', color:'#fff' } : { ...langBase, background:'transparent', color:'var(--ink2)' },
+    }));
+
+    const itemsN = n => `${n} ${n === 1 ? t.item : t.items}`;
+    const dishName = i => t.dishNames[i], dishDesc = i => t.dishDescs[i];
+    const allDishes = this.DISHES.map((d, i) => ({ ...d, name: dishName(i), desc: dishDesc(i), calLabel: `${d.calKcal} ${t.kcal}`, prep: `${d.prepMin} ${t.min}`, priceLabel: money(d.price), add: () => this.add(d.id) }));
+    const cartLines = this.DISHES.map((d, i) => ({ i, d })).filter(x => s.cart[x.d.id]).map(({ i, d }) => ({ name: dishName(i), qty: s.cart[d.id], total: money(s.cart[d.id] * d.price) }));
+    const basketLines = this.DISHES.map((d, i) => ({ i, d })).filter(x => s.cart[x.d.id]).map(({ i, d }) => ({ name: dishName(i), priceEach: money(d.price), qty: s.cart[d.id], total: money(s.cart[d.id] * d.price), inc: () => this.add(d.id), dec: () => this.dec(d.id) }));
+
+    const past = [
+      { name:'Noba Sushi', cnt:2, total:money(32), reorder:() => this.openRest('noba') },
+      { name:'Flame & Co.', cnt:3, total:money(54.5), reorder:() => this.openRest('flame') },
+      { name:'Greenhouse', cnt:1, total:money(13.5), reorder:() => this.openRest('green') },
+    ];
+
+    const readySummary = isDine
+      ? `${t.tableFor} ${s.guests} · ${dateSel.dm} ${s.reserveTime}`
+      : `${t.readyForPickup} ${s.readyTime}`;
+
+    return {
+      dark: s.dark, themeClass: s.dark ? 'theme-dark' : '', tweakVars, L: t, langBtns,
+      notAuthed: !s.authed,
+      isLogin: s.authMode === 'login', isRegister: s.authMode === 'register',
+      setLogin: () => this.setState({ authMode: 'login' }), setRegister: () => this.setState({ authMode: 'register' }),
+      loginTab: authTab(s.authMode === 'login'), registerTab: authTab(s.authMode === 'register'),
+      email: s.email, pass: s.pass, name: s.name,
+      setEmail: e => this.setState({ email: e.target.value }), setPass: e => this.setState({ pass: e.target.value }), setName: e => this.setState({ name: e.target.value }),
+      phone: s.phone, setPhone: e => this.setState({ phone: e.target.value.replace(/[^0-9 ]/g, '') }),
+      inputStyle: 'width:100%;height:52px;border-radius:14px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:15.5px;padding:0 14px;outline:none;box-sizing:border-box',
+      submitLabel: t.auth.continueBtn,
+      submitAuth: () => this.setState({ authed: true, screen: 'home', tab: 'home' }),
+      skipAuth: () => this.setState({ authed: true, screen: 'home', tab: 'home' }),
+      socials: [['','Apple'],['G','Google']].map(([icon, label]) => ({ icon, label: `${t.auth.continueWith} ${label}`, onClick: () => this.setState({ authed: true, screen: 'home', tab: 'home' }) })),
+      noop: () => {},
+      darkIcon: s.dark ? '☀️' : '🌙', darkLabel: s.dark ? t.light : t.dark,
+      toggleDark: () => this.setState(st => ({ dark: !st.dark })),
+
+      isHome: s.screen === 'home', isSearch: s.screen === 'search', isRestaurant: s.screen === 'restaurant',
+      isPreorder: s.screen === 'preorder', isCheckout: s.screen === 'checkout', isTracking: s.screen === 'tracking',
+      isBasket: s.screen === 'basket', isOrders: s.screen === 'orders',
+      isFavorites: s.screen === 'favorites', isProfile: s.screen === 'profile',
+      emptyCart: cartCount === 0, goBasket: () => this.setState({ screen:'basket' }),
+      basketLines, cartLines,
+      hasPlaced: s.placed, noActive: !s.placed,
+      activeFill: `${Math.round((1 - prog) * 100)}%`,
+      activeItems: itemsN(cartCount || 3),
+      pastOrders: past.map((o, i) => ({ ...o, date: t.pastDates[i], items: itemsN(o.cnt) })),
+      loaded: s.loaded, notLoaded: !s.loaded, three: [0,1,2],
+      showTabBar: tabs.includes(s.screen),
+
+      goHome: () => this.setState({ screen:'home', tab:'home' }),
+      goSearch: () => this.setState({ screen:'search', tab:'search' }),
+      goOrders: () => this.setState({ screen:'orders', tab:'orders' }),
+      goFavorites: () => this.setState({ screen:'favorites', tab:'favorites' }),
+      goProfile: () => this.setState({ screen:'profile', tab:'profile' }),
+      goRestaurant: () => this.setState({ screen:'restaurant' }),
+      goTracking: () => this.setState({ screen:'tracking', tab:'orders' }),
+      back: () => this.setState(st => ({ screen: st.screen === 'restaurant' ? 'home' : st.screen === 'basket' ? 'restaurant' : st.screen === 'preorder' ? 'basket' : st.screen === 'checkout' ? 'preorder' : st.screen === 'referral' ? 'profile' : 'home' })),
+      navHome: navc.home, navSearch: navc.search, navOrders: navc.orders, navFav: navc.favorites, navProfile: navc.profile,
+
+      categories: this.CATS.map((emoji, i) => ({ emoji, name: t.cats[i], style: this.catChip(s.categoryIdx === i), onClick: () => this.setState({ categoryIdx: i }) })),
+      nearMe: { style: this.filterCircle(false) },
+      openFilters: () => this.setState({ showFilters: true }),
+      closeFilters: () => this.setState({ showFilters: false }),
+      showFilters: s.showFilters,
+      filtersActive: filtersActiveCount > 0, filterCountBadge: filtersActiveCount,
+      sortOpts: t.flt.sort.map((label, i) => ({ label, style: this.filterChip(s.sortBy === i), onClick: () => this.setState({ sortBy: i }) })),
+      priceMax: s.priceMax, priceLabel: s.priceMax >= 24000 ? '24 000+ ֏' : (s.priceMax.toLocaleString('en-US').replace(/,/g,' ') + ' ֏'),
+      serviceLabel,
+      priceMin: '4 000 ֏', priceMaxCap: '24 000+ ֏',
+      setPrice: e => this.setState({ priceMax: +e.target.value }),
+      distMax: s.distMax, distLabel: `${s.distMax} ${t.km}`,
+      setDist: e => this.setState({ distMax: +e.target.value }),
+      ratingOpts: [[0, t.flt.any, ''], [4.0, '4.0+', '★'], [4.5, '4.5+', '★'], [4.8, '4.8+', '★']].map(([val, label, icon]) => ({ label, icon, style: this.filterChip(s.minRating === val), onClick: () => this.setState({ minRating: val }) })),
+      dietOpts: t.flt.diet.map((label, i) => ({ label, icon: ['🥗','🌱','☪️','🌾'][i], style: this.filterChip(s.dietary.includes(i)), onClick: () => this.setState(st => ({ dietary: st.dietary.includes(i) ? st.dietary.filter(x => x !== i) : [...st.dietary, i] })) })),
+      svcOpts: t.flt.svc.map((label, i) => ({ label, icon: ['🥡','🍽️','📅'][i], style: this.filterChip(s.svcFilters.includes(i)), onClick: () => this.setState(st => ({ svcFilters: st.svcFilters.includes(i) ? st.svcFilters.filter(x => x !== i) : [...st.svcFilters, i] })) })),
+      resetFilters: () => this.setState({ sortBy: 0, priceMax: 12000, distMax: 3, minRating: 0, dietary: [], svcFilters: [] }),
+      resultCount: `${resultCount} ${t.flt.results}`,
+      filtersRest: t.filters.map((label, i) => ({ label, icon: ['📍','⏱','🟢','🍽️','🥡','🪑','🏷️','⭐'][i], style: this.filterChip(s.filterIdxs.includes(i)), onClick: () => this.setState(st => ({ filterIdxs: st.filterIdxs.includes(i) ? st.filterIdxs.filter(x => x !== i) : [...st.filterIdxs, i] })) })),
+      restaurants: this.RESTAURANTS.map(x => ({ ...x, meta: `${t.restCuisine[x.id]} · ${x.price} · ${x.distKm} ${t.km}`, prep: `${x.prepMin} ${t.min}`, services: x.svc.map(k => t.svc[k]), statusLabel: x.open ? t.open : t.closed, statusColor: x.open ? 'var(--good)' : 'var(--ink3)', onClick: () => this.openRest(x.id) })),
+      browse: this.CATS.slice(0, 6).map((emoji, i) => ({ emoji, name: t.cats[i], onClick: () => this.setState({ categoryIdx: i, screen:'home', tab:'home' }) })),
+      popular: t.popular,
+
+      restName: r.name, restMeta: `${t.restCuisine[r.id]} · ${r.price} · ${r.reviews} ${t.reviewsWord}`, restRating: r.rating,
+      restPrep: `${r.prepMin} ${t.min}`, restDist: `${r.distKm} ${t.km}`, restPhoto: r.photo,
+      menuTabs: this.MENUKEYS.map((key, i) => ({ key, label: t.menuTabs[i], style: this.menuTab(s.menuCat === key), onClick: () => this.setState({ menuCat: key }) })),
+      dishes: allDishes.filter(d => d.cat === s.menuCat),
+      hasCart: cartCount > 0, cartCount, cartTotal: money(cartTotal), grandTotal: money(grand),
+      goPreorder: () => this.setState({ screen:'preorder' }),
+
+      setPickup: () => this.setState({ mode:'pickup' }), setDine: () => this.setState({ mode:'dine' }),
+      pickupStyle: this.modeCard(s.mode === 'pickup'), dineStyle: this.modeCard(s.mode === 'dine'),
+      showReserve: isDine, isDine,
+      showReadyAt: !isDine,
+      weekdayHeads, monthLabel, calCells,
+      prevMonth: () => { if (canPrev) shiftMonth(-1); }, nextMonth: () => { if (canNext) shiftMonth(1); },
+      prevStyle: navBtn(canPrev), nextStyle: navBtn(canNext),
+      reserveTimes: RESERVE.map(x => ({ label: x, style: this.pill(s.reserveTime === x), onClick: () => this.setState({ reserveTime: x }) })),
+      readyTimes: READY.map(x => ({ label: x, style: this.pill(s.readyTime === x), onClick: () => this.setState({ readyTime: x }) })),
+      guests: gNum,
+      guestChips: [1,2,4,6].map(n => ({ label: String(n), style: this.guestCircle(gNum === n), onClick: () => this.setState({ guests: n }) })),
+      guestInc: () => this.setState(st => ({ guests: Math.min(18, ((st.guests | 0) || 2) + 1) })),
+      guestDec: () => this.setState(st => ({ guests: Math.max(1, ((st.guests | 0) || 2) - 1) })),
+      depositLabel: money(deposit), depositBreakdown: `${gNum} × ${money(5)} ${t.perGuest}`,
+      readySummary,
+      goCheckout: () => this.setState({ screen:'checkout' }),
+
+      readyTime: s.readyTime,
+      readyRowLabel: isDine ? t.tableWord : t.readyAt,
+      readyRowTime: isDine ? `${dateSel.dm} · ${s.reserveTime}` : s.readyTime,
+      methodLabel: isDine ? t.tableWord : t.pickupWord,
+      methodDetail: isDine ? `${dateSel.dm} · ${s.reserveTime} · ${s.guests}` : t.atCounter,
+      payments: this.PAYIDS.map((id, i) => ({ id, label: t.payNames[i], icon: payGlyph[id] || '', style: payRow(s.payment === id), dotStyle: dotStyle(s.payment === id), onClick: () => this.setState({ payment: id }) })),
+      payLabel: s.payment === 'apple' ? ` ${t.pay}` : s.payment === 'google' ? `G ${t.pay}` : t.payNow,
+      placeOrder: () => this.setState({ screen:'tracking', tab:'orders', secondsLeft: 480, placed: true, orderStatus: s.mode === 'dine' ? 'confirmed' : 'preparing', payFailed: false }),
+
+      ringCirc: circ, ringOffset: circ * (1 - prog),
+      countdownText: `${m}:${String(sec).padStart(2, '0')}`,
+      steps,
+      trkUnpaid, trkFailed, trkCancelled, trkProgress, trkShowRing, trkShowBadge, trkPreorderNote,
+      trkBadge, trkPulse, trkIconWrap, trkIcon: statusIcon[os],
+      trkStatusLabel: tk.status[os], trkStatusDesc: tk.statusDesc[os],
+      trkBigIcon: os === 'ready' ? '🛍️' : '✅',
+      trkCookTime: s.mode === 'dine' ? s.reserveTime : s.readyTime,
+      trkDoneLabel: (os === 'completed' || os === 'cancelled') ? tk.backToOrders : t.done,
+      statusChips,
+      payAgain: () => this.setState({ orderStatus: 'confirmed', payFailed: false, secondsLeft: 480 }),
+      cancelOrder: () => this.setState({ orderStatus: 'cancelled', payFailed: false }),
+      pickupCode: 'AMG-' + (s.mode === 'dine' ? '742' : '318'),
+      tableNote: isDine ? `${t.tableReserved} ${s.guests} · ${dateSel.dm} ${s.reserveTime}.` : t.pickupExpress,
+
+      favorites: this.RESTAURANTS.slice(0, 2).map(x => ({ name: x.name, meta: `${t.restCuisine[x.id]} · ${x.distKm} ${t.km}`, prep: `${x.prepMin} ${t.min}`, rating: x.rating, onClick: () => this.openRest(x.id) })),
+      profileRows: ['💳','❤️','🧾','🎁','⚙️'].map((icon, i) => ({ icon, label: t.profileRows[i], onClick: [() => this.setState({ screen:'settings' }), () => this.setState({ screen:'favorites', tab:'favorites' }), () => this.setState({ screen:'orders', tab:'orders' }), () => this.setState({ screen:'referral' }), () => this.setState({ screen:'settings' })][i] })),
+      isSettings: s.screen === 'settings',
+      toggleNotif: () => this.setState(st => ({ notif: !st.notif })),
+      togglePromo: () => this.setState(st => ({ promoEmails: !st.promoEmails })),
+      darkTrack: toggleTrack(s.dark), darkKnob: toggleKnob(s.dark),
+      notifTrack: toggleTrack(s.notif), notifKnob: toggleKnob(s.notif),
+      promoTrack: toggleTrack(s.promoEmails), promoKnob: toggleKnob(s.promoEmails),
+      accountRows: [['👤', t.set.editProfile], ['💳', t.set.payments], ['📍', t.set.addresses]].map(([icon, label]) => ({ icon, label })),
+      aboutRows: [['❓', t.set.help], ['📄', t.set.terms], ['🔒', t.set.privacy]].map(([icon, label]) => ({ icon, label })),
+      isReferral: s.screen === 'referral',
+      goReferral: () => this.setState({ screen: 'referral' }),
+      referralLink: 'amragrir.am/i/ARAM5', invitedCount: 3, earnedLabel: '6%',
+      copyLabel: s.refCopied ? t.ref.copied : t.ref.copy,
+      copyCode: () => { try { navigator.clipboard && navigator.clipboard.writeText('https://amragrir.am/i/ARAM5'); } catch (e) {} clearTimeout(this._cp); this.setState({ refCopied: true }); this._cp = setTimeout(() => this.setState({ refCopied: false }), 1600); },
+      refSteps: t.ref.steps.map((text, i) => ({ n: i + 1, text })),
+    };
+  }
+}
+</script>
+</body>
+</html>

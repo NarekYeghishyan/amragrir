@@ -99,14 +99,17 @@ src/
     ├── Menu.tsx         # price and availability in the row; add, edit and
     │                    #   delete a dish, and the History dialog behind each
     ├── Restaurants.tsx  # the list, and one restaurant opened: facts, admins,
-    │                    #   branches that open to show who works at each
+    │                    #   the business's default cover and services, and
+    │                    #   branches that open to show their own cover,
+    │                    #   services and bookings plus who works at each
     ├── People.tsx       # who works here: invite, revoke a role, sign in as
     │                    #   somebody, and the way to the restaurant each role
     │                    #   is over
     ├── Dashboard.tsx    # platform: metrics + payment reconciliation
     ├── Users.tsx        # platform: the customer list (read-only), with the
     │                    #   phone reveal and the orders dialog behind two of
-    │                    #   its cells
+    │                    #   its cells, and the switch that brings the guest
+    │                    #   sessions back into it
     └── Platform.tsx     # platform: new restaurants, promo coupons
 ```
 
@@ -192,6 +195,46 @@ Those are not in the URL: they narrow an answer rather than being one, and a
 reload is allowed to forget them. The restaurant, the branch and the role are,
 because they are what somebody sends a colleague.
 
+**A switch the rule forbids is dead, and the row says why.** A restaurant's
+services are three switches, and one of them depends on another: a room with
+waiters (`dinein`) needs tables somebody can book (`reserve`), because wherever
+there is a dining room the way to a seat is the booking. What decides that is
+`serviceToggleBreach` from `@amragrir/shared` — the same rule `PATCH
+/restaurant/restaurants/{id}/services` refuses on — asked as "would flipping
+this produce a legal set". The panel restates nothing, so it cannot offer a
+combination the API is about to refuse. The reason sits in the row as plain
+text: a tooltip is not there on a touch screen, and a dead switch with nothing
+beside it reads as broken. There is no "eat at the restaurant" switch, and
+deliberately: it follows from `reserve` being off, and the pickup row says so.
+See BUSINESS_LOGIC.md §2.
+
+**The cover is shown to everyone who can open the restaurant, and changed by
+whoever holds `restaurant:write`.** A cover is public the moment it is set, so
+there is nothing in the section a reader should not see — what the permission
+gates is the file input and the Remove button, not the picture. It sits directly
+under the restaurant's facts, because it is one of them, and it is a **small
+block with its controls beside it** rather than a banner: the question it
+answers is "is there one, and is it the right photograph", and a full-width hero
+here would push the branches — usually what somebody came for — below the fold.
+
+**A branch's own settings sit behind its disclosure, and "this branch decides"
+is the data model rather than a nicety.** The row stores "not answered"
+separately from every answer, because a branch declaring exactly what the
+business declares is a different state from one that has not — only the first
+survives the business changing its mind. With the switch off the controls show
+the restaurant's values, *disabled*, so the screen still says what this address
+offers instead of going blank; turning it on starts from what the branch is
+already showing, so it changes nothing by itself and only moves who decides.
+That is `branch:write`, which a `restaurant_manager` holds — the restaurant-level
+sections above are the chain's default and stay `restaurant:write`.
+
+Choosing a file
+uploads it and stores it in one go: unlike a dish, there is no form still being
+filled in, so `POST /uploads/restaurant-cover` and `PATCH
+/restaurant/restaurants/{id}/cover` run back to back and the page re-renders
+from what the API answers. A `restaurant_manager` sees the photograph their
+branch is sold under and cannot replace it — the cover speaks for every branch.
+
 **The order board's scope is the exception, because it is what a link is for.**
 `?restaurant=` and `?branch=` are filters by any other measure, and they are in
 the address anyway: every branch on the Restaurants screen has an **Orders**
@@ -216,6 +259,21 @@ search and not under the stage, so a board sent to a finished order moves itself
 to **Past** rather than landing on an empty **Active**. Typing a code by hand
 still leaves you where you are with the counts pointing — that is a search
 telling you where to look, and only a link was sent somewhere specific.
+
+**The pin beside each code writes that same address**, which is why the board
+needed nothing new to hold itself on one order. Pressing it puts the code in the
+search box and leaves that card alone on the screen — what a counter wants while
+somebody is on the phone about an order, over a board of fifty cards that
+reorders itself every twenty seconds. The alternative was retyping twelve
+characters read off the screen you are trying not to lose. It writes `&order=`
+rather than setting the search term directly, so a pinned board can be sent to
+whoever is asking, and `replace` like the pickers: narrowing a queue is not a
+place in the browser's history, and the pinned board is one card, so the pin
+that undoes it is the thing already in front of you. **Only the pin lights up
+the pin** — a code typed by hand is somebody looking for an order, not the board
+being held on one. Taking it out empties the search box too, which is the one
+thing the address alone cannot say: an address naming no order is the ordinary
+board, not an instruction to clear a box somebody is typing in.
 
 **The menu's branch is in the address for the same reason.** `/menu?branch=:id`
 is what a line of an order on the board links to, so which branch's menu is on
@@ -423,18 +481,17 @@ the ticket says either. The link is offered only to an account holding
 `menu:read`; a shift that watches the board without it reads plain text, the
 same way the History dialog's names do without `staff:read`.
 
-**Every card can hand its order's code to a scanner.** The card prints the
-pickup code across its top — the four digits the counter says out loud, unique
-only among the orders in front of it. `orders.code` (`AMR-` + 8 digits) is the
-one that names exactly one order, and it was on the card only as small grey text
-to read out and retype: into the board's own search, into a handheld, into the
-note on a refund. Twelve characters retyped at a counter is where the wrong
-order gets picked. The **QR** button opens that code as a QR code, big enough
-to scan across a counter, so anything that reads one — a phone, a wedge scanner
-that types what it sees — gets it with no keystrokes. The plain code stays
-written under the picture: a scanner can be flat, out of reach, or not there.
+**Every card can hand its order's code to a scanner.** The card prints
+`orders.code` (`AMR-` + 8 digits) across its top — the one thing that names
+exactly one order — and it is still twelve characters somebody would otherwise
+retype: into the board's own search, into a handheld, into the note on a refund.
+Twelve characters retyped at a counter is where the wrong order gets picked. The
+**QR** button opens that code as a QR code, big enough to scan across a counter,
+so anything that reads one — a phone, a wedge scanner that types what it sees —
+gets it with no keystrokes. The plain code stays written under the picture: a
+scanner can be flat, out of reach, or not there.
 
-The code is drawn as an SVG path (`qr.ts`) rather than the encoder's own image,
+The code is drawn as an SVG path (`encodeQr`, in `@amragrir/ui`) rather than the encoder's own image,
 so it inherits `currentColor`, scales to its box and stays crisp on a tablet
 held at arm's length. It is **`--qr-ink` on `--qr-paper`, which are the two
 tokens that do not follow the theme**: dark-on-light is what the format assumes,
@@ -527,7 +584,7 @@ is only true while every order fits on a page — past that, a tab reading "3
 ready" meant "3 ready among the twenty I happened to fetch". Stage, search,
 restaurant and branch all go to `GET /restaurant/orders`, and the tab counts
 come back with the page. They are taken under everything **except** the stage,
-so searching a pickup code from the live board and seeing `Active 0 · Done 1`
+so searching a code from the live board and seeing `Active 0 · Done 1`
 tells you where the order went — the alternative is an empty board and no
 reason given. `past` also made finished orders reachable at all; before this
 the panel only ever asked for active ones.
@@ -548,6 +605,30 @@ sorts finished orders by how they finished.
 *Almost ready* is the one tab an order can miss out entirely, because the card
 before it offers a way past — so it counts what somebody deliberately flagged
 for the counter, not everything on its way to the pass.
+
+**The last move is not a button, and the board does not know the code.** Every
+step up to *Ready* is a statement about the kitchen and goes through on one
+press. *Done* is not: it says the food left the counter in somebody's hands, and
+the only evidence of that is the six-digit pickup code the guest shows. So a
+`ready` card offers **Hand it over**, which opens a box, and the API refuses
+`completed` without a code that matches `orders.pickup_code`.
+
+The board could not check it itself even if it wanted to. **No staff endpoint
+returns that code** — not this screen, not the platform-admin customer list, not
+a `prep_due` notification. It used to be printed across the top of every card,
+which is precisely what would have made a handover check theatre: a counter that
+reads the code off its own board never has to ask anybody for it. What the panel
+can do is *find* an order by it — type six digits into the search box and the
+guest who remembers nothing else is located — matched whole, never as a
+substring, so the box cannot be walked digit by digit into a code nobody gave.
+
+A mistyped digit is the ordinary case at a counter, so it is not a toast: the
+API answers 422 with `details.reason = "pickup_code_mismatch"`, and the dialog
+says "that code is not this order's" beside the box that was typed into. Every
+other failure from that endpoint is shown as the API worded it. There is no
+override — a guest who cannot produce their code cannot have the order closed —
+which is a product decision, written down in BUSINESS_LOGIC.md §5 along with
+what would replace it if a real counter proves it too rigid.
 
 **The board opens on Paid**, and that is where clearing the filters returns it.
 It is the only stage whose next move belongs to the restaurant — the money is
@@ -686,6 +767,18 @@ the API scopes the directory to the caller's reach and the id came from a link
 that knew who it meant — "nobody matches those filters" would read as a broken
 link. On Customers, which sees every diner there is, it is an account that no
 longer exists.
+
+**The Customers list leaves out the sessions nobody was.** A `users` row is
+written every time somebody opens the storefront — `POST /auth/guest`, an
+anonymous account with no name and no number until a phone is verified. They
+outnumber customers quickly and they are the newest rows, so a list ordered
+newest-first was page after page of "No name · no phone · 0 · 0" with the people
+who actually order buried nine pages back. `GET /admin/users` now leaves out the
+guests that never ordered unless asked, and the switch in the toolbar is what
+asks. Hidden rather than deleted: a guest is a real session, one that *did* order
+is a diner and stays in the list either way, and an `id` — the link from a name
+in an order's history — is never filtered at all, or the link would land on "that
+account no longer exists".
 
 **Two of the Customers table's cells open, and neither grew a button to do it.**
 A masked phone and an order count were both facts with the answer withheld. The

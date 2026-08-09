@@ -6,7 +6,8 @@ import {
   QueueFilter,
 } from '@amragrir/shared';
 import { NO_ORDER_FILTERS } from './api';
-import { PAID_TABS, STAGE_TABS, topStage } from './screens/Orders';
+import { parseRoute, routePath } from './navigation';
+import { PAID_TABS, STAGE_TABS, pinScope, topStage } from './screens/Orders';
 
 /**
  * The shape of the board's tabs.
@@ -100,5 +101,55 @@ describe('the stage tabs', () => {
     for (const stage of STAGE_TABS.map((tab) => tab.value)) {
       expect(topStage(stage)).toBe(stage);
     }
+  });
+});
+
+/**
+ * Holding the board on one order.
+ *
+ * The pin beside each code writes an address rather than setting a search term,
+ * so what it produces has to be an address the board reads back as that order —
+ * and has to leave the queue it was pressed on alone.
+ */
+describe('the pin on a card', () => {
+  const SCOPED = { ...NO_ORDER_FILTERS, restaurantId: 'r1', branchId: 'b1' };
+
+  it('names the order without moving the board off the queue it is on', () => {
+    expect(pinScope(SCOPED, 'AMR-17117037')).toEqual({
+      restaurantId: 'r1',
+      branchId: 'b1',
+      orderCode: 'AMR-17117037',
+    });
+  });
+
+  it('drops the code and keeps the queue when it is taken out again', () => {
+    // Unpinning is not "clear the filters": somebody pinned an order from one
+    // branch's board and wants that board back, not every branch's.
+    expect(pinScope(SCOPED, null)).toEqual({
+      restaurantId: 'r1',
+      branchId: 'b1',
+      orderCode: null,
+    });
+  });
+
+  it('reads the empty pickers back as no scope rather than as empty ids', () => {
+    // The filters hold '' for "all", the address holds null — and `?branch=` on
+    // the end of a URL is a branch whose id is the empty string, which matches
+    // nothing.
+    expect(pinScope(NO_ORDER_FILTERS, 'AMR-17117037')).toEqual({
+      restaurantId: null,
+      branchId: null,
+      orderCode: 'AMR-17117037',
+    });
+  });
+
+  it('writes an address the board reads back as that one order', () => {
+    // The whole mechanism in one line: the pin only sets `&order=`, and the
+    // board already knows what that means — it fills the search box from it and
+    // finds the stage holding the order.
+    const path = routePath({ tab: 'Orders', scope: pinScope(SCOPED, 'AMR-17117037') });
+    const [pathname, search] = path.split('?');
+
+    expect(parseRoute(pathname, search)?.scope).toEqual(pinScope(SCOPED, 'AMR-17117037'));
   });
 });

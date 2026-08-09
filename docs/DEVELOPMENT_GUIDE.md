@@ -108,7 +108,8 @@ apps/mobile/
 - Business-rule checks before mutation: slot availability, capacity, working hours, restaurant status, status transitions (state machine).
 - DB migrations versioned; dev seeds cover the design's fixtures (categories, restaurants, menu, tables) **plus staff, orders and each order's history, and what the staff have been doing** — a screen with nothing on it cannot be checked. Seeded data is derived from a stable key, never randomised: a bug found on one seeded database has to reproduce on another.
 - **A seed that describes a change must make it.** `seed-activity.ts` writes the `audit_log` entries the People screen's activity panel reads, and actually soft-deletes the dish each `menu_item.delete` names and closes the branch each `branch.status` names. A seeded audit trail that describes changes the database does not reflect is worse than an empty one — the value of that table is that it can be believed.
-- **Seeded data has to look like the thing it stands for.** Demo dishes carry a photograph of that dish (`prisma/menu-photos.ts`, hotlinked; `MENU_PHOTOS=local` for the committed placeholders), because a menu is a list somebody reads with their eyes and a screen full of grey boxes cannot be judged. Every URL in that table was fetched and looked at before it was written down — a keyword search for "cola" returned a bottle among sugar skulls. **A seed may never overwrite what a user chose:** `db:photos` rewrites a missing or seeded picture and never an uploaded one.
+- **Seeded data has to look like the thing it stands for.** Demo dishes carry a photograph of that dish (`prisma/menu-photos.ts`, hotlinked; `MENU_PHOTOS=local` for the committed placeholders) and demo restaurants a cover of what they sell (`prisma/restaurant-covers.ts`, same terms), because a menu and a home feed are lists somebody reads with their eyes and a screen full of grey boxes cannot be judged. Every URL in both tables was fetched and looked at before it was written down — a search for "cola" returned a bottle among sugar skulls, and one for "burger restaurant interior" the lavatory of a Burger King. **A seed may never overwrite what a user chose:** `db:photos` rewrites a missing or seeded picture and never an uploaded one.
+- **Hotlinked test data must be checked against the client that will fetch it, not against your browser.** Both tables draw from TheMealDB and TheCocktailDB only. Wikimedia Commons was dropped after a day: it answers 403 to a `User-Agent` that is a bare library name, which is what React Native sends, so half the pictures were blank in `apps/mobile` and perfect on the site — and blank is also how the app draws "there is no picture", so the failure was invisible from both ends. Check a new image URL with `curl -A okhttp/4.9.2` before adding it; the specs enforce the host list.
 - Logging, rate-limit on `auth/*`, OTP TTL in Redis (120s).
 
 ### API conventions
@@ -215,7 +216,12 @@ and pre-rendered, and it has no client data layer at all:
 - **The browser never calls the API.** Reads happen in server components; writes
   are Server Actions driven by `<form action={…}>`. There is no
   `NEXT_PUBLIC_API_URL`, so the API's address is not in the bundle, and no CORS
-  is involved.
+  is involved. The same rule decides third-party keys, and the app currently
+  ships **no public one at all**: the location picker's map is Yandex's public
+  widget in an iframe, which takes no key, and `YANDEX_GEOCODER_API_KEY` cannot
+  be domain-restricted — so the picker calls `GET /[lang]/geocode` on this app
+  and that route holds it. It is optional, and `apps/web/.env.example` says what
+  the app does without it.
 - **Tokens and the basket live in httpOnly cookies**, never in `localStorage`
   and never in the page. A token in reach of a script is a token an injected
   script can take, and a basket in reach of the page is a basket the customer
@@ -301,6 +307,22 @@ Armenian word surfacing in an English page.
 | `apps/api` | `Accept-Language` header | One process serves everyone; see §3 "API conventions". |
 | `apps/web` | the URL — the bare domain is `hy`, then `/ru`, `/en` | A crawler sends one header, so header negotiation alone leaves two languages unindexed. Needs a URL per language with `hreflang`. The default language is unprefixed (`/r/x`, not `/hy/r/x`) because it is most of the traffic; `/hy/…` 308s to it so one page keeps one address. |
 | `apps/admin` | a stored choice (`amragrir.language`), then the browser's, then `hy` | Internal, behind a sign-in, nothing to index. Staff work a shift in one language, so the choice sits in storage next to the theme and is switched from the account menu (and from the sign-in card, which is in front of anyone who cannot yet read the panel). |
+
+Where the language is part of the URL, **switching it is a navigation, and it
+must land on the page the visitor is already reading.** `apps/web`'s header
+switch builds its links with `translatedPath()` (`lib/site.ts`), which swaps the
+language segment and keeps the rest of the address; the query string rides along
+with it. It accepts both the published path (`/cart`) and the internal one the
+middleware rewrites to (`/hy/cart`), so a link is the same whether it was built
+during the render or in the browser.
+
+That switch is a **document load** (`<a>`, not `<Link>`) and has to be. Changing
+the `[lang]` segment remounts the root layout, and React 19 re-acquires the
+`<html>` singleton by stripping every attribute on it first — including
+`data-theme`, which the layout's pre-paint script sets from `localStorage` and
+React therefore never puts back. The rule this leaves: **anything set on `<html>`
+outside React survives only until the next remount of it**, so it must be
+re-applied by something that runs on every document load, not once per session.
 
 The admin panel sends its choice as `Accept-Language` on every request, so the
 API's error messages and `*_i18n` columns come back in the same language the

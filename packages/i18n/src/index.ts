@@ -30,3 +30,9 @@ export const dictionaries = {
   [Language.Ru]: ru satisfies Dictionary,
   [Language.En]: en satisfies Dictionary,
 } as const;
+
+/**
+ * Keys, not strings — which is why they belong beside the dictionaries rather
+ * than in a client. See the module for what it maps and why it is shared.
+ */
+export { ORDER_STATUS_COPY } from './order-status-copy';

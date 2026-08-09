@@ -2,8 +2,8 @@ import Link from 'next/link';
 import type { Language } from '@amragrir/shared';
 import { t } from '@/lib/language';
 import {
-  FILTER_CHIPS,
   chipHref,
+  chipsFor,
   clearHref,
   hasAnyFilter,
   isActive,
@@ -23,13 +23,22 @@ import {
  * links, not buttons, and clicking an active one navigates to the view with
  * that filter removed.
  */
-export function FilterChips({ state, language }: { state: FilterState; language: Language }) {
+export function FilterChips({
+  state,
+  language,
+  hasOrigin = false,
+}: {
+  state: FilterState;
+  language: Language;
+  /** Whether a district is chosen; decides if "near me" is offered at all. */
+  hasOrigin?: boolean;
+}) {
   const label = t(language);
 
   return (
     <nav className="filters" aria-label={label('filtersLabel')}>
       <ul className="chips">
-        {FILTER_CHIPS.map((chip) => {
+        {chipsFor(hasOrigin).map((chip) => {
           const active = isActive(state, chip);
           return (
             <li key={chip.id}>

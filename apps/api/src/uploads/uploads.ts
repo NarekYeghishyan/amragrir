@@ -29,6 +29,17 @@ export const STATIC_URL_PREFIX = '/static';
 /** The subdirectory menu photos live in, under `UPLOAD_DIR`. */
 export const MENU_PHOTO_DIR = 'menu';
 
+/**
+ * The subdirectory restaurant covers live in, under `UPLOAD_DIR`.
+ *
+ * Separate from the dishes rather than one flat pile: the two are uploaded
+ * behind different permissions and are wanted at different sizes, so whoever
+ * later adds thumbnailing or a sweep for orphans can act on one without
+ * reasoning about the other. Names are uuids either way, so this is not
+ * preventing a collision — it is keeping the two answerable apart.
+ */
+export const COVER_PHOTO_DIR = 'covers';
+
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /**

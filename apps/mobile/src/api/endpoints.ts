@@ -1,15 +1,25 @@
-import type { PaymentMethod } from '@amragrir/shared';
+import type {
+  DietaryTag,
+  PaymentMethod,
+  PickupOption,
+  RestaurantService,
+  ServiceMode,
+} from '@amragrir/shared';
 import { request } from './client';
 import type {
   AuthResult,
+  Availability,
   Category,
+  FavoriteItem,
   GuestResult,
   MenuItem,
+  NotificationList,
   Order,
   OrderListItem,
   Paged,
   PaymentResult,
   Quote,
+  Reservation,
   RestaurantDetail,
   RestaurantListItem,
   SendCodeResult,
@@ -36,12 +46,26 @@ export const auth = {
   guest: () => request<GuestResult>('/auth/guest', { method: 'POST', authenticated: false }),
 };
 
+/**
+ * Mirrors `ListRestaurantsDto` (apps/api/src/catalog/dto.ts).
+ *
+ * Every filter the design's sheet draws is here because the API already
+ * implements all of them — this type had fallen behind it, not the other way
+ * round, and a filter missing here is one the sheet cannot honestly offer.
+ */
 export interface RestaurantQuery {
   lat?: number;
   lng?: number;
   sort?: 'recommended' | 'nearest' | 'fastest' | 'top_rated';
   distMax?: number;
   minRating?: number;
+  /** Only branches serving right now. */
+  openNow?: boolean;
+  dietary?: DietaryTag[];
+  service?: RestaurantService[];
+  /** Price per person, AMD. */
+  priceMin?: number;
+  priceMax?: number;
   category?: string;
   q?: string;
   page?: number;
@@ -54,7 +78,7 @@ export const catalog = {
 
   restaurants: (query: RestaurantQuery = {}, language?: string) =>
     request<Paged<RestaurantListItem>>('/restaurants', {
-      query: query as Record<string, string | number | undefined>,
+      query: query as Record<string, string | number | boolean | string[] | undefined>,
       authenticated: false,
       language,
     }),
@@ -72,8 +96,14 @@ export const catalog = {
 
 export interface BasketPayload {
   branchId: string;
-  serviceMode: 'pickup';
+  serviceMode: ServiceMode;
+  /** Where the order ends up. Absent means take-away — see `CartState`. Only
+   *  meaningful for pickup; the API refuses it on a dine-in basket. */
+  pickupOption?: PickupOption;
   items: { menuItemId: string; qty: number }[];
+  /** Required for dine-in and refused otherwise: food brought to a table needs
+   *  a table, and that means a booking. */
+  reservationId?: string;
 }
 
 export const cart = {
@@ -97,6 +127,77 @@ export const orders = {
   get: (id: string) => request<Order>(`/orders/${id}`),
 
   cancel: (id: string) => request<Order>(`/orders/${id}/cancel`, { method: 'POST' }),
+};
+
+export const notifications = {
+  /**
+   * The bell. No `language` is sent and that is not an omission: an `order`
+   * notification carries `{ orderId, code, status }` and no prose, so there is
+   * nothing on it for the API to translate — the screen renders it from the
+   * same dictionary the tracking screen uses (API_DOCUMENTATION.md,
+   * "Notifications").
+   */
+  list: () => request<NotificationList>('/notifications'),
+
+  /** Clears the badge in one call — what opening the screen means. */
+  readAll: () => request<{ read: number }>('/notifications/read-all', { method: 'POST' }),
+
+  /** The cross on a row. A real delete — see DATABASE.md §12. */
+  remove: (id: string) => request<void>(`/notifications/${id}`, { method: 'DELETE' }),
+
+  /** Empties the bell, unread ones included. */
+  clear: () => request<{ deleted: number }>('/notifications', { method: 'DELETE' }),
+};
+
+export const reservations = {
+  /**
+   * Free times on a date, for a party of this size.
+   *
+   * Public, like the rest of the catalog — a guest may look at a calendar
+   * before deciding to sign in. Availability is answered *per party size*: the
+   * guest count is not a filter applied afterwards, it is what makes "19:00 is
+   * free" mean anything.
+   *
+   * Takes a slug, a restaurant id or a branch id, exactly as `/restaurants/:id`
+   * does.
+   */
+  availability: (idOrSlug: string, date: string, guests: number, language?: string) =>
+    request<Availability>(`/restaurants/${idOrSlug}/availability`, {
+      query: { date, guests },
+      authenticated: false,
+      language,
+    }),
+
+  /**
+   * Books a table and holds the deposit.
+   *
+   * The table is chosen by the server, not named here — assignment is what
+   * makes a booking exclusive. `idempotencyKey` must survive a retry of the
+   * same tap, or a flaky connection books two tables.
+   */
+  create: (
+    booking: { branchId: string; reservedFor: string; guests: number; notes?: string },
+    idempotencyKey: string,
+    language?: string,
+  ) => request<Reservation>('/reservations', { method: 'POST', body: booking, idempotencyKey, language }),
+
+  list: (status?: 'upcoming' | 'past') =>
+    request<Paged<Reservation>>('/reservations', { query: { status } }),
+
+  get: (id: string) => request<Reservation>(`/reservations/${id}`),
+
+  cancel: (id: string) => request<Reservation>(`/reservations/${id}/cancel`, { method: 'POST' }),
+};
+
+export const favorites = {
+  list: () => request<{ items: FavoriteItem[] }>('/favorites'),
+
+  /** Idempotent server-side — favouriting twice is what a double tap does. */
+  add: (restaurantId: string) =>
+    request<{ favorited: true }>('/favorites', { method: 'POST', body: { restaurantId } }),
+
+  remove: (restaurantId: string) =>
+    request<void>(`/favorites/${restaurantId}`, { method: 'DELETE' }),
 };
 
 export const payments = {

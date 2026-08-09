@@ -1,0 +1,32 @@
+-- The customer bell starts writing rows, and they carry facts rather than a sentence.
+--
+-- `notifications` has existed since the schema was laid out (DATABASE.md §12)
+-- and nothing ever wrote to it. Turning it on raised the question the table had
+-- never had to answer: in which language is `title` stored?
+--
+-- Every answer that fills the column is wrong in the same way. The row would be
+-- frozen in whatever language the reader preferred the moment it was written,
+-- so changing language in Settings leaves a bell half-translated — and unlike a
+-- restaurant name, this text is ours and there is no reason it should be. The
+-- API also cannot reach the shared dictionary to render it properly even if we
+-- wanted that: it compiles to CommonJS under Node resolution, and
+-- `@amragrir/i18n` ships TypeScript that only a bundler reads.
+--
+-- So the two columns become nullable and mean what they should have meant all
+-- along: **the words, when the server is the one who wrote them.** A promo, a
+-- system note — text with no key in any dictionary. An `order` row carries
+-- `payload` instead (`{ orderId, code, status }`) and the client draws it from
+-- the keys it already ships for its tracking screen: `statusReady`,
+-- `statusReadyDesc`, and their siblings for all eight statuses in hy/ru/en.
+-- This feature therefore added no copy in any language, which is also why it
+-- cannot be inconsistent with the tracking screen it duplicates.
+--
+-- It is the same conclusion `staff_notifications` reached (§8b: "the row
+-- carries the numbers"), arrived at from the other direction. That table had no
+-- known reader to pick a language for; this one has exactly one reader and
+-- still should not pick, because the reader is allowed to change their mind.
+--
+-- Widening only — every existing row satisfies a nullable column, and there are
+-- no existing rows.
+ALTER TABLE "notifications" ALTER COLUMN "title" DROP NOT NULL;
+ALTER TABLE "notifications" ALTER COLUMN "body" DROP NOT NULL;

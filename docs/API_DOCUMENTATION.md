@@ -184,11 +184,16 @@ Nearby list with filters (Home feed).
 - **Response 200:**
 ```json
 { "items": [ {
-  "id","slug","name","cuisine","priceLevel":2,"rating":4.8,"reviewsCount":1200,
+  "id","restaurantId","slug","name","cuisine","priceLevel":2,"rating":4.8,"reviewsCount":1200,
   "distanceKm":0.4,"prepMin":12,"isOpen":true,"services":["pickup","dinein","reserve"],
   "coverUrl","reservationsEnabled":true } ],
   "total": 24, "page": 1 }
 ```
+- **`id` is the branch; `restaurantId` is the business.** They are not
+  interchangeable: a basket and `GET /restaurants/{id}` are addressed by the
+  branch, while a favourite is stored against the restaurant, so a card's heart
+  posts `restaurantId` to `POST /favorites`. `GET /search` has always returned
+  both for the same reason.
 
 ### GET /restaurants/{id}
 Restaurant profile + branch.
@@ -275,10 +280,12 @@ Ordered by `sortOrder`. `name` is resolved from `Accept-Language` (default `hy`)
 Prices a basket without creating anything. **Any bearer token, guests
 included** — filling a basket is allowed before verification; only ordering
 is not.
-- **Body:** `{ "branchId", "serviceMode": "pickup", "items": [ { "menuItemId", "qty" } ] }`
+- **Body:** `{ "branchId", "serviceMode": "pickup", "pickupOption": "take_away|eat_in", "items": [ { "menuItemId", "qty" } ] }`
 - **Response 200:**
 ```json
 { "branchId","restaurantName","serviceMode":"pickup",
+  "pickupOption":"take_away","pickupOptions":["take_away","eat_in"],
+  "eatInRequiresBooking":false,"reservationsEnabled":false,
   "items":[ { "menuItemId","name","unitPriceAmd","qty","lineTotalAmd" } ],
   "unavailable":[ { "menuItemId","reason":"not_on_menu|sold_out" } ],
   "subtotalAmd":14200,"serviceFeeAmd":360,"depositAmd":0,"totalAmd":14560,
@@ -287,11 +294,50 @@ is not.
 ```
 - Prices, names and prep times are re-read from the database; the request
   carries ids and quantities only.
+- **`pickupOption` is optional and defaults to `take_away`** — the ending every
+  pickup restaurant offers, so a client that has never heard of the field still
+  prices the basket it always priced. Null in the response for a dine-in basket,
+  and sending one on a dine-in basket is a **422**: food brought to a table it is
+  already sitting at is neither taken away nor collected.
+- **`eat_in` is a 422 at a branch that takes table bookings**
+  (BUSINESS_LOGIC.md §2) — eating in there is a booked table, not an ending on a
+  pickup order. Checked here as well as at `POST /orders`, so a basket built
+  before the branch started taking bookings is refused on the screen the guest
+  is looking at rather than at the payment.
+- **`pickupOptions` is what to draw the choice from** — the endings this
+  restaurant offers, in reading order. Sent rather than left to the client to
+  derive from `services`, because deriving the same answer twice is how the two
+  stop agreeing. Fewer than two entries is not a choice, and the clients render
+  no live pair.
+- **`eatInRequiresBooking` says to draw the other one dead.** True where eating
+  in exists but is reached by booking a table — the clients then render "eat at
+  the restaurant" beside take-away, dimmed, and pressing it switches the basket
+  to `dine_in` rather than choosing an ending. Without it the option would
+  simply vanish at every restaurant, and the guest would be left to work out the
+  rule from its absence.
+- **`reservationsEnabled` says whether the booking mode is worth offering at
+  all** — `reserve` declared **and** bookings not paused, the same pair
+  `GET /restaurants/{id}/availability` and `POST /reservations` gate on. False
+  makes `dine_in` a dead end, so a client draws no booking control rather than
+  one whose only destination is "this restaurant does not take bookings".
+
+  **Not the same question as `eatInRequiresBooking`**, which is why both are
+  sent. That one is the *declaration*: it stays true while a booking restaurant
+  has its bookings paused, and it is false at a place declaring `reserve` alone
+  (there is no pickup pair for a dead half to sit under). A client that tried to
+  drive the booking mode from it would offer a calendar in the first case and
+  hide it in the second.
+
+  Sent rather than derived, like the two above: the switch is not in `services`
+  at all, so a client could not work this out even in principle.
 - A dish that is missing or sold out is **reported in `unavailable`, not
   thrown**, so the basket screen can flag the line. `canOrder` is the single
   answer to "may this become an order".
 - A closed restaurant still returns prices, with `branchIsOpen: false`.
 - `prepMin` is the **slowest dish**, not the sum — a kitchen cooks in parallel.
+  A dish declaring `0` counts as having declared: a basket of nothing but
+  bottled drinks quotes `prepMin: 0`, where only dishes that declare `null`
+  fall through to the branch average and then to `DEFAULT_PREP_MIN`.
 
 ---
 
@@ -309,11 +355,17 @@ Create a pre-order.
   body → **409**. Missing → **400**.
 - **Body:**
 ```json
-{ "branchId","serviceMode":"pickup",
+{ "branchId","serviceMode":"pickup","pickupOption":"take_away",
   "items":[{"menuItemId","qty"}],
   "readyAt":"2026-07-25T12:30:00+04:00",
   "notes": null }
 ```
+- `pickupOption` follows the same rules as on the quote above: optional,
+  defaults to `take_away`, **422** for `eat_in` at a branch that takes table
+  bookings and for any value at all on a dine-in order. It is stored on the
+  order, put on the `created` history entry, and shown to the branch on its
+  board — a bag and a plate are not the same order to pack, and the counter is
+  too late to ask.
 - `readyAt` is optional and defaults to now + `prepMin`. Earlier than the
   kitchen can manage → **422** carrying `{ "earliestReadyAt" }`; further ahead
   than 7 days → **422**; outside the branch's opening hours → **422** carrying
@@ -336,7 +388,7 @@ Create a pre-order.
   quantities; merging silently would hide a broken basket).
 - **Response 201:**
 ```json
-{ "id","code":"AMR-42774033","pickupCode":"4033","status":"created",
+{ "id","code":"AMR-42774033","pickupCode":"730914","status":"created",
   "serviceMode":"pickup","restaurantName","branch":{ "id","name","address" },
   "items":[ { "id","menuItemId","name","unitPriceAmd","qty","lineTotalAmd" } ],
   "subtotalAmd","serviceFeeAmd","depositAmd","totalAmd",
@@ -348,8 +400,13 @@ Create a pre-order.
   earliest, so the tracking screen counts down to a promise instead of showing a
   timer that has not started. `prepStartAt` is when the kitchen begins — shown
   to staff, not to the diner.
-- `pickupCode` is the **last four digits of `code`** — derived, never stored,
-  so the two can never disagree.
+- `pickupCode` is `orders.pickup_code` — **six digits, generated in its own
+  right and unrelated to `code`.** It used to be the last four digits of the
+  order number, which meant a receipt gave it away; it is now the proof that
+  closes the order, and it is checked at handover (see
+  `PATCH /restaurant/orders/{id}/status`). **This is the only family of
+  endpoints that returns it** — an order belongs to the customer asking, and
+  they are the audience it is for. No staff endpoint sends it at all.
 - Item names are **snapshots** taken in the caller's language at purchase
   time; an order records what was bought at the price it was bought.
 - **The first `order_events` row is written by this same INSERT** (nested, not a
@@ -619,9 +676,99 @@ keeps across retries).
 
 ## Notifications
 
-### GET /notifications → `{ "items":[ { "id","type","title","body","isRead","createdAt" } ], "unread": 2 }`
-### PATCH /notifications/{id}/read → **204**
-### POST /devices → register push token: `{ "platform":"ios|android","token" }`
+The customer's bell — the header bell on the web and the mobile app's
+`/notifications` screen. What has happened to **this account's** orders, so a
+visitor who is not sitting on the tracking screen still learns that the kitchen
+moved. See DATABASE.md §12 for the table and §8b for why the back office's bell
+is a different one.
+
+All of these are gated on a **verified phone**, exactly like `GET /orders`: every
+notification here is about an order, and ordering is what verification gates
+(ROLES_AND_PERMISSIONS.md §1). A guest has nothing to be told about.
+
+**Which moves are announced:** `confirmed`, `preparing`, `almost_ready`,
+`ready`, `completed`, `cancelled`. Not `created` — the customer is the one who
+just made it — and not `paid`, which is published back to back with `confirmed`
+from a single payment and would buzz a phone twice for one tap. See
+BUSINESS_LOGIC.md §4.
+
+### GET /notifications · *implemented*
+- **Query:** `limit` (default 30, capped at 50).
+- **Response 200:** `{ "items":[ { "id","type","title","body","payload","isRead","createdAt" } ], "unread": 2 }`
+- **`type`** is one of `order`, `reservation`, `promo`, `referral`, `system`.
+- **`title` and `body` are null for everything the client can draw itself**,
+  which is every `order` row. Those carry `payload` —
+  `{ "orderId", "code", "status" }` — and the client renders the line from the
+  dictionary it already ships for its tracking screen (`statusReady`,
+  `statusReadyDesc`, and their siblings; the map is `ORDER_STATUS_COPY` in
+  `@amragrir/i18n`). **This feature added no copy in any language.**
+  They are populated only where the server wrote the prose — a promo, a system
+  note — and there the API's words are all there is.
+  Storing a sentence for an order would freeze it in whatever language the
+  reader preferred that day, and switching language in Settings would leave the
+  bell half-translated. Same conclusion as the staff bell's "numbers, never
+  prose", reached from the other direction: that table has no known reader, this
+  one has a reader who is allowed to change their mind.
+- **`unread` counts everything unread**, not what fits on the page — a badge
+  reading 30 because that is where the page ended would be a lie at 31.
+- **Newest first.**
+
+### PATCH /notifications/{id}/read · *implemented* → **204**
+- What tapping one line means. Scoped to the caller, so another account's id
+  marks nothing and answers **404** — the same answer as for an id that does not
+  exist, because a distinguishable error would confirm it does.
+
+### POST /notifications/read-all · *implemented* → **200**
+- **Response:** `{ "read": <count> }` — what opening the bell means. A call
+  rather than a PATCH per id: the set is "everything unread", not a list the
+  client has to hold and send back.
+
+### DELETE /notifications/{id} · *implemented* → **204**
+- The cross on a line. **A real delete, not a flag** — see DATABASE.md §12: a
+  notification is a *message about* a fact, and the fact is in `orders` and
+  `order_events` either way, so there is nothing here worth soft-deleting.
+- Scoped like the read above: another account's id deletes nothing and answers
+  **404**, the same as an id that never existed. Deleting the same id twice is
+  therefore a 404 the second time, and both clients treat that as done rather
+  than as a failure.
+
+### DELETE /notifications · *implemented* → **200**
+- **Response:** `{ "deleted": <count> }` — empties the bell. **Everything, not
+  only what has been read**: the gesture is "I am done with all of this", and a
+  clear that quietly left the unread ones behind would look like it had failed.
+- `DELETE` on the collection rather than a `POST /clear`, unlike `read-all`
+  above: marking read is a state change with no verb of its own, while removing
+  every member of a collection is exactly what this verb means.
+- Clearing an empty bell is **200 with `{ "deleted": 0 }`**, not an error: it
+  leaves the caller where they asked to be.
+
+### `watchMe` (WebSocket) · *implemented*
+- `{ "event": "watchMe", "data": { "token": "<access token>" } }` on the same
+  socket as the order stream; answers `{ "event": "watchingMe" }`.
+- **Customer tokens only, and a verified phone** — the same gate the REST list
+  sits behind, because "may you call this" and "may you hold this open" have to
+  give the same answer. Staff are addressed by branch (`watchBranches`).
+- The account comes from the verified token and never from the message, so a
+  socket cannot ask for somebody else's bell.
+- Delivers `{ "event": "notification", "data": { …the item as `GET` returns it } }`
+  — the whole row here, unlike the staff frame, because there is no reach to
+  re-check: the row belongs to the one account that authenticated, so a client
+  can unshift it into the list it already holds instead of re-reading. A bell
+  that refetched on every push would turn one order moving through six stages
+  into six list requests.
+- **Both clients use this, by different routes.** `apps/mobile` holds its token
+  in memory and subscribes directly. `apps/web` cannot — its session is an
+  httpOnly cookie, so the page has no token for that first message — so its
+  `/[lang]/notifications/stream` route handler holds this socket server-side and
+  streams frames down to the browser as Server-Sent Events. The API sees one
+  ordinary subscriber either way. Its 30-second poll remains as the fallback for
+  a deployment where a held connection is not available.
+
+### POST /devices — **not implemented**
+- Register a push token: `{ "platform":"ios|android","token" }`. OS-level push
+  is a separate piece of work: it needs FCM/APNs credentials, which live outside
+  this repository. The bell above is in-app only and works whenever the site or
+  the app is open.
 
 ---
 
@@ -723,9 +870,14 @@ The kitchen queue.
   it is the opposite of. Worth reaching at all because **nothing expires those
   rows** — no job expires an unpaid basket (the reminder sweep is the API's only
   scheduled job, and it is about pre-orders), so they accumulate.
-- **`q` matches the order code, the pickup code, or the customer name.** One
-  parameter rather than three: the pickup code is the last four digits of
-  `code`, so a substring match finds an order by either.
+- **`q` matches the order code, the customer name, or a whole pickup code.** One
+  parameter rather than three, because whoever is typing knows which of them
+  they have. The first two are substring matches; the pickup code is matched
+  **only when `q` is exactly six digits, and then on equality**. That asymmetry
+  is deliberate: a substring match on it would answer "which orders have a 7 in
+  their collection code", and repeated per digit that is the code itself,
+  arrived at without anybody being told it. You can find the order you were
+  given a code for, and nothing else.
 - Scoped to the caller's reach; `q`, `restaurantId` and `branchId` **narrow** it
   and never widen it, so passing someone else's branch id returns nothing. The
   search is composed with `AND` for exactly this reason — the scope filter is
@@ -738,7 +890,18 @@ The kitchen queue.
   rather than at the top. Nulls sort last: an order from before the column
   existed is a finished one, and a finished order has no claim on the front of a
   queue.
-- **Response 200:** `{ "items":[ { "id","code","pickupCode","status","serviceMode","branch","customerName","itemsCount","totalAmd","paymentStatus","readyAt","secondsLeft","scheduled","prepStartAt","prepMin","reminderAt","reminderLeadMin","createdAt","items":[{"menuItemId","name","qty","lineTotalAmd"}],"notes" } ], "total", "page", "counts" }`
+- **Response 200:** `{ "items":[ { "id","code","status","serviceMode","pickupOption","branch","customerName","itemsCount","totalAmd","paymentStatus","readyAt","secondsLeft","scheduled","prepStartAt","prepMin","reminderAt","reminderLeadMin","createdAt","items":[{"menuItemId","name","qty","lineTotalAmd"}],"notes" } ], "total", "page", "counts" }`
+- **No `pickupCode`.** The board names an order by `code`. It used to carry the
+  collection code and print it across every card, which is what made a handover
+  check pointless: a counter that can read the code off its own screen never has
+  to ask a guest for it. The panel's only dealing with that code is the other
+  direction — typed into the handover dialog, checked by the API.
+- **`pickupOption`** is where a pickup order ends up — `take_away` or `eat_in`,
+  null on a dine-in order. The one field here the kitchen acts on *before* the
+  food is ready, which is why it is on the card and not behind the History
+  dialog: a bag and a plate are not the same order to pack. The panel marks only
+  `eat_in`, because every other pickup order is take-away and labelling all of
+  them would bury the one that is different.
 - **`scheduled`** is whether this is a pre-order still waiting, taken against the
   same instant the page was selected under — so a card cannot claim to be
   scheduled while the query that fetched it disagreed. `prepStartAt` is when the
@@ -755,7 +918,7 @@ The kitchen queue.
   showing it beside the quantity is not asking a kitchen to multiply.
 - **`counts`** is one number per stage — `{ active, scheduled, paid, unpaid,
   confirmed, preparing, almost_ready, ready, past }` — taken under every filter **except**
-  the stage itself. That is what lets a search say where an order is: type a pickup code
+  the stage itself. That is what lets a search say where an order is: type a code
   while looking at the live board and the counts read `active: 0, past: 1`, one
   click away, instead of an empty board with no explanation. They do **not** sum
   to `total`: `active` overlaps every working stage, so one paid order is
@@ -803,7 +966,25 @@ Everything that has happened to one order — what the card's **History** button
   anything. Scoped in the query, so an order outside reach is **404**.
 
 ### PATCH /restaurant/orders/{id}/status · *implemented* — `orders:advance`
-- **Body:** `{ "status": "confirmed|preparing|almost_ready|ready|completed|cancelled" }`
+- **Body:** `{ "status": "confirmed|preparing|almost_ready|ready|completed|cancelled", "pickupCode"? }`
+- **`completed` requires `pickupCode`, and every other status refuses it.** That
+  transition is the only one on this endpoint that is not a statement about the
+  kitchen: the rest say what the restaurant has done, and this one says the food
+  left the counter in somebody's hands. The evidence is the six digits the guest
+  shows, checked here against `orders.pickup_code` — which no staff endpoint
+  ever returns, so the panel cannot make this check itself and is not trusted
+  to. Required exactly on `completed` by the DTO, so "mark it ready" stays a
+  one-field request.
+  - A code of the wrong shape is **400** (validation).
+  - A well-formed code that is not this order's is **422** with
+    `details.reason = "pickup_code_mismatch"` — a distinct reason because a
+    mistyped digit is the ordinary outcome at a counter and clients word it
+    themselves, in the shift's language, rather than showing the API's sentence.
+  - The state machine is checked **first**: a correct code does not make
+    `paid → completed` legal, and the 422 for that names the real problem.
+  - **There is no override.** A guest who cannot produce their code cannot have
+    the order closed — see BUSINESS_LOGIC.md §5 for why that was chosen over an
+    audited escape hatch.
 - **`paid` is not settable.** Only a payment makes an order paid.
 - **`cancelled` is settable only from `created`** — the same rule the customer's
   cancel obeys. A branch cannot call off an order that has been paid for; the
@@ -890,6 +1071,110 @@ One restaurant, opened on its own.
 - **404, not 403**, outside the caller's reach — the reach is part of the query,
   so no path loads someone else's restaurant and then decides, and the answer
   does not confirm the id names anything.
+
+### PATCH /restaurant/restaurants/{id}/services · *implemented* — `restaurant:write`
+How the restaurant will feed people — pickup, table service, table booking.
+- **Body:** `{ "services": ["pickup","reserve"] }` — values from
+  `restaurants.services` (`pickup`, `dinein`, `reserve`).
+- **The whole set, not the one that moved.** The rules are about *combinations*:
+  "may this restaurant offer dine-in" cannot be answered without knowing whether
+  it takes bookings. A body naming one service at a time would have to be judged
+  against a set the caller may not have looked at since, and a whole set makes
+  the request idempotent.
+- **422 for a combination that is not a place** (BUSINESS_LOGIC.md §2): `dinein`
+  without `reserve`, a dining room whose tables cannot be booked. The message
+  names both services.
+- **There is no `eat_in` to send.** Eating in after collecting the order is
+  derived from the absence of `reserve`, not declared — see BUSINESS_LOGIC.md §2
+  for why a switch that could disagree with the booking was removed. The value
+  is outside the vocabulary now and the DTO refuses it.
+- **The back office disables the switch that would break the rule**, reading the
+  same `checkServices` from `@amragrir/shared` that this validates with — but a
+  disabled control is a courtesy to whoever is looking at the screen, not a
+  check on what reaches the database.
+- **Stored de-duplicated and in a fixed order** (`pickup, dinein, reserve`).
+  Nothing reads the array positionally, so the order is for whoever opens the
+  row; a save that only reorders writes no activity entry.
+- **Response 200:** the restaurant, in `GET /restaurant/restaurants/{id}`'s
+  shape — which is what shows a caller the *stored* set, including a service
+  switched off as a consequence rather than by the request.
+- **`restaurant:write`, held by a restaurant admin and above and by no
+  branch-level role.** This is one statement covering every branch of the
+  business, so a manager setting it at one branch would be answering for the
+  others. 404, not 403, outside reach.
+- Recorded as `restaurant.services` in `audit_log`, with the whole array in
+  `before` and `after`.
+
+### PATCH /restaurant/restaurants/{id}/cover · *implemented* — `restaurant:write`
+The photograph on the restaurant's card, on the catalog, and behind its page in
+the app.
+- **Body:** `{ "coverUrl": "https://api.amragrir.am/uploads/covers/<uuid>.jpg" }`
+  — normally the URL `POST /uploads/restaurant-cover` just answered with, though
+  any reachable absolute `http(s)` URL is accepted, trimmed, max 500 chars. The
+  same rule `photoUrl` follows, and for the same reason: this column has always
+  held addresses the API did not issue (the seed hotlinks them).
+- **`"coverUrl": null` takes the cover down.** The one place this differs from a
+  dish's photo, which cannot be blanked: the column is nullable, every client
+  already draws the no-cover state, and a restaurant that wants its photograph
+  gone has no other way to say so.
+- **400 for an absent field.** Only an *explicit* null removes — an empty body
+  would otherwise read as "take it down", which nobody sending it would have
+  meant.
+- **Response 200:** the restaurant, in `GET /restaurant/restaurants/{id}`'s
+  shape, so a caller re-renders from what was stored rather than from what it
+  sent.
+- **`restaurant:write`, held by a restaurant admin and above and by no
+  branch-level role.** One cover is shared by every branch, so a
+  `restaurant_manager` running one branch would be choosing the picture the
+  others are advertised under. 404, not 403, outside reach.
+- **Setting it and uploading it are two requests** — see
+  `POST /uploads/restaurant-cover`. This half is where reach is checked; the
+  upload only writes a file.
+- **A cover the request replaces is not deleted from disk.** The
+  `restaurant.cover` entry carries the previous URL in `before`, which is what
+  makes an accidental replacement recoverable.
+- **A request that changes nothing writes nothing** — no update and no entry.
+- Recorded as `restaurant.cover` in `audit_log`, with the URLs in `before` and
+  `after`, filed against the restaurant and **no branch**: it did not happen at
+  one.
+
+### PATCH /restaurant/branches/{id}/cover · *implemented* — `branch:write`
+This branch's own photograph.
+- **Body:** `{ "coverUrl": "https://…" }`, or **`null` to wear the restaurant's
+  again** — which is not "no picture". A branch with none falls back, and there
+  is deliberately no way to be blank while the business has one.
+- **`branch:write`, so a `restaurant_manager` may set it.** The same permission
+  that already lets them correct this branch's address and phone: a cover is a
+  statement about *this address*, and a manager answers for it. The
+  restaurant-level endpoint is the chain's default and stays `restaurant:write`.
+- Uploading is `POST /uploads/branch-cover`; this only decides which branch
+  wears the result. **Response 200:** the branch, with `own` and `offering`.
+- Recorded as `branch.cover`.
+
+### PATCH /restaurant/branches/{id}/services · *implemented* — `branch:write`
+What this branch offers.
+- **Body:** `{ "services": ["dinein","reserve"] }`, or **`null` to follow the
+  restaurant again**.
+- **`[]` and `null` are different answers.** `[]` is this branch declaring it
+  offers nothing, overriding a parent that offers pickup; `null` hands the
+  question back. Emptiness could never have meant "unset" — every restaurant is
+  created having declared nothing — which is why the row carries a separate
+  `services_overridden` flag.
+- **422 for a combination that is not a place**, judged per branch: a dining
+  room at this address still needs tables somebody can book, whether or not the
+  branch down the road has either. Same `checkServices` as the restaurant's.
+- Recorded as `branch.services`. `after.servicesOverridden: false` is the branch
+  giving the question back, which is a different event from declaring the same
+  set the business happens to declare.
+
+### PATCH /restaurant/branches/{id}/bookings · *implemented* — `branch:write`
+Whether this branch takes table bookings.
+- **Body:** `{ "reservationsEnabled": true | false | null }` — `null` follows the
+  restaurant. Its own request rather than a field on the services, because they
+  are two columns and either moves without the other.
+- Moved down with the services because `reserve` is one of them: the two must
+  agree per address, or a guest is offered slots the booking endpoint refuses.
+- Recorded as `branch.bookings`.
 
 ### GET /restaurant/restaurants/{id}/people · *implemented* — `staff:read`
 Who holds a role over the restaurant **itself** — its admins.
@@ -1009,6 +1294,11 @@ Rules worth knowing:
   number the kitchen has stopped believing. The exact opposite of `photoUrl`
   above, which the same request refuses to blank. Absent still means "leave it
   alone" for both.
+- **`prepMin: 0` is legal and is not `null`.** `0` says the dish needs no
+  cooking — a bottle of water, a cake already on the counter — and the quote
+  honours it; `null` says the dish declines to estimate and the branch's average
+  stands in. The bound is `0…480`; it was `1…480` until 2026-08-07, which left
+  the truest answer for a drink unsayable.
 - **A PATCH that moves nothing writes no history entry.** The body is diffed
   against the stored row before anything is recorded, so a form that re-sends an
   untouched price does not fill a dish's trail with "2400 → 2400".
@@ -1102,8 +1392,10 @@ hidden.
 - **`type`** is `prep_due`. An enum rather than a free string so the panel's
   rendering is exhaustive — a kind added to the database and not to the bell
   would arrive as a blank row, and this makes it a compile error instead.
-- **`payload` is numbers, never prose** — pickup code, full code, `readyAt`,
-  `prepStartAt`, `prepMin`, `reminderLeadMin`, `itemsCount`, `needsConfirming`.
+- **`payload` is numbers, never prose** — order code, `readyAt`, `prepStartAt`,
+  `prepMin`, `reminderLeadMin`, `itemsCount`, `needsConfirming`. **Never the
+  pickup code:** a bell is a screen a shift leaves open on a counter, and that
+  is the last place to print the one thing a guest has to be asked for.
   A job has no request to take a language from, so the panel renders the line
   through its own dictionary, exactly as it does an order status. Fields are
   absent where the order recorded nothing.
@@ -1171,6 +1463,35 @@ Rules worth knowing:
   somebody is still typing the price, so it can be shown back to them before the
   dish exists. A form abandoned afterwards leaves the file behind; nothing
   sweeps those yet, which is the known cost of the split.
+
+### POST /uploads/restaurant-cover · *implemented* — `restaurant:write`
+
+Stores one restaurant cover and answers with the URL to save on the restaurant.
+
+- **Request and refusals: identical to `POST /uploads/menu-photo` above** — raw
+  bytes, sniffed rather than trusted, uuid name, 5 MB, 415/413/400. A cover is
+  drawn larger, but "larger" is a rendering decision, and a second size limit
+  here would be a number to keep in step with a stylesheet.
+- **Response 201:** `{ "url": "https://api.amragrir.am/uploads/covers/<uuid>.jpg" }`
+- **`restaurant:write`, not `menu:write`** — the permission that sets the cover,
+  so an account that cannot choose a restaurant's photograph cannot put the file
+  on this disk either. A `restaurant_manager` holds neither.
+- **Its own directory** (`covers/`, not `menu/`). Names are uuids either way, so
+  this is not preventing a collision — it keeps two kinds of image that sit
+  behind different permissions separately answerable, for whoever later adds
+  thumbnailing or a sweep for orphans.
+- **This request grants no reach.** It writes a file and hands back a URL;
+  `PATCH /restaurant/restaurants/{id}/cover` is where the caller's scope decides
+  which restaurant may be given it. As with a dish, an abandoned form costs an
+  orphaned image rather than a half-changed row.
+
+### POST /uploads/branch-cover · *implemented* — `branch:write`
+
+One branch's own photograph. **Request, refusals and directory identical to
+`POST /uploads/restaurant-cover`** — the *permission* is the whole difference: a
+`restaurant_manager` may photograph their branch and may not re-photograph the
+business, and one endpoint would have to make that distinction in a service, out
+of sight of the guard.
 
 ### Where images are served from
 
@@ -1364,10 +1685,18 @@ Payments and orders that disagree. **Empty is the expected answer.**
 
 #### GET /admin/users — `platform:users`
 The **customer** list. Staff are `GET /staff`.
-- **Query:** `q` (phone, name or email), `role`, `id`, `page` (1-based, default 1), `limit` (default 20, **max 50** — above it is a 400, not a silent clamp)
+- **Query:** `q` (phone, name or email), `role`, `id`, `guests`, `page` (1-based, default 1), `limit` (default 20, **max 50** — above it is a 400, not a silent clamp)
 - **`id` narrows to one customer exactly** — what a diner's name in an order's
   history links to. There is no search term that would find only them: names are
   shared, and the phone this screen shows is masked.
+- **Anonymous sessions that never ordered are left out** unless `guests=true`
+  (`1` and `true` are on; anything else is off). One `users` row is written per
+  visitor to the storefront (`POST /auth/guest`), so newest-first they are the
+  whole first page — accounts with no name, no number and nothing bought, with
+  the people who actually order behind them. They are hidden, never deleted.
+- **A guest who *has* ordered is always listed**, whatever `guests` says: it is
+  somebody who bought something, which is what this list is asking. `id` is
+  likewise never filtered — a link that names an account must find it.
 - **Returns** `{ items, total, page }`; `total` counts everything matching `q`, not the page, which is what lets a client show how much it is not displaying. The back office pages this 25 at a time.
 - Ordered newest first (`createdAt desc`, `id desc`) — a stable tiebreak, so a row cannot appear on two pages.
 - **Phone numbers come back masked** (`+374******56`). The unmasked one is its
@@ -1394,9 +1723,10 @@ One customer's number **in full**.
 #### GET /admin/users/{id}/orders — `platform:users`
 What one customer has ordered, newest first.
 - **Query:** `q`, `status`, `page` (1-based, default 1), `limit` (default 10, **max 50**)
-- **`q`** matches the **order code** (full or the four-digit pickup code, which is
-  its suffix), a **dish on the order** (the snapshot name, not the dish's name
-  today), or the **restaurant/branch** it was bought at. Deliberately *not* the
+- **`q`** matches the **order code**, a **dish on the order** (the snapshot name,
+  not the dish's name today), or the **restaurant/branch** it was bought at. Not
+  the pickup code: this is the platform side rather than a counter, and the
+  response does not carry that code either. Deliberately *not* the
   customer's name, which the order board matches and which would match every row
   here by construction.
 - **`status`** is `all` (default) / `active` / `completed` / `cancelled` —
@@ -1413,7 +1743,9 @@ What one customer has ordered, newest first.
   the order board's per-stage counts, and `counts.all` is the sum of the group-by
   rather than of the other three, so a status no filter buckets is still counted.
 - Each item carries the whole order:
-  both codes, status, service mode, the restaurant and branch **ids** as well as
+  the order `code` (**not** the pickup code — no staff endpoint sends that, and
+  this screen is further from a counter than the board is), status, service
+  mode, the restaurant and branch **ids** as well as
   their names, every line (`menuItemId`, snapshot `name`, `qty`, `unitPriceAmd`,
   `lineTotalAmd`), the four money fields plus the total, the payment (`null` for
   an order nobody ever paid for), the booked table, the notes, `readyAt` and

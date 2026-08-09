@@ -17,9 +17,29 @@ pnpm --filter @amragrir/api dev             # API on :3000
 pnpm --filter @amragrir/mobile dev          # then press i / a / w
 ```
 
-`extra.apiUrl` in `app.json` points at `http://localhost:3000/v1`. On a
-**physical device** `localhost` is the phone itself — change it to your
-machine's LAN address (e.g. `http://192.168.1.5:3000/v1`).
+`extra.apiUrl` in `app.json` holds **a LAN address, not `localhost`** — on a
+physical device `localhost` is the phone itself, so it has to be the dev
+machine's address. The fallback in `src/api/client.ts` is `localhost:3000`; the
+value in `app.json` overrides it and is what actually gets used.
+
+**That address is committed, and DHCP moves it.** When the app renders its
+chrome but every screen says "Cannot reach the server", check this first — the
+IP in `app.json` is probably the machine's *old* one. `curl http://<that
+ip>:3000/v1/health` from the dev machine settles it in a second.
+
+**Changing it needs `--clear`.** Metro bakes the resolved config into the
+bundle and caches the result, so editing `app.json` and restarting is not
+enough — the old address is served from cache and the symptom looks identical
+to not having edited it at all:
+
+```bash
+pnpm --filter @amragrir/mobile exec expo start --clear
+```
+
+The web target is a real one here (`react-native-web` is a dependency and
+`app.json` sets `web.bundler: metro`), which is the quickest way to look at a
+change without a device: `pnpm --filter @amragrir/mobile web`. The first bundle
+takes about ten seconds and is ~4.6 MB.
 
 Signing in locally: the dev SMS sender prints the OTP to the **API** log —
 `[SMS] [dev] to +374...: Amragrir: 1234`.
@@ -37,7 +57,7 @@ app/                     # expo-router: file = route
 ├── restaurant/[id].tsx  # detail, menu tabs, add to basket
 ├── basket.tsx           # lines + quantities, priced by the server
 ├── checkout.tsx         # payment method, place order
-└── tracking/[id].tsx    # live status, countdown, pickup code
+└── tracking/[id].tsx    # live status, countdown, pickup code + its QR
 src/
 ├── api/                 # client (error envelope → ApiError), typed endpoints
 ├── cart.tsx             # the basket — client-side by design (see below)

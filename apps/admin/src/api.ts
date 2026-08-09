@@ -1,4 +1,4 @@
-import { CustomerOrderFilter, QueueFilter } from '@amragrir/shared';
+import { CustomerOrderFilter, HANDOVER_CODE_MISMATCH, QueueFilter } from '@amragrir/shared';
 import type {
   AuditAction,
   MenuTab,
@@ -143,6 +143,27 @@ export class ApiError extends Error {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+/**
+ * Whether a failed handover is the ordinary one: the digits did not match.
+ *
+ * The only API failure the panel rewords rather than shows as sent. A mistyped
+ * code is what happens at a counter several times a shift — it is not an error
+ * anybody needs the API's sentence for, it is a prompt to look at the guest's
+ * screen again, and it belongs in the shift's own language beside the box they
+ * typed into. Everything else from that endpoint still comes through
+ * `errorText`.
+ *
+ * Keyed off `details.reason` rather than the status: a 422 from there could
+ * equally be "that order is not ready yet", which is a different sentence and a
+ * different thing to do about it.
+ */
+export function isWrongPickupCode(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.details as { reason?: string } | undefined)?.reason === HANDOVER_CODE_MISMATCH
+  );
 }
 
 /**
@@ -403,12 +424,29 @@ export const SEARCH_DEBOUNCE_MS = 300;
  */
 export const ORDERS_PAGE_SIZE = 50;
 
+/**
+ * One card on the board.
+ *
+ * **No `pickupCode`, deliberately, and the API does not send one.** It used to
+ * be here and printed across the top of every card — which is what made the
+ * handover check pointless before it existed: a counter that can read the code
+ * off its own screen never has to ask the guest for it. The panel's only
+ * dealing with that code is the other direction, in `HandoverDialog`: typed in,
+ * sent to the API, checked there.
+ */
 export interface StaffOrder {
   id: string;
   code: string;
-  pickupCode: string;
   status: OrderStatus;
   serviceMode: string;
+  /**
+   * Where a pickup order ends up — `take_away`, `eat_in`, or null on a dine-in
+   * order and on anything placed before the choice existed.
+   *
+   * The one thing on this card the kitchen acts on before the food is ready: a
+   * bag and a plate are not the same order to pack.
+   */
+  pickupOption: string | null;
   branch: { id: string; name: string | null };
   customerName: string | null;
   itemsCount: number;
@@ -487,7 +525,8 @@ export interface StaffNotification {
  *  own columns are: an order from before pre-ordering existed recorded none of
  *  them, and the bell says so rather than printing "null minutes". */
 export interface PrepDuePayload {
-  pickupCode?: string;
+  /** The order's name. Never its collection code — the bell is a screen a shift
+   *  leaves open, and the code is the one thing the counter has to ask for. */
   code?: string;
   readyAt?: string | null;
   prepStartAt?: string | null;
@@ -569,6 +608,30 @@ export interface StaffBranch {
   isOpen: boolean;
   avgPrepMin: number | null;
   menuItemCount: number;
+  /**
+   * What this branch has answered for itself — `null`/`false` means it has not,
+   * and follows the restaurant.
+   *
+   * Both this and `offering` are sent, because the screen draws two different
+   * things: which switch is on *here* (what the "follow the restaurant" control
+   * reflects) and what a guest actually sees. Neither derives from the other —
+   * a branch declaring exactly what the business declares is a different state
+   * from one that has not declared, and only the flag tells them apart.
+   */
+  own: {
+    coverUrl: string | null;
+    services: string[];
+    servicesOverridden: boolean;
+    reservationsEnabled: boolean | null;
+  };
+  /** What a guest sees at this address, resolved by the same function every
+   *  customer read path uses — so the panel cannot promise what the catalog
+   *  will not show. */
+  offering: {
+    coverUrl: string | null;
+    services: string[];
+    reservationsEnabled: boolean;
+  };
 }
 
 /** What the restaurants list is narrowed to. Same shape of idea as
@@ -843,8 +906,6 @@ export interface AdminCustomerOrderItem {
 export interface AdminCustomerOrder {
   id: string;
   code: string;
-  /** The four digits a counter says out loud. */
-  pickupCode: string;
   status: OrderStatus;
   serviceMode: ServiceMode;
   restaurantId: string;
@@ -1058,8 +1119,19 @@ export const api = {
       },
     }),
 
-  setOrderStatus: (id: string, status: OrderStatus) =>
-    request<unknown>(`/restaurant/orders/${id}/status`, { method: 'PATCH', body: { status } }),
+  /**
+   * Moves an order along, and hands it over.
+   *
+   * `pickupCode` is required by the API on `completed` and refused on every
+   * other status — the counter proves the food went to the person it belongs
+   * to, and nothing else does. Optional here because the same call serves both:
+   * the board sends it only from the handover dialog.
+   */
+  setOrderStatus: (id: string, status: OrderStatus, pickupCode?: string) =>
+    request<unknown>(`/restaurant/orders/${id}/status`, {
+      method: 'PATCH',
+      body: { status, pickupCode },
+    }),
 
   /**
    * How much notice the branch wants on one pre-order.
@@ -1106,6 +1178,45 @@ export const api = {
   restaurant: (id: string) => request<StaffRestaurantDetail>(`/restaurant/restaurants/${id}`),
 
   /**
+   * What the restaurant offers — the whole set, not the one that moved.
+   *
+   * Whole, because the rules are about combinations: table service and the
+   * eat-in pickup option cancel each other out, so the API has to see both ends
+   * of the change to judge it. It answers with the restaurant as `GET` would,
+   * which is what keeps the page in step with a save that also switched
+   * something off.
+   */
+  setRestaurantServices: (id: string, services: string[]) =>
+    request<StaffRestaurantDetail>(`/restaurant/restaurants/${id}/services`, {
+      method: 'PATCH',
+      body: { services },
+    }),
+
+  /**
+   * Stores a restaurant cover and answers with the URL to save on it.
+   *
+   * The same two-step shape as a dish photo, and a different endpoint because
+   * it is a different permission: `restaurant:write` rather than `menu:write`,
+   * so a manager's panel gets a 403 here and does not render the control at
+   * all. Also answers with the URL rather than storing it — `setRestaurantCover`
+   * below is what puts it on the restaurant.
+   */
+  uploadRestaurantCover: (file: File) =>
+    request<{ url: string }>('/uploads/restaurant-cover', { method: 'POST', file }),
+
+  /**
+   * Puts an uploaded cover on the restaurant, or `null` to take it down.
+   *
+   * Answers with the restaurant as `GET` would, like the services above, so the
+   * page re-renders from what was stored rather than from what was sent.
+   */
+  setRestaurantCover: (id: string, coverUrl: string | null) =>
+    request<StaffRestaurantDetail>(`/restaurant/restaurants/${id}/cover`, {
+      method: 'PATCH',
+      body: { coverUrl },
+    }),
+
+  /**
    * The restaurant's own admins — the roles held over all of it.
    *
    * A separate request from the restaurant itself, because it needs a separate
@@ -1142,6 +1253,39 @@ export const api = {
 
   updateBranch: (id: string, patch: { name?: string; address?: string; phone?: string }) =>
     request<StaffBranch>(`/restaurant/branches/${id}`, { method: 'PATCH', body: patch }),
+
+  /**
+   * Stores a branch cover and answers with its URL.
+   *
+   * A different endpoint from the restaurant's because it is a different
+   * permission — `branch:write`, which a manager holds. Same bytes, same
+   * refusals, same directory.
+   */
+  uploadBranchCover: (file: File) =>
+    request<{ url: string }>('/uploads/branch-cover', { method: 'POST', file }),
+
+  /** This branch's own photograph, or `null` to wear the restaurant's again —
+   *  which is not the same as having none. */
+  setBranchCover: (id: string, coverUrl: string | null) =>
+    request<StaffBranch>(`/restaurant/branches/${id}/cover`, {
+      method: 'PATCH',
+      body: { coverUrl },
+    }),
+
+  /** What this branch offers, or `null` to follow the restaurant. `[]` is a
+   *  real answer — "this branch offers nothing" — and not the same as `null`. */
+  setBranchServices: (id: string, services: string[] | null) =>
+    request<StaffBranch>(`/restaurant/branches/${id}/services`, {
+      method: 'PATCH',
+      body: { services },
+    }),
+
+  /** Whether this branch takes bookings, or `null` to follow the restaurant. */
+  setBranchBookings: (id: string, reservationsEnabled: boolean | null) =>
+    request<StaffBranch>(`/restaurant/branches/${id}/bookings`, {
+      method: 'PATCH',
+      body: { reservationsEnabled },
+    }),
 
   menu: (branchId: string) =>
     request<{ items: StaffMenuItem[] }>('/restaurant/menu-items', { query: { branchId } }),
@@ -1256,12 +1400,25 @@ export const api = {
   reconciliation: () =>
     request<{ items: { orderCode: string; issue: string }[] }>('/admin/metrics/reconciliation'),
 
-  /** `id` narrows to one customer exactly — a link from an order's history,
-   *  which knows who it means and has no search term that would find only
-   *  them. */
-  users: (q?: string, role?: string, page = 1, id?: string) =>
+  /**
+   * `id` narrows to one customer exactly — a link from an order's history,
+   * which knows who it means and has no search term that would find only them.
+   *
+   * `guests` asks for the anonymous sessions too. The API leaves out the ones
+   * that never ordered unless asked, so the flag is sent only when it is on:
+   * omitting it is what gets the default, and `guests=false` would say the same
+   * thing in a way the DTO has to be trusted to read.
+   */
+  users: (q?: string, role?: string, page = 1, id?: string, guests = false) =>
     request<Page<AdminUser>>('/admin/users', {
-      query: { q, role, id, page: String(page), limit: String(USERS_PAGE_SIZE) },
+      query: {
+        q,
+        role,
+        id,
+        guests: guests ? 'true' : undefined,
+        page: String(page),
+        limit: String(USERS_PAGE_SIZE),
+      },
     }),
 
   /**

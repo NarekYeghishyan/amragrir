@@ -3,6 +3,7 @@ import { OrderStatus } from '@amragrir/shared';
 import { OrdersGateway } from './orders.gateway';
 import { OrderEventsService } from './order-events.service';
 import { NotificationEventsService } from '../notifications/notification-events.service';
+import { CustomerNotificationEventsService } from '../notifications/customer-notification-events.service';
 import type { StaffNotificationsService } from '../notifications/staff-notifications.service';
 import type { OrdersService } from './orders.service';
 import type { TokenService } from '../auth/token.service';
@@ -70,6 +71,10 @@ function build(
     reachableBranchIds: jest.fn().mockResolvedValue(options.branches ?? ['branch-1']),
   } as unknown as StaffNotificationsService;
 
+  // The customer fan-out — a third emitter, because a bell is addressed to one
+  // account rather than to an order or to a branch.
+  const customerNotificationEvents = new CustomerNotificationEventsService();
+
   const gateway = new OrdersGateway(
     tokens,
     staffTokens,
@@ -77,10 +82,104 @@ function build(
     events,
     notificationEvents,
     notifications,
+    customerNotificationEvents,
   );
   gateway.onModuleInit();
-  return { gateway, events, tokens, staffTokens, orders, notificationEvents, notifications };
+  return {
+    gateway,
+    events,
+    tokens,
+    staffTokens,
+    orders,
+    notificationEvents,
+    notifications,
+    customerNotificationEvents,
+  };
 }
+
+/** A verified customer, which is what `watchMe` requires. */
+const verified = { sub: 'user-1', phoneVerified: true };
+
+const notification = (over: Record<string, unknown> = {}) => ({
+  id: 'notification-1',
+  userId: 'user-1',
+  type: 'order' as const,
+  title: null,
+  body: null,
+  payload: { orderId: ORDER_ID, code: 'AMR-12344821', status: OrderStatus.Ready },
+  isRead: false,
+  createdAt: '2026-07-21T18:12:15.556Z',
+  ...over,
+});
+
+describe('watchMe', () => {
+  it('pushes this account notifications and no other account any', async () => {
+    const { gateway, customerNotificationEvents } = build({ user: verified });
+    const mine = fakeSocket();
+    const theirs = fakeSocket();
+    gateway.handleConnection(mine as never);
+    gateway.handleConnection(theirs as never);
+
+    await gateway.onWatchMe(mine as never, { token: 'access' });
+
+    customerNotificationEvents.publish(notification());
+
+    expect(mine.sent).toEqual([{ event: 'notification', data: expect.objectContaining({ id: 'notification-1' }) }]);
+    // The second socket never asked, so it has no account and hears nothing —
+    // which is also every back-office panel's socket.
+    expect(theirs.sent).toEqual([]);
+    gateway.onModuleDestroy();
+  });
+
+  it('sends an account nothing that belongs to somebody else', async () => {
+    const { gateway, customerNotificationEvents } = build({ user: verified });
+    const socket = fakeSocket();
+    gateway.handleConnection(socket as never);
+    await gateway.onWatchMe(socket as never, { token: 'access' });
+
+    customerNotificationEvents.publish(notification({ userId: 'user-2' }));
+
+    expect(socket.sent).toEqual([]);
+    gateway.onModuleDestroy();
+  });
+
+  it('refuses a guest, the same answer GET /notifications gives', async () => {
+    // "May you call this" and "may you hold this open" have to agree, or the
+    // socket is a way around the REST rule rather than a second route to it.
+    const { gateway, customerNotificationEvents } = build({
+      user: { sub: 'user-1', phoneVerified: false },
+    });
+    const socket = fakeSocket();
+    gateway.handleConnection(socket as never);
+
+    const reply = await gateway.onWatchMe(socket as never, { token: 'access' });
+
+    expect(reply).toEqual({ event: 'error', data: { message: 'A verified phone is required' } });
+    customerNotificationEvents.publish(notification());
+    expect(socket.sent).toEqual([]);
+    gateway.onModuleDestroy();
+  });
+
+  it('refuses a token that does not verify', async () => {
+    const { gateway } = build({ user: null });
+    const socket = fakeSocket();
+    gateway.handleConnection(socket as never);
+
+    const reply = await gateway.onWatchMe(socket as never, { token: 'nonsense' });
+
+    expect(reply).toEqual({ event: 'error', data: { message: 'Invalid or expired token' } });
+    gateway.onModuleDestroy();
+  });
+
+  it('stops listening when the module goes down', () => {
+    // A gateway that kept its subscription would go on writing to sockets from
+    // a torn-down module — and in tests, leak a listener per `build()`.
+    const { gateway, customerNotificationEvents } = build({ user: verified });
+    gateway.onModuleDestroy();
+
+    expect(() => customerNotificationEvents.publish(notification())).not.toThrow();
+  });
+});
 
 describe('subscribe', () => {
   it('answers with the current state, not only future changes', async () => {

@@ -626,6 +626,78 @@ p {
   background: var(--placeholder);
 }
 
+/* A restaurant's cover photograph, on its own page.
+
+   A small block with its controls beside it, not a banner across the card:
+   the question here is "is there one, and is it the right photograph", which a
+   thumbnail answers — and this section sits above the branches, so a full-width
+   hero would push what somebody came for down the page. The ratio is fixed and
+   the image cropped to it for the same reason the dish previews are: uploads
+   arrive in every shape, the app crops this to a banner anyway, and a row of
+   differently-shaped boxes reads as broken.
+
+   Wraps rather than shrinking the picture — on a narrow panel the controls go
+   under it and the thumbnail stays the size it is worth looking at. */
+.cover {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+.cover__image {
+  width: 168px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  background: var(--placeholder);
+}
+/* Held to the picture's width so the section is the same size either way, and
+   the controls beside it do not jump when a cover is added or removed. */
+.cover__none {
+  width: 168px;
+  margin: 0;
+}
+.cover__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+/* What a restaurant-level section is: the default a branch inherits, not the
+   answer. Sits under the title rather than in its aside because it is a
+   sentence, and the aside is where the one-line hints go. */
+.section-note {
+  margin: -4px 0 10px;
+  font-size: 13px;
+}
+
+/* One branch's own cover, services and bookings, inside its disclosure.
+   Separated by rules rather than cards: they are already inside one, and three
+   nested cards per branch reads as a stack of boxes. */
+.branch__settings {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-bottom: 14px;
+}
+.branch__setting {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.branch__setting + .branch__setting {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.row--between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .search {
   position: relative;
   display: inline-flex;
@@ -1750,6 +1822,26 @@ p {
 .order--late {
   border-color: var(--danger);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 12%, transparent);
+}
+/* The pin and the code it is about, as one thing at the head of the card. */
+.order__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+/* Pulled back by the button's own padding — half of 32px minus the 17px glyph —
+   so what lines up with the card's left edge is the pin itself rather than its
+   hit area, which is what the branch line and the items below are aligned to.
+   The colour is the ghost button's `--ink2` until the board is actually being
+   held: twenty accent-coloured pins down a board would read as a row of buttons
+   rather than a row of orders. */
+.order__pin {
+  margin-inline-start: -7px;
+}
+.order__pin--on,
+.order__pin--on:hover:not(:disabled) {
+  color: var(--accent);
 }
 .order__code {
   font-size: 26px;

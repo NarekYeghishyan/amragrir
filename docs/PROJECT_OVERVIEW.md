@@ -82,7 +82,7 @@ Amragrir is **order-ahead / dine-in booking**, not delivery. The core mechanic i
 ## 7. Terminology
 
 - **Pre-order** — a food order placed in advance for a specific time.
-- **Pickup** — self-collect at the counter (express counter), released by pickup code.
+- **Pickup** — self-collect at the counter (express counter), released by pickup code: six digits the guest shows (as a number or a QR), which the counter checks before the order can be closed.
 - **Dine-in** — table booking; accompanied by a deposit.
 - **Table deposit** — table deposit; **fully credited** toward the final bill, not an extra charge.
 - **Food ready at** — the time by which the kitchen prepares the order.

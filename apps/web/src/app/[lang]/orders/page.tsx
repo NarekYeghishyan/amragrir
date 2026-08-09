@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { api, ApiError, type Order } from '@/lib/api';
+import { api, ApiError, type OrderSummary } from '@/lib/api';
 import { parseLanguage, t } from '@/lib/language';
 import { formatAmd, formatTime } from '@/lib/format';
 import { readSession } from '@/lib/session';
@@ -34,8 +34,8 @@ export default async function OrdersPage({ params }: Props) {
     redirect(signinPath(language, ordersPath(language)));
   }
 
-  let active: { items: Order[] };
-  let past: { items: Order[] };
+  let active: { items: OrderSummary[] };
+  let past: { items: OrderSummary[] };
   try {
     [active, past] = await Promise.all([
       api.orders('active', session.accessToken, language),
@@ -81,7 +81,7 @@ export default async function OrdersPage({ params }: Props) {
   );
 }
 
-function OrderRow({ order, language }: { order: Order; language: string }) {
+function OrderRow({ order, language }: { order: OrderSummary; language: string }) {
   const label = t(language as Parameters<typeof t>[0]);
   return (
     <li>

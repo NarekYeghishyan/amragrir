@@ -14,7 +14,12 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { ORDER_MAX_ITEM_QTY, ORDER_MAX_LINES, ServiceMode } from '@amragrir/shared';
+import {
+  ORDER_MAX_ITEM_QTY,
+  ORDER_MAX_LINES,
+  PickupOption,
+  ServiceMode,
+} from '@amragrir/shared';
 
 export class OrderItemInputDto {
   @IsUUID()
@@ -37,6 +42,20 @@ export class BasketDto {
 
   @IsIn(Object.values(ServiceMode))
   serviceMode: ServiceMode = ServiceMode.Pickup;
+
+  /**
+   * Where a pickup order ends up — taken away, or eaten in the dining room.
+   *
+   * Optional, and absent means take-away: that is what every pickup restaurant
+   * offers, so a client that has never heard of this field still places the
+   * order it always placed. Sending it on a dine-in basket is refused by the
+   * service, as is `eat_in` at a branch that takes table bookings — both are
+   * business rules with a sentence attached rather than shapes, so neither is
+   * expressible here.
+   */
+  @IsIn(Object.values(PickupOption))
+  @IsOptional()
+  pickupOption?: PickupOption;
 
   @IsArray()
   @ArrayMinSize(1)

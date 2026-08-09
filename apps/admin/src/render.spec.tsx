@@ -62,6 +62,10 @@ const BRANCH: StaffBranch = {
   isOpen: true,
   avgPrepMin: 20,
   menuItemCount: 12,
+  // Answers for nothing itself, so it wears the restaurant's — the common
+  // case, and the one every screen has to render.
+  own: { coverUrl: null, services: [], servicesOverridden: false, reservationsEnabled: null },
+  offering: { coverUrl: null, services: ['pickup'], reservationsEnabled: false },
 };
 
 /** A second restaurant, so the two-step restaurant → branch picking has
@@ -145,6 +149,8 @@ describe('every screen renders', () => {
         <Restaurants
           branches={[BRANCH, OTHER_BRANCH]}
           canCreate
+          canEditRestaurant
+          canEditBranch
           canReadStaff
           canOpenOrders
           open={null}
@@ -160,6 +166,8 @@ describe('every screen renders', () => {
       <Restaurants
         branches={[BRANCH]}
         canCreate
+        canEditRestaurant
+        canEditBranch
         canReadStaff
         canOpenOrders
         open={{ restaurantId: 'r1', branchId: 'b1', assignmentId: null }}
@@ -444,9 +452,9 @@ describe('an order’s code as a QR code', () => {
   const ORDER: StaffOrder = {
     id: 'o1',
     code: 'AMR-48219031',
-    pickupCode: '9031',
     status: OrderStatus.Preparing,
     serviceMode: 'pickup',
+    pickupOption: 'take_away',
     branch: { id: 'b1', name: 'Northern Ave' },
     customerName: 'Aram',
     itemsCount: 2,
@@ -496,6 +504,8 @@ describe('every screen renders in every language', () => {
         key="r"
         branches={[BRANCH, OTHER_BRANCH]}
         canCreate
+        canEditRestaurant
+        canEditBranch
         canReadStaff
         canOpenOrders
         open={null}

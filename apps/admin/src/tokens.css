@@ -23,6 +23,8 @@
   --glass: rgba(246,245,242,0.78);
   --scrim: rgba(26,23,18,0.42);
   --good: #12A150;
+  --danger: #D64524;
+  --danger-soft: #FDEAE4;
   --shadow: rgba(60,40,15,0.12);
 
   --star: #F5A623;
@@ -61,6 +63,8 @@
     --glass: rgba(16,14,11,0.72);
     --scrim: rgba(0,0,0,0.62);
     --good: #2EC76F;
+    --danger: #F26B48;
+    --danger-soft: rgba(242,107,72,0.16);
     --shadow: rgba(0,0,0,0.55);
   }
 }
@@ -83,6 +87,8 @@
   --glass: rgba(246,245,242,0.78);
   --scrim: rgba(26,23,18,0.42);
   --good: #12A150;
+  --danger: #D64524;
+  --danger-soft: #FDEAE4;
   --shadow: rgba(60,40,15,0.12);
 }
 
@@ -102,5 +108,7 @@
   --glass: rgba(16,14,11,0.72);
   --scrim: rgba(0,0,0,0.62);
   --good: #2EC76F;
+  --danger: #F26B48;
+  --danger-soft: rgba(242,107,72,0.16);
   --shadow: rgba(0,0,0,0.55);
 }

@@ -1,8 +1,10 @@
 import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
+  HANDOVER_CODE_MISMATCH,
   OrderEventType,
   OrderStatus,
+  PICKUP_CODE_PATTERN,
   Permission,
   QUEUE_FILTER_STATUSES,
   TERMINAL_ORDER_STATUSES,
@@ -15,18 +17,37 @@ import { countdown } from '../orders/order-events.service';
 import { orderEventData, staffActor } from '../orders/order-history';
 import { OrderHistoryService } from '../orders/order-history.service';
 import type { OrderHistoryEntry } from '../orders/order-history';
-import { pickupCodeFrom } from '../orders/order-code';
 import { reminderFor } from '../orders/scheduling';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
 import { orderScope } from '../staff/scope';
 import { ListQueueDto, QueueFilter, SetOrderReminderDto, SetOrderStatusDto } from './dto';
 
+/**
+ * One card on the kitchen board.
+ *
+ * **No `pickupCode`.** It used to be here, and printed across the top of every
+ * card, which is exactly what made "confirm at handover" theatre: a counter that
+ * can read the code off its own screen never has to ask for it. The board names
+ * an order by `code` now, and the collection code reaches the panel only in the
+ * direction that matters — typed in, checked by the API, never sent out.
+ */
 export interface QueueItem {
   id: string;
   code: string;
-  pickupCode: string;
   status: OrderStatus;
   serviceMode: string;
+  /**
+   * Where a pickup order ends up — `take_away` or `eat_in`, null on a dine-in
+   * order.
+   *
+   * The one field on this card the kitchen acts on before the food is ready: a
+   * bag and a plate are not the same order to pack, and the counter is too late
+   * to ask. Null also on every order placed before the column existed, which is
+   * honest — nothing recorded it, though the migration could and did fill in
+   * take-away for the ones already in the table, since it was the only thing on
+   * offer at the time.
+   */
+  pickupOption: string | null;
   branch: { id: string; name: string | null };
   customerName: string | null;
   itemsCount: number;
@@ -202,10 +223,21 @@ export class RestaurantOrdersService {
     if (term) {
       narrow.push({
         OR: [
-          // Matches the full code and the pickup code both: the latter is the
-          // last four digits of the former.
           { code: { contains: term, mode: 'insensitive' } },
           { user: { name: { contains: term, mode: 'insensitive' } } },
+          // The collection code, and only when what was typed is one in full.
+          //
+          // A guest who cannot remember which order is theirs reads out six
+          // digits and the board finds it — that is the whole reason this
+          // branch exists, now that the code is no longer a substring of
+          // `code` and would otherwise be unfindable.
+          //
+          // Whole, not `contains`, and this is the difference between a lookup
+          // and an oracle: a substring match would let somebody type `4` and be
+          // handed every order whose collection code contains a four, which is
+          // most of them, along with the codes-by-elimination that follow. You
+          // can find the order you were told the code for, and nothing else.
+          ...(PICKUP_CODE_PATTERN.test(term) ? [{ pickupCode: term }] : []),
         ],
       });
     }
@@ -273,9 +305,9 @@ export class RestaurantOrdersService {
       items: rows.map((row) => ({
         id: row.id,
         code: row.code,
-        pickupCode: pickupCodeFrom(row.code),
         status: row.status as OrderStatus,
         serviceMode: row.serviceMode,
+        pickupOption: row.pickupOption,
         branch: { id: row.branch.id, name: row.branch.name },
         customerName: row.user.name,
         itemsCount: row.items.reduce((sum, item) => sum + item.qty, 0),
@@ -310,6 +342,10 @@ export class RestaurantOrdersService {
    * The legality of the move comes from the shared state machine, not from a
    * list written here — the same table the customer app reads, so the two
    * cannot disagree about what "ready" follows.
+   *
+   * One move has a second condition. `completed` means the food left the counter
+   * in somebody's hands, and the only evidence of that is the code they showed —
+   * so it is checked here, against this order, before anything is written.
    */
   async setStatus(
     staff: StaffJwtPayload,
@@ -334,9 +370,41 @@ export class RestaurantOrdersService {
       );
     }
 
+    if (dto.status === OrderStatus.Completed) {
+      this.verifyHandover(order.pickupCode, dto.pickupCode);
+    }
+
     // The staff member the token stands for — and the super admin behind it, if
     // this is an impersonated session. See `staffActor`.
     return this.orders.transition(order, dto.status, staffActor(staff));
+  }
+
+  /**
+   * The code the guest showed against the code the order carries.
+   *
+   * On the backend, and only on the backend. The panel never receives
+   * `pickup_code` — see `toQueueItem` — so there is nothing for it to compare
+   * against even if somebody wanted it to, and "the counter checked" is a fact
+   * about a request rather than about a screen.
+   *
+   * `reason` rides along in the error's details because the panel says something
+   * specific about this one: a mistyped code is the ordinary case at a counter,
+   * not a failure, and "that code does not match this order" is a different
+   * sentence from whatever an unexpected 422 would produce. The envelope
+   * forwards any extra key as `details` — see `AllExceptionsFilter`.
+   *
+   * A constant-time comparison would be the reflex and is not warranted: this
+   * is behind staff authentication, rate-limited by a human at a counter, and
+   * the code changes every order. Ordinary equality, and the honest reason
+   * written down rather than a defence nobody can explain.
+   */
+  private verifyHandover(expected: string, given: string | undefined): void {
+    if (given !== expected) {
+      throw new UnprocessableEntityException({
+        message: 'The pickup code does not match this order',
+        reason: HANDOVER_CODE_MISMATCH,
+      });
+    }
   }
 
   /**

@@ -19,6 +19,7 @@ import { useLanguage } from './i18n';
 import type { Translate } from './language';
 import { routePath } from './navigation';
 import { Link } from './router';
+import { serviceList } from './services';
 import { Banner, Button, Dialog, DialogBody, EmptyState, Pagination, Skeleton } from './ui';
 
 /**
@@ -408,6 +409,15 @@ export function headline(t: Translate, entry: ActivityEntry, language: Language)
 
     case AuditAction.MenuItemDelete:
       return t('activity_menu_item_delete', { name: dish });
+
+    case AuditAction.RestaurantServices:
+      // What the restaurant was left offering, not what moved. Turning table
+      // service on withdraws the eat-in option with it, so "turned dine-in on"
+      // would name half of a change whose other half is the one a guest would
+      // notice.
+      return t('activity_restaurant_services', {
+        services: serviceList(t, Array.isArray(after.services) ? after.services.map(String) : []),
+      });
 
     case AuditAction.BranchCreate:
       return t('activity_branch_create', { name: text(after.name) || '—' });

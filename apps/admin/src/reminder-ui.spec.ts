@@ -42,9 +42,9 @@ const READY_AT = '2026-08-06T09:00:00.000Z';
 const order = (over: Partial<StaffOrder> = {}): StaffOrder => ({
   id: 'o1',
   code: 'AMR-48219031',
-  pickupCode: '9031',
   status: OrderStatus.Confirmed,
   serviceMode: 'pickup',
+  pickupOption: 'take_away',
   branch: { id: 'b1', name: 'Northern Ave' },
   customerName: 'Aram',
   itemsCount: 2,
@@ -155,7 +155,6 @@ const notification = (over: Partial<StaffNotification> = {}): StaffNotification 
   branchId: 'b1',
   orderId: 'o1',
   payload: {
-    pickupCode: '9031',
     code: 'AMR-48219031',
     readyAt: READY_AT,
     prepStartAt: '2026-08-06T08:30:00.000Z',
@@ -171,7 +170,9 @@ const notification = (over: Partial<StaffNotification> = {}): StaffNotification 
 
 describe('the bell', () => {
   it('names the order it is about', () => {
-    expect(notificationHeadline(t, notification())).toContain('9031');
+    // By its order code. It used to be the collection code, which is the one
+    // thing a bell left open on a counter must not print.
+    expect(notificationHeadline(t, notification())).toContain('AMR-48219031');
   });
 
   it('still says something when the row recorded no code', () => {

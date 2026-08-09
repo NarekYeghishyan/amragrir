@@ -70,11 +70,17 @@ export function priceOrder(
  * the fries at once, so an order of ten dishes is not ten times slower. Falls
  * back to the branch average, then to a fixed default, so an order is never
  * scheduled for "now" just because nobody filled the column in.
+ *
+ * A declared `0` counts as declared. It changes nothing for a basket that also
+ * holds food — the maximum already ignores it — but a basket of nothing but
+ * bottled drinks is ready now, and falling through to the branch average there
+ * would invent a wait out of a column somebody did fill in. Only `null`, which
+ * is the dish declining to say, reaches the fallbacks.
  */
 export function estimatePrepMinutes(lines: PricedLine[], branchAvgPrepMin: number | null): number {
   const declared = lines
     .map((line) => line.prepMin)
-    .filter((min): min is number => typeof min === 'number' && min > 0);
+    .filter((min): min is number => typeof min === 'number' && min >= 0);
 
   if (declared.length > 0) {
     return Math.max(...declared);

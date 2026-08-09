@@ -17,9 +17,142 @@
 
 Each order has a mode: **`pickup`** or **`dine_in`**. **[from design]**
 
-- The restaurant declares supported services: `pickup`, `dinein`, `reserve`. **[from design]** (e.g. Sunny Table: all three; Greenhouse: pickup only).
-- Dine-in mode is available only if the restaurant supports `reserve`/`dinein`.
+- The restaurant declares supported services: `pickup`, `dinein`, `reserve` (`restaurants.services`). **[from design]** (e.g. Sunny Table: pre-order and booking; Greenhouse: a counter with tables, pre-order and walk-in seating).
+- Dine-in **mode** is available only if the restaurant supports `reserve` — that mode *is* the booking, and it carries a `reservationId`.
 - Pickup — released by **pickup code** at the express counter.
+
+**The stored value and the name a guest reads are not the same word.** The mode
+is `pickup` everywhere it is stored, sent or queried; every client *calls* it
+**Pre-Order** (hy `Պատվիրել նախապես`, ru `Заказать заранее`), and its two
+sub-modes read **Takeaway** (`take_away`) and **Eat at the Restaurant**
+(`eat_in`). Renaming the label was deliberately not a rename of the value: the
+database column, the `service` filter and every `POST /orders` body still carry
+`pickup`, so nothing about this is a migration. Change the wording in
+`packages/i18n` and it changes everywhere; there is no second copy.
+
+### Two ways of seating somebody, and an address does one of them
+
+A pre-order is the guest collecting the food themselves. What happens next is
+either **Takeaway** — they leave with it, bagged — or **Eat at the Restaurant**:
+they sit down with what they collected, plated. Which of those is on offer
+follows from how this address gets somebody into a seat, and there are exactly
+two ways:
+
+- **`dinein` — the room seats whoever arrives.** A khorovats place with tables,
+  a pizzeria, a bakery with a window seat. There is no table to hold and nothing
+  to put a deposit on, so the guest pre-orders, **pays for the food exactly as
+  any pre-order**, and eats it there off a plate instead of out of a bag. That
+  order is a `pickup` order with `pickup_option = eat_in`; the only thing the
+  sub-mode tells the kitchen is to plate rather than bag. **Both endings are
+  real, and both buttons are live.**
+- **`reserve` — the table is held in advance.** Eating in here is a date, a
+  slot, a table and a deposit against the bill: the booking flow, in `dine_in`
+  mode with a `reservationId`, not a checkbox on a pre-order. **Its pre-order is
+  Takeaway and nothing else.**
+
+**The two exclude each other.** Both mean "you can eat here" and they differ
+only on what the guest does first, so declaring both would advertise two answers
+to one question and leave the pre-order screen unable to say whether "Eat at the
+Restaurant" means *press this* or *go and book*. An address that both holds
+tables and seats walk-ins declares `reserve`: the booking is the stronger
+promise, and a guest who has one is not helped by also being told they might get
+lucky.
+
+So:
+
+- **Takeaway is what a pre-order *is*.** It needs no flag: every place offering
+  a pre-order offers it, and there is no configuration in which it is off.
+- **Eating in is declared, not derived.** It used to be offered wherever
+  `reserve` was absent, which quietly assumed every place without bookings had
+  somewhere to sit — a hatch on a street corner does not, and it was offering
+  "Eat at the Restaurant" to people with nowhere to eat it. Having a dining room
+  is a fact about a place, and facts about a place are declared. (There is still
+  no `eat_in` *service*: `dinein` says the room exists, and the per-order choice
+  lives in `orders.pickup_option`.)
+- **Nothing requires anything.** A service can be switched off without taking
+  another with it, which is what makes "we have stopped seating people" sayable.
+- **The panel chooses rather than refuses.** Turning `dinein` on turns `reserve`
+  off and the other way round (`toggleService`), so no switch is ever disabled.
+  The rule is not softened by that: a `PATCH` body naming both is still refused
+  with a 422.
+- **The guest is shown the rule, not just its result.** At a booking restaurant
+  the clients still draw "Eat at the Restaurant" beside Takeaway — dimmed,
+  dashed, reading "only by booking a table" — and pressing it switches the
+  basket to dine-in and opens the calendar. Hiding it would leave somebody to
+  discover the rule by not finding it.
+
+The whole of it:
+
+| Declared | Dine-in mode | Pre-Order → Takeaway | Pre-Order → Eat at the Restaurant |
+|---|---|---|---|
+| `pickup` | ❌ | ✅ | ❌ — nowhere to sit |
+| `pickup`, `dinein` | ❌ | ✅ | ✅ — paid as a pre-order, no deposit |
+| `pickup`, `reserve` | ✅ | ✅ | → book a table |
+| `dinein` | ❌ | ❌ | ✅ — nothing to carry out |
+| `reserve` | ✅ | ❌ | ❌ |
+| `dinein`, `reserve` | — | — | **refused: two ways of seating somebody** |
+
+**Enforced in two places, from one rule.** `checkServices` in
+`@amragrir/shared` (`service-offering.ts`) answers whether a set of services
+describes a real place. `PATCH /restaurant/restaurants/{id}/services` and
+`PATCH /restaurant/branches/{id}/services` both refuse one that does not with a
+422; the back office reads the same function per row, and `toggleService` keeps
+every click on a legal set. Neither restates the rule, so the panel cannot offer
+what the API is about to refuse.
+
+**A walk-in eat-in order carries no deposit and no table.** It is priced,
+charged and tracked as the pre-order it is — `RESERVATION_DEPOSIT_AMD` belongs
+to the booking flow, and there is no held table to secure. `orders.table_no` and
+`orders.reservation_id` stay null, exactly as on a Takeaway order.
+
+**`reserve` is what kind of place this is; `reservations_enabled` is whether it
+is taking bookings this week.** The two are deliberately different questions. A
+restaurant that has paused its bookings is still a restaurant — its pre-order
+stays Takeaway only, and the dead button now leads to a calendar that says "not
+taking bookings" rather than turning the place into one that seats walk-ins for
+an afternoon. Pausing bookings is not a way to acquire a dining room; only
+`dinein` says there is one.
+ 
+**These are answered per branch.** `restaurants.services` is the **default**;
+a branch that answers for itself (`services_overridden`) overrides it, and the
+rules above then judge that one address — the branch with the dining room takes
+bookings and hands out bags, whether or not the counter in the mall down the
+road does. What a guest is offered, and what an order is validated against, is
+always the branch's resolved set (`resolveBranchOffering`). The same is true of
+`reservations_enabled`, which moved down with them because `reserve` is one of
+them. See ROLES_AND_PERMISSIONS.md for who sets which level.
+
+### What the guest chooses, and what the kitchen sees
+
+The services above are what a restaurant *offers*. What one order *is* lands in
+**`orders.pickup_option`**: `take_away` or `eat_in`, and **null exactly when the
+order is dine-in** — a CHECK constraint holds it to that (DATABASE.md §5).
+
+- **Nothing chosen means `take_away`.** Every pre-order restaurant hands food
+  over, so the default is the ending that always exists — and a client that has
+  never heard of the field still places the order it always placed.
+- **`eat_in` is refused at a branch that takes bookings**, checked when the
+  basket is priced *and* when the order is created. Not trusted from the basket:
+  a basket outlives the page it was built on, and a branch can start taking
+  bookings between choosing it and paying.
+- **Refusal keys off `reserve`, not off `dinein`** — deliberately wider than
+  what the screen *shows*. `pickupOptionsFor` wants the dining room declared
+  before it offers to seat anybody, but a restaurant is created with an empty
+  `services` and many never fill it in; refusing an order on the strength of a
+  field nobody got round to would break orders those places have always taken.
+  Showing less than is allowed is a screen being careful. Refusing more than is
+  forbidden is a screen breaking orders.
+- **A dine-in order may not carry one at all.** Food brought to a table it is
+  already sitting at is neither taken away nor collected.
+- **The clients offer the choice only when there are two of them.** `POST
+  /cart/quote` answers with `pickupOptions`; one button is not a question. It
+  also answers with `eatInRequiresBooking`, which is what keeps the second
+  button on the screen — dead, pointing at the calendar — where there is only
+  one ending to choose.
+- **The kitchen is told.** The order board marks an eat-in order and nothing
+  else — every other pickup order is take-away, so labelling all of them would
+  bury the one that needs a plate rather than a bag. This is the whole point of
+  recording it: the counter is too late to ask.
 
 ---
 
@@ -40,9 +173,19 @@ Rules **[proposed based on design]**:
 
 - **A booking is a seating, not an instant.** It occupies
   `RESERVATION_SEATING_MINUTES` (90), which is why 19:00 and 19:30 conflict on
-  the same table. Slots are offered every `RESERVATION_SLOT_MINUTES` (30), and
-  the last one is a full seating before closing — offering 22:30 when the
-  kitchen shuts at 23:00 sells a table nobody can use.
+  the same table. Slots are offered every `RESERVATION_SLOT_MINUTES` (**10**
+  since 2026-08-08; it was 30), and the last one is a full seating before
+  closing — offering 22:30 when the kitchen shuts at 23:00 sells a table nobody
+  can use.
+  - **The spacing is the grain of the offer, not the length of the booking.**
+    Only the first number moved: a party still keeps the table 90 minutes, so
+    19:00 and 19:10 collide exactly as 19:00 and 19:30 did. What changed is that
+    somebody who wants 19:20 can now ask for it. A 10:00–23:00 day therefore
+    offers about 70 starts where it offered 21.
+  - **One generator, so the offer and the gate cannot drift.** `isSlotBoundary`
+    decides whether a requested instant is legal by regenerating the day from
+    `slotsFor` rather than by testing the minute against a copy of the spacing —
+    which is why changing this number needed no change to `POST /reservations`.
 - **Availability is answered per party size.** "19:00 is free" is meaningless
   without knowing whether it is free for two or for eight; a slot is available
   when at least one table big enough is free for the whole seating.
@@ -115,6 +258,11 @@ See the deposit table in §3.
   cooks in parallel, so ten dishes are not ten times slower. Falls back to the
   branch average, then to `DEFAULT_PREP_MIN`, so an unfilled column never
   schedules an order for "right now".
+- **A prep time of `0` is a declaration, not an unfilled column.** Some things
+  are handed over rather than cooked — bottled water, a canned drink, a cake on
+  the counter — and a basket holding only those is ready now. Beside food it
+  changes nothing, because the estimate is the maximum. Only a dish that says
+  nothing (`null`) reaches the fallbacks above.
 - A requested `ready_at` earlier than that estimate is rejected; so is one more
   than `ORDER_MAX_LEAD_DAYS` ahead. A minute of slack is allowed for clock skew
   between the quote and the order.
@@ -185,17 +333,61 @@ possible are both refused, the latter because it has no warning to move.
 which writes a `staff_notifications` row for the branch and announces it on the
 socket. See DATABASE.md §8b.
 
+**Telling the customer.** Every move an order makes is also announced to whoever
+placed it, as a row in `notifications` (DATABASE.md §12) and a push on the same
+socket — the bell in the web header and in the app. `CustomerNotificationsService`
+subscribes to the order event stream rather than being called from the places
+that move an order, so a fourth one is announced for free.
+
+Six of the eight statuses earn a notification: **`confirmed`, `preparing`,
+`almost_ready`, `ready`, `completed`, `cancelled`**. The two that do not:
+
+- **`created`** — the customer is the one who just created it, and is looking at
+  the screen that says so.
+- **`paid`** — paying publishes `paid` and `confirmed` back to back from one
+  transaction (both, so the socket sees an edge the state machine has), and
+  announcing both would buzz a phone twice for one tap. `confirmed` is the half
+  that carries news: the kitchen has the order.
+
+A notification interrupts somebody, so it has to earn the interruption by
+telling them something they could not already see.
+
 **Pre-orders stay off the live board until their hour comes.** The back office
 splits every stage on `reminder_at` against the clock — never on
 `reminder_sent_at`, so an order still reaches the board on time in a deployment
 where the job is not running. The job announces; it does not gatekeep.
 - **Countdown** after placing: starts at `480 seconds` (8:00 min) to readiness (demo value). **[from design]** In production `ready_at` is computed from the chosen time and current kitchen load.
-- **Pickup code** generated per order; for dine-in — table number. **[from design]**
-  It is the **last four digits of `orders.code`** (`AMR-42774033` → `4033`) —
-  derived rather than stored, so the two can never disagree. `orders.code`
-  carries the unique constraint; the pickup code is additionally checked
-  against active orders at the same branch, because with only 10,000 possible
-  values a busy branch would otherwise repeat one surprisingly often.
+- **Pickup code** generated per order — **six digits, and the order is not
+  closed without it.** Every order gets one, `pickup` and `dine_in` alike: one
+  rule rather than two, so nobody at a counter has to remember which kind of
+  order asks for a code. A dine-in order additionally has its table number,
+  which is where the food goes, not what proves it was collected.
+
+  It is **`orders.pickup_code`** — generated in its own right and stored under
+  its own unique constraint, **not derived from `orders.code`**. It used to be
+  the order number's last four digits (`AMR-42774033` → `4033`), which meant
+  the receipt gave it away; see DATABASE.md §7 for the whole argument and for
+  the 1,000,000-order ceiling global uniqueness implies.
+
+  **The counter never sees it.** No staff endpoint returns it — not the kitchen
+  board, not the platform-admin customer screen, not a `prep_due` notification.
+  It reaches the back office only by being typed into the handover dialog.
+  Staff *can* search by it (`GET /restaurant/orders?q=`), matched whole, so a
+  guest who remembers nothing else can be found.
+
+- **`ready → completed` requires the pickup code.** It is the one transition
+  that is not a statement about the kitchen: every other status says what the
+  restaurant has done, and this one says the food left the counter in somebody's
+  hands. `PATCH /restaurant/orders/{id}/status` refuses `completed` without a
+  matching `pickupCode` (422, `details.reason = pickup_code_mismatch`), and the
+  comparison is made in the API against `orders.pickup_code`.
+
+  **There is no override.** A guest who cannot produce their code — a dead
+  phone, a friend collecting — cannot have the order closed for them, and staff
+  cannot wave it through. That was chosen deliberately over an escape hatch with
+  an audit entry; if it proves too rigid at a real counter the fix is a
+  permission-gated override recorded in `order_events`, not a way around the
+  check.
 - **Cancellation is allowed only while the order is unpaid** (`created`).
   Paying commits the order: from `paid` onwards there is no way out of the
   queue for either side — not the customer, and not the restaurant. An unpaid
@@ -322,17 +514,34 @@ them to go and host it first. The panel uploads the file
 comes back. An edit may swap the picture for a better one but cannot remove it.
 
 **Every dish in the demo data has one, and it is a photograph of that dish.**
-The seed points each one at a real picture hosted elsewhere — recipe photos from
-TheMealDB/TheCocktailDB, freely-licensed photographs from Wikimedia Commons —
-falling back to a photograph of its category where no picture of the dish itself
-could be found. Hotlinked rather than downloaded: no images in the repository
-and no licences to carry, at the cost of depending on somebody else's servers,
-which `MENU_PHOTOS=local` trades back for the committed placeholders.
+The seed points each one at a real picture hosted elsewhere — recipe photography
+from TheMealDB and TheCocktailDB — falling back to a photograph of its category
+where no picture of the dish itself could be found. Hotlinked rather than
+downloaded: no images in the repository and no licences to carry, at the cost of
+depending on somebody else's servers, which `MENU_PHOTOS=local` trades back for
+the committed placeholders.
 
-`pnpm --filter @amragrir/api db:photos` applies the same table to a database
-that is already running. It rewrites a dish with no photograph or one the seed
-put there, and **never** one a restaurant uploaded — that is the only picture in
-the table anybody actually chose.
+**Those two hosts only.** Wikimedia Commons was used and dropped: it answers 403
+to a request whose `User-Agent` is a bare library name, which is what React
+Native sends, so every Commons picture was blank in `apps/mobile` while the site
+showed all of them. A new URL belongs in these tables only after it answers 200
+to that agent.
+
+**Every demo restaurant has a cover too**, on the same terms
+(`prisma/restaurant-covers.ts`): a photograph of what that kitchen sends out, by
+slug, falling back to one per cuisine and then to something plated for a cuisine
+the table does not know. `restaurants.cover_url` is what the card, the
+restaurant banner and the order thumbnail draw; it was null for every
+restaurant, so all three showed their empty state. Seeding it is not the upload
+feature: a restaurant sets its own cover through the back office
+(`PATCH /restaurant/restaurants/{id}/cover`, `restaurant:write` — a
+`restaurant_manager` may not, see ROLES_AND_PERMISSIONS.md), and that overwrites
+a seeded photograph freely.
+
+`pnpm --filter @amragrir/api db:photos` applies both tables to a database that
+is already running. It rewrites a dish or a restaurant with no picture, or one
+the seed put there, and **never** one a restaurant uploaded — that is the only
+picture in the table anybody actually chose.
 
 ### A dish changing
 
@@ -351,6 +560,10 @@ charged.
 null`) takes the estimate off the dish and the branch's average stands in —
 an estimate can turn out to be wrong. Emptying the photograph is refused: a dish
 is required to have one, so an edit may swap the picture but never remove it.
+
+**And a third thing that is neither: `0`.** An empty box is the dish declining to
+estimate; `0` is it estimating none, which is the honest answer for anything sold
+as it stands. The panel accepts `0…480` minutes.
 
 ### A dish leaving the menu
 
@@ -456,7 +669,8 @@ customer buy the dish would not be a delete.
 | Referral discount | 2%, stacks to 25% | design |
 | Filter price range | 4000–24000֏ | design |
 | Distance range | 0.5–5 km | design |
-| Booking slot interval | 30 min | proposed |
+| Booking slot interval | 10 min | **confirmed 2026-08-08** (was 30, proposed) |
+| Ready-time interval | 10 min | **confirmed 2026-08-08** (was 15) |
 | Seating length | 90 min | proposed |
 | Free cancellation window | 2 h | proposed |
 | Max booking lead time | 30 days | proposed |
@@ -468,6 +682,7 @@ customer buy the dish would not be a delete.
 | Fallback prep time | 15 min | proposed |
 | Pre-order warning buffer (added to the prep estimate) | 10 min | proposed |
 | Warning notice a shift may set | 5 min – 24 h | proposed |
+| Pickup code length | 6 digits | **confirmed 2026-08-08** (was 4, and derived from the order code) |
 
 > Move all numeric business constants to config/settings, do not hardcode.
 > They currently live in `packages/shared/src/constants.ts`; the ordering

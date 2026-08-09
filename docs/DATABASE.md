@@ -57,8 +57,8 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | reviews_count | integer DEFAULT 0 | |
 | owner_id | uuid FK→users.id **NULL** `ON DELETE SET NULL` | **historical.** Who administers a restaurant is a `restaurant_admin` row in `staff_assignments` (§17) — a set, not a single id, which is what makes two administrators or a handover expressible. Kept as the only record of the original owner for restaurants whose owner had no email and so could not be migrated into `staff_users`. Deleting that user empties the column rather than refusing: the restaurant does not depend on them any more, and a record of who it once was is not worth blocking a deletion for. |
 | reservations_enabled | boolean DEFAULT false | enable/disable booking |
-| services | text[] | {pickup, dinein, reserve} |
-| cover_url | text NULL | |
+| services | text[] | `{pickup, dinein, reserve}`. **Not every combination is legal** — `dinein` and `reserve` exclude each other, being the two ways of seating somebody (BUSINESS_LOGIC.md §2). The rule is `checkServices` in `@amragrir/shared`, enforced by `PATCH /restaurant/restaurants/{id}/services`; there is no CHECK constraint, because the vocabulary is a code-side enum and the array would need one per rule. Stored de-duplicated and in that order — nothing reads it positionally, so the order is for whoever opens the row. **`eat_in` used to be a member and is not one now:** whether a place seats people is `dinein`, and what one guest chose lives in `orders.pickup_option`; the `20260805090000_eat_in_derives_from_bookings` migration strips the value from every row, and `20260805170000_dinein_excludes_reserve` repairs rows that declared both seatings. |
+| cover_url | text NULL | The picture on the restaurant's card, its banner and the thumbnail beside an order — an **absolute** URL, like `menu_items.photo_url` and for the same reason. Written by `PATCH /restaurant/restaurants/{id}/cover` (`restaurant:write` — a `restaurant_manager` may not, see ROLES_AND_PERMISSIONS.md), which stores the URL that `POST /uploads/restaurant-cover` answered with. The seed is the other writer, planting a demo photograph per restaurant (`prisma/restaurant-covers.ts`; `refreshSeedCovers`, run on its own as `pnpm --filter @amragrir/api db:photos`); the endpoint overwrites a seeded value freely, and the seed rewrites only a cover that is empty or one it planted — never one somebody chose. Nullable and staying that way: a restaurant without a picture is an ordinary state, every client already falls back, and an explicit `null` through that endpoint is how a cover is taken down. The seed prints `restaurantsWithoutCover` on every run. |
 | created_at / updated_at | timestamptz | |
 
 ---
@@ -71,6 +71,10 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | restaurant_id | uuid FK→restaurants.id | |
 | name | varchar(160) | e.g. "Northern Ave" |
 | address | text | |
+| cover_url | text NULL | **This branch's own photograph, or NULL to wear the restaurant's.** Branches of one chain are different places — one has a dining room, one is a counter in a mall — so the parent is the *default* rather than the answer. There is deliberately no "explicitly blank" state: a branch with none falls back, because a blank card beside a business that has a picture is worse than showing the business's. Set by `PATCH /restaurant/branches/{id}/cover` (`branch:write`). |
+| services | text[] NOT NULL DEFAULT '{}' | What this branch offers, **when `services_overridden` is true** — meaningless otherwise. The `checkServices` rules (BUSINESS_LOGIC.md §2) now judge one address rather than the business. |
+| services_overridden | boolean NOT NULL DEFAULT false | Whether `services` above is this branch's answer or the restaurant's. A flag rather than a nullable array for two reasons: **Prisma scalar lists cannot be null**, and `{}` is already a legitimate value — every restaurant is created having declared nothing, so a branch must be able to override a pickup parent with a genuinely empty set. A CHECK (`services_overridden OR cardinality(services) = 0`) holds the array to the flag, so a stale set cannot sit behind a `false` looking like an answer. |
+| reservations_enabled | boolean NULL | Whether this branch takes bookings, or NULL to follow the restaurant's. Moved down with the services because `reserve` is one of them: a branch offering `reserve` under a business flag saying otherwise would be two answers to "can I book a table here". |
 | city | varchar(80) DEFAULT 'Yerevan' | |
 | lat / lng | numeric(9,6) | geolocation |
 | phone | varchar(20) | |
@@ -179,10 +183,12 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | Field | Type | Description |
 |---|---|---|
 | id | uuid PK | |
-| code | varchar(12) UNIQUE | pickup code |
+| code | varchar(12) UNIQUE | the order's **name**: `AMR-` + 8 digits. Printed on the ticket, read out over the phone, scanned off the board, typed into a support note. It identifies an order; it proves nothing about one |
+| pickup_code | varchar(6) UNIQUE | the order's **proof**: the six digits a guest shows to collect it, and the only thing that lets the counter move it to `completed`. Generated in its own right — **not derived from `code`** — and never sent to a staff endpoint. See the note below |
 | user_id | uuid FK→users.id | |
 | branch_id | uuid FK→restaurant_branches.id | |
 | service_mode | enum(`pickup`,`dine_in`) | |
+| pickup_option | enum(`take_away`,`eat_in`) NULL | Where a pickup order ends up. **Set exactly when `service_mode = 'pickup'`**, enforced by the CHECK below. `eat_in` is only accepted from a branch that does **not** take table bookings (BUSINESS_LOGIC.md §2) — at a restaurant, eating in is a booked table; the kitchen reads it, because a bag and a plate are not the same order to pack. Backfilled to `take_away` for the pickup orders that predate it — the only ending on offer at the time, so not a guess. Rows written under the old rule keep whatever they recorded: what a guest chose is what happened, and rewriting it would be a lie about history. |
 | status | enum(`created`,`paid`,`confirmed`,`preparing`,`almost_ready`,`ready`,`completed`,`cancelled`) | |
 | subtotal_amd | integer | |
 | service_fee_amd | integer | |
@@ -197,6 +203,55 @@ restaurants 1─* reviews         menu_items *─* dietary_tags
 | reservation_id | uuid FK→reservations.id NULL | if dine_in |
 | notes | text NULL | |
 | created_at / updated_at | timestamptz | |
+
+**`orders_pickup_option_matches_service_mode`** — `(service_mode = 'pickup') =
+(pickup_option IS NOT NULL)`. A CHECK rather than NOT NULL, because the column is
+required for one value of `service_mode` and forbidden for the other: a dine-in
+order has a table instead, and "took it away from the table it is sitting at" is
+not a state worth being able to store. Written as an equality between two
+booleans so it states the whole rule in one line. Prisma has no CHECK support, so
+it lives in `20260804090000_pickup_option/migration.sql` and here — not in
+`schema.prisma`.
+
+### `pickup_code` — the collection code
+
+**It is not derived from `code`, and that is the whole design.** Until
+`20260808090000_independent_pickup_code` the pickup code *was* the last four
+digits of `orders.code` — computed in the API, never stored, on the argument
+that two stored identifiers can come to disagree. True, and beside the point:
+the order number is printed on the ticket, read out over the phone and scanned
+off the board, so every place it appears was a place the collection code leaked
+with it. `AMR-24919119` told you `9119`, and `9119` was all the counter ever
+asked for. A proof derived from a public name proves nothing.
+
+So it is drawn independently (`randomInt` over the whole space — this is a
+credential, not a serial number), stored, and:
+
+- **Never sent to a staff endpoint.** Not on the kitchen board, not on the
+  platform-admin customer screen, not in a `prep_due` notification payload. The
+  panel's only dealing with it is the other direction — typed into the handover
+  dialog and checked by the API. A card that printed the code would mean a
+  counter can close an order without a guest being present, which is exactly the
+  situation this replaced.
+- **Searchable, but only whole.** `GET /restaurant/orders?q=` matches it on
+  equality, never as a substring, so a guest who remembers only their six digits
+  can be found and the box cannot be walked digit by digit into somebody else's
+  code.
+- **Backfilled for every order, history included** — the column is NOT NULL and
+  the check reads it directly, so a row without one is a row nobody can ever
+  close. The migration assigns them as a bijection over the space rather than a
+  sequence, so the backfilled codes are as unguessable as new ones.
+
+**Unique across the table, not per branch — which caps the platform at
+1,000,000 orders, ever.** Per-branch uniqueness would be enough for the check to
+be correct, since a code is only compared against the one order in front of
+somebody. Global uniqueness buys something else: a mistyped code can never
+quietly *be* a different live order's, here or at another branch, so "wrong
+code" is always the answer. Past a million orders the unique index refuses the
+insert and order creation fails loudly — which is the intended failure, the
+alternative being to silently reuse somebody's proof of purchase. The two ways
+out are widening the column or scoping uniqueness to the branch, and both are
+decisions for a person rather than something the code should work around.
 
 **`reminder_at` is what makes an order a pre-order.** Null means it was placed
 for as soon as possible: the warning would land in the past, and there is nobody
@@ -313,7 +368,7 @@ to a person. One kind so far: a pre-order is about to need cooking.
 | branch_id | uuid FK→restaurant_branches.id ON DELETE CASCADE | who is being told |
 | type | enum(`prep_due`) | what kind of thing this is |
 | order_id | uuid FK→orders.id NULL ON DELETE CASCADE | what it is about, when it is about an order |
-| payload | jsonb NULL | the numbers the panel renders the line from — pickup code, when it is due, the prep estimate, the notice, the dish count |
+| payload | jsonb NULL | the numbers the panel renders the line from — order code, when it is due, the prep estimate, the notice, the dish count. **Never the pickup code:** a bell is a screen a shift leaves open, and that is the last place to print the one thing the counter has to ask a guest for |
 | created_at | timestamptz | |
 
 **Not a staff-side copy of `notifications` (§12).** That table has a `user_id`
@@ -413,16 +468,55 @@ deposit never happens.
 
 ## 12. notifications
 
+The customer's bell. One account's rows, read by that account and nobody else —
+**not** a customer-side copy of `staff_notifications` (§8b): that table is
+addressed to a *branch* and read by whoever is on shift, which is why it needs a
+separate `staff_notification_reads` table to answer "have *I* seen this". Here
+the reader is the row's owner, so `is_read` is a column.
+
 | Field | Type | Description |
 |---|---|---|
 | id | uuid PK | |
 | user_id | uuid FK→users.id | |
 | type | enum(`order`,`reservation`,`promo`,`referral`,`system`) | |
-| title | varchar(160) | |
-| body | text | |
-| payload | jsonb NULL | deep-link data |
+| title | varchar(160) NULL | the words, **when the server wrote them** — see below |
+| body | text NULL | |
+| payload | jsonb NULL | what the row is about; for `order`: `{ orderId, code, status }` |
 | is_read | boolean DEFAULT false | |
 | created_at | timestamptz | |
+
+**`title`/`body` are null for everything a client can draw itself**, which is
+every `order` row. Those carry `payload` and the client renders the line from
+the dictionary it already ships for its tracking screen — the map is
+`ORDER_STATUS_COPY` in `@amragrir/i18n`, shared so the web and the app cannot
+word the same fact differently.
+
+They were `NOT NULL` until the bell was actually built, and the first thing
+turning it on asked was: *in which language is `title` stored?* Every answer
+that fills the column is wrong the same way — the row is frozen in whatever
+language the reader preferred that day, so changing language in Settings leaves
+the bell half-translated. The API cannot render it properly either: it compiles
+to CommonJS under Node resolution and `@amragrir/i18n` ships TypeScript that
+only a bundler reads.
+
+So the columns mean what they should have meant: **prose the server authored**,
+for the kinds with no key in any dictionary (`promo`, `system`), and null for
+the kinds that describe themselves. It is §8b's conclusion — "the row carries
+the numbers" — reached from the other direction: that table has no known reader
+to pick a language for, this one has exactly one reader who is allowed to change
+their mind.
+
+Rows are written by `CustomerNotificationsService`, which subscribes to the
+order event stream rather than being called from the three places that move an
+order. Which statuses earn a row is BUSINESS_LOGIC.md §4.
+
+**Deletion here is hard, and it is the exception in this schema.** Everywhere
+else a removal is soft, because the row is a fact somebody may later have to
+account for — an order, a staff assignment, a menu item that was on sale at the
+time. A notification is not that. It is a *message about* a fact, and the fact
+lives in `orders` and `order_events`, untouched by the cross in the bell. A
+`deleted_at` column here would mean keeping rows nobody can ever read again, to
+preserve a second copy of information that is preserved properly elsewhere.
 
 ---
 

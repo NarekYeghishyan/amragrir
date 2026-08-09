@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { currentLanguage } from '../language';
 
 /**
  * Base URL comes from app.json `extra.apiUrl`. On a physical device
@@ -43,7 +44,10 @@ export function getAccessToken(): string | null {
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
-  query?: Record<string, string | number | boolean | undefined>;
+  /** An array value is sent as `a,b` — the form the API's own `toArray`
+   *  normalises (apps/api/src/catalog/dto.ts). An empty array is omitted, so
+   *  "no dietary filter chosen" never narrows the query. */
+  query?: Record<string, string | number | boolean | string[] | undefined>;
   language?: string;
   /** Send the stored bearer. Default true; the auth endpoints opt out. */
   authenticated?: boolean;
@@ -79,9 +83,16 @@ export function newIdempotencyKey(): string {
 function buildUrl(path: string, query?: RequestOptions['query']): string {
   const url = new URL(`${BASE_URL}${path}`);
   for (const [key, value] of Object.entries(query ?? {})) {
-    if (value !== undefined) {
-      url.searchParams.set(key, String(value));
+    if (value === undefined) {
+      continue;
     }
+    if (Array.isArray(value)) {
+      if (value.length > 0) {
+        url.searchParams.set(key, value.join(','));
+      }
+      continue;
+    }
+    url.searchParams.set(key, String(value));
   }
   return url.toString();
 }
@@ -104,9 +115,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
-  if (language) {
-    headers['Accept-Language'] = language;
-  }
+  // Always sent, defaulting to the chosen language: the API localises its error
+  // messages and `*_i18n` columns from this header, and those strings reach the
+  // screen verbatim. An explicit argument still wins, for the rare call that
+  // wants a specific language rather than the current one.
+  headers['Accept-Language'] = language ?? currentLanguage();
   if (authenticated && accessToken) {
     headers.Authorization = `Bearer ${accessToken}`;
   }

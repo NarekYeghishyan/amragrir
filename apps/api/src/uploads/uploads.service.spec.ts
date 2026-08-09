@@ -135,3 +135,46 @@ describe('UploadsService.saveMenuPhoto', () => {
     await expect(service.saveMenuPhoto(bytes, tooLarge)).rejects.toThrow(PayloadTooLargeException);
   });
 });
+
+describe('UploadsService.saveRestaurantCover', () => {
+  it('stores the bytes under the covers directory, not with the dishes', async () => {
+    const { service, root } = await build();
+
+    const { url } = await service.saveRestaurantCover(JPEG, false);
+
+    expect(url).toMatch(/^https:\/\/api\.amragrir\.am\/uploads\/covers\/[0-9a-f-]{36}\.jpg$/);
+    const name = url.split('/').pop() as string;
+    await expect(readFile(join(root, 'covers', name))).resolves.toEqual(JPEG);
+    // The two kinds stay separately answerable — nothing landed in `menu`.
+    await expect(readdir(root)).resolves.toEqual(['covers']);
+  });
+
+  it('refuses exactly what a dish photo refuses', async () => {
+    // One set of rules for what an image is. A cover is drawn larger, but
+    // "larger" is a rendering decision — a second size limit here would be a
+    // number to keep in step with a stylesheet.
+    const { service } = await build();
+
+    await expect(
+      service.saveRestaurantCover(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), false),
+    ).rejects.toThrow(UnsupportedMediaTypeException);
+    await expect(service.saveRestaurantCover(undefined, false)).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(
+      service.saveRestaurantCover(Buffer.alloc(MAX_IMAGE_UPLOAD_BYTES + 1, 0xff), false),
+    ).rejects.toThrow(PayloadTooLargeException);
+  });
+
+  it('gives two uploads two names, so replacing a cover keeps the old file', async () => {
+    // Nothing deletes the picture a cover replaced, and the audit entry holds
+    // its URL — which is only worth anything if the file is still there.
+    const { service, root } = await build();
+
+    const first = await service.saveRestaurantCover(PNG, false);
+    const second = await service.saveRestaurantCover(PNG, false);
+
+    expect(first.url).not.toBe(second.url);
+    await expect(readdir(join(root, 'covers'))).resolves.toHaveLength(2);
+  });
+});

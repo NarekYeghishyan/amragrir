@@ -432,6 +432,8 @@ function Shell({
             <Restaurants
               branches={branches ?? []}
               canCreate={can(Permission.BranchCreate)}
+              canEditRestaurant={can(Permission.RestaurantWrite)}
+              canEditBranch={can(Permission.BranchWrite)}
               canReadStaff={can(Permission.StaffRead)}
               canOpenOrders={can(Permission.OrdersRead)}
               open={route?.tab === 'Restaurants' ? route.open : null}

@@ -16,5 +16,8 @@
     "@amragrir/config": "workspace:*",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4"
   }
 }

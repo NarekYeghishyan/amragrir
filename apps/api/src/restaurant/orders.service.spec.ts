@@ -1,6 +1,7 @@
 import { NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import {
   ACTIVE_ORDER_STATUSES,
+  HANDOVER_CODE_MISMATCH,
   OrderActorType,
   OrderEventType,
   OrderStatus,
@@ -31,6 +32,10 @@ function orderRow(over: Record<string, unknown> = {}) {
   return {
     id: ORDER_ID,
     code: 'AMR-12344821',
+    // Six digits with nothing of the order code in them, which is the point of
+    // the column: `4821` is the tail of `code` and is *not* what the counter
+    // asks for any more.
+    pickupCode: '730914',
     status: OrderStatus.Paid,
     serviceMode: 'pickup',
     totalAmd: 6160,
@@ -149,12 +154,22 @@ describe('listOrders', () => {
     ]);
   });
 
-  it('shows the pickup code and the dish count', async () => {
+  it('shows the order code and the dish count', async () => {
     const { service } = build();
     const page = await service.listOrders(staff, query());
 
-    expect(page.items[0]?.pickupCode).toBe('4821');
+    expect(page.items[0]?.code).toBe('AMR-12344821');
     expect(page.items[0]?.itemsCount).toBe(2);
+  });
+
+  it('never sends the collection code to the board', async () => {
+    // The whole handover check rests on this. A card that printed the code —
+    // which it used to — means the counter can close an order without ever
+    // asking the guest for anything, and the confirmation is decoration.
+    const { service } = build();
+    const page = await service.listOrders(staff, query());
+
+    expect(page.items[0]).not.toHaveProperty('pickupCode');
   });
 
   it('gives each line the dish it came from and what it cost', async () => {
@@ -218,6 +233,27 @@ describe('listOrders', () => {
         { user: { name: { contains: '4821', mode: 'insensitive' } } },
       ],
     });
+  });
+
+  it('finds an order by the collection code a guest reads out', async () => {
+    // The code is no longer a substring of `code`, so without this branch a
+    // guest who knows only their six digits could not be found at all.
+    const { service, prisma } = build();
+    await service.listOrders(staff, query({ q: '730914' }));
+
+    const where = (prisma.order.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.AND[0].OR).toContainEqual({ pickupCode: '730914' });
+  });
+
+  it('matches a collection code whole, never as a substring', async () => {
+    // A `contains` here would answer "which orders have a 7 in their code" —
+    // and repeated with each digit, that is the code itself, arrived at without
+    // anybody being told it. Only a full six digits is a lookup.
+    const { service, prisma } = build();
+    await service.listOrders(staff, query({ q: '7309' }));
+
+    const or = (prisma.order.findMany as jest.Mock).mock.calls[0][0].where.AND[0].OR;
+    expect(or.some((clause: Record<string, unknown>) => 'pickupCode' in clause)).toBe(false);
   });
 
   it('keeps the ownership filter intact while searching', async () => {
@@ -366,8 +402,8 @@ describe('listOrders', () => {
 });
 
 describe('setStatus', () => {
-  const dto = (status: OrderStatus): SetOrderStatusDto =>
-    Object.assign(new SetOrderStatusDto(), { status });
+  const dto = (status: OrderStatus, pickupCode?: string): SetOrderStatusDto =>
+    Object.assign(new SetOrderStatusDto(), { status, pickupCode });
 
   it('advances an order through the shared state machine', async () => {
     const { service, orders } = build({ order: orderRow({ status: OrderStatus.Confirmed }) });
@@ -468,6 +504,85 @@ describe('setStatus', () => {
       service.setStatus(staff, ORDER_ID, dto(OrderStatus.Confirmed)),
     ).rejects.toThrow(NotFoundException);
   });
+
+  describe('the handover check', () => {
+    const ready = () => build({ order: orderRow({ status: OrderStatus.Ready }) });
+
+    it('completes an order when the code the guest showed matches', async () => {
+      const { service, orders } = ready();
+      await service.setStatus(staff, ORDER_ID, dto(OrderStatus.Completed, '730914'));
+
+      expect(orders.transition).toHaveBeenCalledWith(
+        expect.objectContaining({ id: ORDER_ID }),
+        OrderStatus.Completed,
+        expect.anything(),
+      );
+    });
+
+    it('refuses a code that belongs to some other order', async () => {
+      const { service, orders } = ready();
+
+      await expect(
+        service.setStatus(staff, ORDER_ID, dto(OrderStatus.Completed, '000001')),
+      ).rejects.toThrow(UnprocessableEntityException);
+      expect(orders.transition).not.toHaveBeenCalled();
+    });
+
+    it('refuses the tail of the order code, which used to be the whole answer', async () => {
+      // `AMR-12344821` → `4821` was the pickup code until this change. Anybody
+      // holding a receipt knew it, which is why it is not one any more.
+      const { service, orders } = ready();
+
+      await expect(
+        service.setStatus(staff, ORDER_ID, dto(OrderStatus.Completed, '124821')),
+      ).rejects.toThrow(UnprocessableEntityException);
+      expect(orders.transition).not.toHaveBeenCalled();
+    });
+
+    it('refuses to complete an order with no code at all', async () => {
+      // The DTO requires one on this status, so a request without it never
+      // reaches the service — but a caller inside the API could still get here,
+      // and "undefined matched nothing" must not read as a match.
+      const { service, orders } = ready();
+
+      await expect(
+        service.setStatus(staff, ORDER_ID, dto(OrderStatus.Completed)),
+      ).rejects.toThrow(UnprocessableEntityException);
+      expect(orders.transition).not.toHaveBeenCalled();
+    });
+
+    it('says why, in a form the panel can act on', async () => {
+      // A mistyped digit is the ordinary case at a counter, and the panel says
+      // so in the shift's own language rather than showing the API's sentence.
+      const { service } = ready();
+
+      await expect(
+        service.setStatus(staff, ORDER_ID, dto(OrderStatus.Completed, '000001')),
+      ).rejects.toMatchObject({
+        response: { reason: HANDOVER_CODE_MISMATCH },
+      });
+    });
+
+    it('asks for no code on any other move', async () => {
+      // Only the handover is a handover. Requiring one to start cooking would
+      // be a counter fetching a guest before the food exists.
+      const { service, orders } = build({ order: orderRow({ status: OrderStatus.Confirmed }) });
+      await service.setStatus(staff, ORDER_ID, dto(OrderStatus.Preparing));
+
+      expect(orders.transition).toHaveBeenCalledTimes(1);
+    });
+
+    it('still refuses an illegal move before it looks at the code', async () => {
+      // A correct code does not make `paid -> completed` legal. The state
+      // machine is checked first, so the answer names the real problem.
+      const { service, orders } = build({ order: orderRow({ status: OrderStatus.Paid }) });
+
+      await expect(
+        service.setStatus(staff, ORDER_ID, dto(OrderStatus.Completed, '730914')),
+      ).rejects.toThrow(UnprocessableEntityException);
+      expect(orders.transition).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('setReminderLead', () => {
@@ -475,6 +590,23 @@ describe('setReminderLead', () => {
    *  a thirty-minute dish arrives with. */
   const READY_AT = new Date('2026-08-06T09:00:00.000Z');
   const DEFAULT_LEAD = 40;
+
+  /**
+   * The day before that, so "tomorrow" stays tomorrow.
+   *
+   * These tests read a fixed instant and compare it against `new Date()` inside
+   * the service — which meant they passed until the literal above stopped being
+   * in the future, and then "re-arms a warning that had already gone out" began
+   * failing on a calendar rather than on a change. Pinning the clock keeps the
+   * assertions literal, which is what makes them readable.
+   */
+  beforeAll(() => {
+    jest.useFakeTimers({ now: new Date('2026-08-05T10:00:00.000Z') });
+  });
+
+  afterAll(() => {
+    jest.useRealTimers();
+  });
 
   const preOrder = (over: Record<string, unknown> = {}) =>
     orderRow({

@@ -17,6 +17,10 @@ import {
   NotificationEventsService,
   type StaffNotificationEvent,
 } from '../notifications/notification-events.service';
+import {
+  CustomerNotificationEventsService,
+  type CustomerNotificationEvent,
+} from '../notifications/customer-notification-events.service';
 
 /** How often a ping goes out. A socket that misses two in a row is dropped. */
 const HEARTBEAT_MS = 30_000;
@@ -39,6 +43,17 @@ interface SocketState {
    */
   branches: Set<string> | null;
   allBranches: boolean;
+  /**
+   * The account whose bell this socket is hearing, once it asked with
+   * `watchMe`. Null until it does, and null forever for a back-office panel.
+   *
+   * The customer counterpart of `branches`, and separate from `orders` for the
+   * same reason that one is: an order subscription is "tell me when *this*
+   * moves", while a bell is "tell me when anything of mine moves" — including
+   * an order the visitor is not looking at, which is the whole reason the bell
+   * exists rather than the tracking screen being enough.
+   */
+  userId: string | null;
   /** Reset by every pong; a socket that fails to answer is assumed gone. */
   alive: boolean;
 }
@@ -63,6 +78,7 @@ export class OrdersGateway
   private readonly sockets = new Map<WebSocket, SocketState>();
   private unsubscribe?: () => void;
   private unsubscribeNotifications?: () => void;
+  private unsubscribeCustomerNotifications?: () => void;
   private heartbeat?: NodeJS.Timeout;
 
   constructor(
@@ -72,12 +88,16 @@ export class OrdersGateway
     private readonly events: OrderEventsService,
     private readonly notificationEvents: NotificationEventsService,
     private readonly notifications: StaffNotificationsService,
+    private readonly customerNotificationEvents: CustomerNotificationEventsService,
   ) {}
 
   onModuleInit(): void {
     this.unsubscribe = this.events.subscribe((event) => this.broadcast(event));
     this.unsubscribeNotifications = this.notificationEvents.subscribe((event) =>
       this.broadcastNotification(event),
+    );
+    this.unsubscribeCustomerNotifications = this.customerNotificationEvents.subscribe((event) =>
+      this.broadcastCustomerNotification(event),
     );
 
     // Without this, a socket killed by a dropped mobile connection is never
@@ -88,6 +108,7 @@ export class OrdersGateway
   onModuleDestroy(): void {
     this.unsubscribe?.();
     this.unsubscribeNotifications?.();
+    this.unsubscribeCustomerNotifications?.();
     if (this.heartbeat) {
       clearInterval(this.heartbeat);
     }
@@ -98,6 +119,7 @@ export class OrdersGateway
       orders: new Set(),
       branches: null,
       allBranches: false,
+      userId: null,
       alive: true,
     });
     client.on('pong', () => {
@@ -208,6 +230,51 @@ export class OrdersGateway
     };
   }
 
+  /**
+   * `{ "event": "watchMe", "data": { "token": "<access token>" } }`
+   *
+   * A customer asking to be told when anything of theirs moves — the bell in
+   * the header, which has to work on every screen and not only on the one
+   * tracking page. **Customer tokens only**: staff are addressed by branch
+   * (`watchBranches`) and read a different table entirely (DATABASE.md §8b).
+   *
+   * The account is taken from the verified token and never from the message, so
+   * a socket cannot ask for somebody else's bell. It is resolved once, here,
+   * for the same reason `watchBranches` resolves reach once: a notification
+   * arriving is not the moment to go and ask the database who this is.
+   */
+  @SubscribeMessage('watchMe')
+  async onWatchMe(
+    @ConnectedSocket() client: WebSocket,
+    @MessageBody() data: { token?: string },
+  ): Promise<{ event: string; data: unknown }> {
+    if (!data?.token) {
+      return error('token is required');
+    }
+
+    const user = await this.tokens.tryReadAccess(data.token);
+    if (!user) {
+      return error('Invalid or expired token');
+    }
+
+    // The same gate `GET /notifications` sits behind, checked here too because
+    // "may you call this" and "may you hold this open" have to give the same
+    // answer — a socket that pushed to a guest would be a way around the REST
+    // rule rather than a second route to the same data.
+    if (!user.phoneVerified) {
+      return error('A verified phone is required');
+    }
+
+    const state = this.sockets.get(client);
+    if (!state) {
+      return error('Socket is not connected');
+    }
+
+    state.userId = user.sub;
+
+    return { event: 'watchingMe', data: { ok: true } };
+  }
+
   @SubscribeMessage('unsubscribe')
   onUnsubscribe(
     @ConnectedSocket() client: WebSocket,
@@ -266,6 +333,47 @@ export class OrdersGateway
 
     for (const [socket, state] of this.sockets) {
       if (!state.allBranches && !state.branches?.has(event.branchId)) {
+        continue;
+      }
+      try {
+        socket.send(payload);
+      } catch (err) {
+        this.logger.warn(`Dropping a socket that could not be written to: ${String(err)}`);
+        this.sockets.delete(socket);
+      }
+    }
+  }
+
+  /**
+   * Sends a customer notification to that account's open clients.
+   *
+   * Membership is the `userId` the socket proved at `watchMe` time, so this is
+   * the second check and a frame cannot reach an account that did not
+   * authenticate as itself. A socket that never asked has `userId: null` and
+   * hears nothing, which is every back-office panel's socket.
+   *
+   * **The frame name is shared with the staff broadcast above and that is
+   * safe**: a socket is authorised by exactly one of `watchMe` (customer token)
+   * or `watchBranches` (staff token), the two token kinds are mutually
+   * exclusive by construction (`kind: "staff"`, checked in TokenService), and
+   * so no socket can ever be sent both shapes.
+   */
+  private broadcastCustomerNotification(event: CustomerNotificationEvent): void {
+    const payload = JSON.stringify({
+      event: 'notification',
+      data: {
+        id: event.id,
+        type: event.type,
+        title: event.title,
+        body: event.body,
+        payload: event.payload,
+        isRead: event.isRead,
+        createdAt: event.createdAt,
+      },
+    });
+
+    for (const [socket, state] of this.sockets) {
+      if (state.userId !== event.userId) {
         continue;
       }
       try {

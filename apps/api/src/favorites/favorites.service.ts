@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { resolveBranchOffering } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface FavoriteRestaurant {
@@ -42,6 +43,14 @@ export class FavoritesService {
     return {
       items: rows.map((row) => {
         const branch = row.restaurant.branches[0];
+        // The card is the branch it links to, so it shows that branch's cover
+        // and services. A restaurant with no branches has nothing to resolve
+        // against and falls back to its own defaults — the same values it
+        // would have shown before.
+        const offering =
+          branch === undefined
+            ? { coverUrl: row.restaurant.coverUrl, services: row.restaurant.services }
+            : resolveBranchOffering(branch, row.restaurant);
         return {
           restaurantId: row.restaurant.id,
           branchId: branch?.id ?? null,
@@ -51,10 +60,10 @@ export class FavoritesService {
           priceLevel: row.restaurant.priceLevel,
           rating: Number(row.restaurant.ratingAvg),
           reviewsCount: row.restaurant.reviewsCount,
-          coverUrl: row.restaurant.coverUrl,
+          coverUrl: offering.coverUrl,
           prepMin: branch?.avgPrepMin ?? null,
           isOpen: branch?.isOpen ?? false,
-          services: row.restaurant.services,
+          services: [...offering.services],
           addedAt: row.createdAt.toISOString(),
         };
       }),

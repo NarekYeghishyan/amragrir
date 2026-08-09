@@ -11,12 +11,18 @@ import { useT } from './i18n';
 import { useToast } from './ui';
 
 /**
- * A dish's photograph: what may be sent, and the control that sends it.
+ * A photograph the panel uploads: what may be sent, and the control that sends
+ * it.
  *
- * Shared by the two forms that set one — adding a dish and editing one — because
- * they are the same job twice. A file input that behaved differently in the two
- * places a photograph is chosen would be a panel with two answers to one
- * question.
+ * Shared by every form that sets one — adding a dish, editing one, and the
+ * restaurant's cover — because they are the same job each time. A file input
+ * that behaved differently in the places a photograph is chosen would be a
+ * panel with several answers to one question.
+ *
+ * What differs between them is only *which endpoint the bytes go to*, which is
+ * the argument `usePhotoUpload` takes: the two live behind different
+ * permissions (`menu:write` and `restaurant:write`), and picking the wrong one
+ * is a 403 rather than something this file could paper over.
  */
 
 /**
@@ -75,8 +81,15 @@ export interface PhotoUpload {
  * A failed upload leaves the form's photograph where it was. It is the one that
  * will be saved if the form is submitted, so showing it is the truth; the toast
  * is what says the replacement did not happen.
+ *
+ * `send` is which upload endpoint the bytes go to, defaulting to a dish's
+ * because that is what most callers are. Everything around it — the refusals,
+ * the clearing, the toast — is the same wherever the file is going.
  */
-export function usePhotoUpload(onUploaded: (url: string) => void): PhotoUpload {
+export function usePhotoUpload(
+  onUploaded: (url: string) => void,
+  send: (file: File) => Promise<{ url: string }> = api.uploadMenuPhoto,
+): PhotoUpload {
   const [uploading, setUploading] = useState(false);
   const t = useT();
   const toast = useToast();
@@ -104,7 +117,7 @@ export function usePhotoUpload(onUploaded: (url: string) => void): PhotoUpload {
 
     setUploading(true);
     try {
-      const stored = await api.uploadMenuPhoto(file);
+      const stored = await send(file);
       onUploaded(stored.url);
     } catch (err) {
       clear();

@@ -16,10 +16,16 @@ import {
   type PaymentMethod,
   PaymentStatus,
   Permission,
+  PickupOption,
   ReservationStatus,
   ServiceMode,
   TERMINAL_ORDER_STATUSES,
+  acceptsPickupOption,
+  eatInRequiresBooking,
   isOrderCancellable,
+  pickupOptionsFor,
+  resolveBranchOffering,
+  takesBookings,
 } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { localize, type I18nField } from '../common/i18n';
@@ -31,7 +37,7 @@ import type { JwtPayload } from '../auth/token.service';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
 import { OrderEventsService, countdown, toStatusEvent } from './order-events.service';
 import { customerActor, orderEventData, type OrderActor } from './order-history';
-import { generateOrderCode, pickupCodeFrom } from './order-code';
+import { generateOrderCode, generatePickupCode } from './order-code';
 import { estimatePrepMinutes, priceLine, priceOrder, type PricedLine } from './pricing';
 import { resolveSchedule, type Schedule, type ScheduleRefusal } from './scheduling';
 import { BasketDto, CreateOrderDto, ListOrdersDto, OrderListFilter } from './dto';
@@ -52,6 +58,47 @@ export interface QuoteResult {
   branchId: string;
   restaurantName: string;
   serviceMode: ServiceMode;
+  /**
+   * Where this pickup basket would end up, resolved — take-away when the client
+   * said nothing. Null for a dine-in basket, which has a table instead.
+   */
+  pickupOption: PickupOption | null;
+  /**
+   * The endings this restaurant offers, for the client to draw the choice from.
+   *
+   * Sent with the quote rather than left to the client to derive from
+   * `services`, because it is the same question the order will be validated
+   * against and deriving it twice is how the two stop agreeing. **Fewer than two
+   * entries is not a choice** — a guest shown one button is being asked to
+   * confirm something that was never in doubt — so the clients render it only
+   * when it has both, or when the field below says to draw the other one dead.
+   */
+  pickupOptions: PickupOption[];
+  /**
+   * True where eating in exists but is reached by booking a table.
+   *
+   * A restaurant's pickup is take-away and nothing else, so `pickupOptions`
+   * above holds one entry — but hiding the other half would leave the guest to
+   * discover the rule by not finding it. The clients draw "eat at the
+   * restaurant" beside it, visibly dead, and pressing it switches the basket to
+   * dine-in and opens the calendar.
+   *
+   * Sent rather than derived for the same reason as `pickupOptions`: it is the
+   * rule the order is validated against, and a client working it out from
+   * `services` is a second copy to disagree with.
+   */
+  eatInRequiresBooking: boolean;
+  /**
+   * Whether a table can be booked here right now — `reserve` declared **and**
+   * bookings not paused. False makes the dine-in mode a dead end, so a client
+   * draws no booking control at all rather than one that leads to "this
+   * restaurant does not take bookings".
+   *
+   * Distinct from `eatInRequiresBooking`, which is only ever true where there is
+   * a pickup for the dead "eat in" half to sit under: a place that declares
+   * `reserve` alone takes bookings and has no such pair.
+   */
+  reservationsEnabled: boolean;
   items: QuoteLine[];
   /** Requested items that cannot be ordered, with the reason. Reported rather
    *  than thrown so the basket screen can mark the offending line. */
@@ -91,6 +138,8 @@ export interface OrderDetail {
   pickupCode: string;
   status: OrderStatus;
   serviceMode: ServiceMode;
+  /** How this pickup order ends — null on a dine-in order, which has a table. */
+  pickupOption: PickupOption | null;
   restaurantName: string;
   branch: { id: string; name: string | null; address: string | null };
   items: OrderItemDto[];
@@ -134,6 +183,38 @@ export interface OrderListItem {
 
 type BranchWithRestaurant = Prisma.RestaurantBranchGetPayload<{ include: { restaurant: true } }>;
 
+/**
+ * What this branch offers, resolved against its restaurant's defaults.
+ *
+ * A one-liner because it is used at three points in one file and every one of
+ * them is a decision about what a guest may order — pricing a basket, placing
+ * the order, and telling the client which endings to draw. Reading
+ * `branch.restaurant.services` at any of them would be the business answering a
+ * question about one address.
+ */
+function servicesAt(branch: BranchWithRestaurant): readonly string[] {
+  return resolveBranchOffering(branch, branch.restaurant).services;
+}
+
+/**
+ * Whether a table can actually be booked here **right now**.
+ *
+ * Both halves, and they answer different questions (see `takesBookings`):
+ * `reserve` says this is a place that seats people through a calendar, and
+ * `reservations_enabled` says it is taking bookings this week. A client
+ * offering the booking mode needs both to be true, because either one being
+ * false makes `POST /reservations` refuse — it gates on this exact pair, and so
+ * does `GET /restaurants/{id}/availability`.
+ *
+ * Sent on the quote for the same reason as `pickupOptions`: it decides what a
+ * client draws, and a client working it out from `services` would be a second
+ * copy of the rule, missing the switch entirely.
+ */
+function bookableAt(branch: BranchWithRestaurant): boolean {
+  const offering = resolveBranchOffering(branch, branch.restaurant);
+  return offering.reservationsEnabled && takesBookings(offering.services);
+}
+
 type ReservationForOrder = Prisma.ReservationGetPayload<{
   include: { table: true; order: { select: { id: true } } };
 }>;
@@ -171,6 +252,14 @@ export class OrdersService {
     const reservation = await this.resolveReservation(userId, dto, { required: false });
 
     const { branch, lines, unavailable } = await this.loadBasket(dto, language);
+    // Checked while pricing, not only while creating: a basket whose chosen
+    // ending the restaurant has withdrawn should say so on the screen the guest
+    // is looking at, rather than at the payment.
+    // The *branch's* services, not the business's: a guest orders from one
+    // address, and it is that address which decides whether the food can be
+    // eaten in. A chain whose other branch has a dining room is not an answer
+    // to what happens at this counter.
+    const pickupOption = resolvePickupOption(dto, servicesAt(branch));
 
     const subtotal = lines.reduce((sum, line) => sum + line.lineTotalAmd, 0);
     // Priced, not claimed: a quote must not spend a coupon the guest is only
@@ -186,6 +275,10 @@ export class OrdersService {
       branchId: branch.id,
       restaurantName: branch.restaurant.name,
       serviceMode: dto.serviceMode,
+      pickupOption,
+      pickupOptions: pickupOptionsFor(servicesAt(branch)),
+      eatInRequiresBooking: eatInRequiresBooking(servicesAt(branch)),
+      reservationsEnabled: bookableAt(branch),
       items: lines.map(({ prepMin: _prepMin, ...line }) => line),
       unavailable,
       ...totals,
@@ -212,6 +305,11 @@ export class OrdersService {
     const reservation = await this.resolveReservation(userId, dto, { required: true });
 
     const { branch, lines, unavailable } = await this.loadBasket(dto, language);
+    // The *branch's* services, not the business's: a guest orders from one
+    // address, and it is that address which decides whether the food can be
+    // eaten in. A chain whose other branch has a dining room is not an answer
+    // to what happens at this counter.
+    const pickupOption = resolvePickupOption(dto, servicesAt(branch));
 
     if (unavailable.length > 0) {
       throw new UnprocessableEntityException({
@@ -237,11 +335,18 @@ export class OrdersService {
 
     let order;
     try {
-      order = await this.createWithUniqueCode(branch.id, (code) => ({
+      order = await this.createWithUniqueCode((code, pickupCode) => ({
         code,
+        // Drawn beside the order number and unrelated to it. See
+        // `order-code.ts`: the counter's proof must not be readable off the
+        // order's name.
+        pickupCode,
         userId,
         branchId: branch.id,
         serviceMode: dto.serviceMode,
+        // Null on a dine-in order, which is what the column's CHECK constraint
+        // requires — see `resolvePickupOption`.
+        pickupOption,
         status: OrderStatus.Created,
         subtotalAmd: totals.subtotalAmd,
         serviceFeeAmd: totals.serviceFeeAmd,
@@ -286,6 +391,10 @@ export class OrdersService {
             toStatus: OrderStatus.Created,
             detail: {
               serviceMode: dto.serviceMode,
+              // What the kitchen has to know before it plates anything, on the
+              // entry that says the order was placed — so the timeline still
+              // answers "was this ever a take-away" after somebody asks.
+              pickupOption,
               itemsCount: lines.reduce((sum, line) => sum + line.qty, 0),
               totalAmd: totals.totalAmd,
               readyAt: schedule.readyAt.toISOString(),
@@ -343,7 +452,9 @@ export class OrdersService {
         id: row.id,
         code: row.code,
         restaurantName: row.branch.restaurant.name,
-        coverUrl: row.branch.restaurant.coverUrl,
+        // The branch the order was placed at, so the thumbnail beside it is
+        // the place the guest actually went to.
+        coverUrl: row.branch.coverUrl ?? row.branch.restaurant.coverUrl,
         date: row.createdAt.toISOString(),
         // Dishes, not lines: "3 items" means three things to eat.
         itemsCount: row.items.reduce((sum, item) => sum + item.qty, 0),
@@ -649,18 +760,34 @@ export class OrdersService {
   }
 
   /**
-   * Creates the order, retrying on the (rare) chance that the generated code is
-   * already taken. `orders.code` carries a unique constraint, which is what
-   * actually guarantees uniqueness — the retry just turns a 500 into a success.
+   * Creates the order, retrying on the (rare) chance that one of its two codes
+   * is already taken.
+   *
+   * Both `orders.code` and `orders.pickup_code` carry unique constraints, and
+   * those constraints are what actually guarantee uniqueness — the retry only
+   * turns a 500 into a success. A pre-flight SELECT would be neither: it cannot
+   * see an order being inserted in another transaction right now, so it would
+   * be a query per order that still leaves the insert to the constraint.
+   *
+   * This is why the pickup code is no longer checked against the branch's live
+   * board before use, which is what the old `freshCode` did — it had to, because
+   * the four digits it produced were not unique in the database at all. They are
+   * now, and a database constraint is a better answer than a best-effort SELECT.
+   *
+   * Five attempts is generous at any realistic table size and is not a strategy
+   * for a full code space: once a million orders exist every attempt collides,
+   * and the honest outcome is this throwing rather than an order quietly sharing
+   * somebody's collection code. See DATABASE.md §5.
    */
   private async createWithUniqueCode(
-    branchId: string,
-    build: (code: string) => Prisma.OrderUncheckedCreateInput,
+    build: (code: string, pickupCode: string) => Prisma.OrderUncheckedCreateInput,
   ): Promise<OrderRow> {
     for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt += 1) {
-      const code = await this.freshCode(branchId);
       try {
-        return await this.prisma.order.create({ data: build(code), include: ORDER_DETAIL_INCLUDE });
+        return await this.prisma.order.create({
+          data: build(generateOrderCode(), generatePickupCode()),
+          include: ORDER_DETAIL_INCLUDE,
+        });
       } catch (err) {
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
           continue;
@@ -669,34 +796,6 @@ export class OrdersService {
       }
     }
     throw new Error(`Could not allocate an order code after ${CODE_ATTEMPTS} attempts`);
-  }
-
-  /**
-   * An order code whose last four digits — the pickup code the counter calls
-   * out — are not already in use by an active order at the same branch.
-   *
-   * Best effort by design: only `orders.code` is unique in the database, and
-   * with 10,000 possible pickup codes a busy branch would otherwise hit a
-   * collision surprisingly often (about one in eight with 50 active orders).
-   * Two orders created in the same instant could still collide; that is a
-   * counter asking "which order?", not a correctness failure.
-   */
-  private async freshCode(branchId: string): Promise<string> {
-    for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt += 1) {
-      const code = generateOrderCode();
-      const clash = await this.prisma.order.findFirst({
-        where: {
-          branchId,
-          status: { in: [...ACTIVE_ORDER_STATUSES] },
-          code: { endsWith: pickupCodeFrom(code) },
-        },
-        select: { id: true },
-      });
-      if (!clash) {
-        return code;
-      }
-    }
-    return generateOrderCode();
   }
 
   /** Reads an order the caller owns. Ownership is part of the query, not a
@@ -719,9 +818,14 @@ export class OrdersService {
     return {
       id: order.id,
       code: order.code,
-      pickupCode: pickupCodeFrom(order.code),
+      // The customer's copy of it. This is the one audience that is meant to
+      // have it: the staff endpoints do not send it at all, because a code the
+      // counter can read off its own screen is not something a guest has to be
+      // asked for.
+      pickupCode: order.pickupCode,
       status: order.status as OrderStatus,
       serviceMode: order.serviceMode as ServiceMode,
+      pickupOption: (order.pickupOption as PickupOption | null) ?? null,
       restaurantName: order.branch.restaurant.name,
       branch: { id: order.branch.id, name: order.branch.name, address: order.branch.address },
       items: order.items.map((item) => ({
@@ -750,6 +854,48 @@ export class OrdersService {
       createdAt: order.createdAt.toISOString(),
     };
   }
+}
+
+/**
+ * Where this basket's food ends up, or the reason it cannot end up there.
+ *
+ * Three rules, and each of them is a sentence rather than a shape, which is why
+ * none is in the DTO:
+ *
+ * - **Only a pickup order chooses.** A dine-in order is food brought to a table
+ *   it is already sitting at; the database says the same thing with a CHECK
+ *   constraint, and a body carrying both would otherwise reach it as a 500.
+ * - **Nothing chosen means take-away.** Every pickup restaurant hands food over,
+ *   so a client that has never heard of this field still places the order it
+ *   always placed — and the column stays non-null for every pickup row.
+ * - **Eating in belongs to counters — and this branch must be one.** A branch
+ *   that takes bookings seats people by holding a table, so its pickup is
+ *   take-away and nothing else (BUSINESS_LOGIC.md §2). Checked here rather than
+ *   trusted from the basket, because a basket outlives the page it was built
+ *   on: a branch can start taking bookings between the choice and the payment —
+ *   and since services moved down to the branch, the branch *next door* taking
+ *   them is no longer the same event.
+ *
+ * Take-away is *not* checked against `pickup` being declared — see
+ * `acceptsPickupOption`, which explains why that is a different question.
+ */
+function resolvePickupOption(dto: BasketDto, services: readonly string[]): PickupOption | null {
+  if (dto.serviceMode !== ServiceMode.Pickup) {
+    if (dto.pickupOption !== undefined) {
+      throw new UnprocessableEntityException(
+        'Only a pickup order chooses between taking it away and eating in',
+      );
+    }
+    return null;
+  }
+
+  const option = dto.pickupOption ?? PickupOption.TakeAway;
+  if (!acceptsPickupOption(services, option)) {
+    throw new UnprocessableEntityException(
+      'Eating in at this restaurant means booking a table, not a pickup order',
+    );
+  }
+  return option;
 }
 
 /**

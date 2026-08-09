@@ -18,6 +18,7 @@ import {
   TERMINAL_RESERVATION_STATUSES,
   depositOutcomeFor,
   isReservationCancellable,
+  resolveBranchOffering,
 } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { DepositsService } from '../payments/deposits.service';
@@ -104,8 +105,16 @@ export class ReservationsService {
     idOrBranchId: string,
     query: AvailabilityQueryDto,
   ): Promise<AvailabilityResult> {
+    // Slug, restaurant id or branch id — whichever the previous screen was
+    // holding, exactly as `/restaurants/{id}` and its menu accept. Passing the
+    // slug those two take used to reach Prisma as a UUID and fail there, so a
+    // perfectly ordinary URL answered 500 instead of a booking calendar.
     const branch = await this.prisma.restaurantBranch.findFirst({
-      where: { id: idOrBranchId },
+      where: identityWhere(idOrBranchId),
+      // A restaurant id or slug matches several branches, and `findFirst`
+      // without an order returns whichever row the database yields — the same
+      // URL could otherwise offer a different branch's tables each request.
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       include: { restaurant: true, tables: { where: { isActive: true } } },
     });
     if (!branch) {
@@ -116,9 +125,13 @@ export class ReservationsService {
     const maxSeats = branch.tables.reduce((max, table) => Math.max(max, table.seats), 0);
 
     const window = openWindowFor(branch.openHours, new Date(`${query.date}T12:00:00Z`));
+    // Both halves resolved for this branch: a chain can take bookings at the
+    // restaurant with a dining room and not at the counter in the mall, and
+    // the two settings have to agree per address or a guest is offered times
+    // that `assertBookable` then refuses.
+    const offering = resolveBranchOffering(branch, branch.restaurant);
     const reservationsEnabled =
-      branch.restaurant.reservationsEnabled &&
-      branch.restaurant.services.includes(RestaurantService.Reserve);
+      offering.reservationsEnabled && offering.services.includes(RestaurantService.Reserve);
 
     // A closed day, a restaurant that does not take bookings, or no table big
     // enough — all mean "no times", and each is a real answer rather than an
@@ -420,10 +433,10 @@ export class ReservationsService {
     reservedFor: Date,
     guests: number,
   ): void {
-    if (
-      !branch.restaurant.reservationsEnabled ||
-      !branch.restaurant.services.includes(RestaurantService.Reserve)
-    ) {
+    // The same resolution the slot list above uses, so what is offered and what
+    // is accepted cannot disagree for a branch that answers for itself.
+    const offering = resolveBranchOffering(branch, branch.restaurant);
+    if (!offering.reservationsEnabled || !offering.services.includes(RestaurantService.Reserve)) {
       throw new UnprocessableEntityException('This restaurant does not take table bookings');
     }
     if (reservedFor.getTime() <= Date.now()) {
@@ -573,3 +586,20 @@ function isRetryableBookingError(err: unknown): boolean {
 }
 
 export const SEATING_MINUTES = RESERVATION_SEATING_MINUTES;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Accepts a branch id, a restaurant id, or a restaurant slug — clients hold
+ * whichever of the three the previous screen gave them.
+ *
+ * The same rule as `RestaurantsService.identityWhere`. Kept as a small local
+ * copy rather than shared: the catalog's version is private to a service this
+ * module does not depend on, and a booking calendar answering a different
+ * branch's tables than the menu did would be worse than five duplicated lines.
+ */
+function identityWhere(idOrSlug: string): Prisma.RestaurantBranchWhereInput {
+  return UUID.test(idOrSlug)
+    ? { OR: [{ id: idOrSlug }, { restaurantId: idOrSlug }] }
+    : { restaurant: { slug: idOrSlug } };
+}

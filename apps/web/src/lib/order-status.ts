@@ -1,4 +1,4 @@
-import { OrderStatus } from '@amragrir/shared';
+import { OrderStatus, TERMINAL_ORDER_STATUSES } from '@amragrir/shared';
 import type { TranslationKey } from '@amragrir/i18n';
 
 /**
@@ -46,6 +46,18 @@ export function stepIndex(status: OrderStatus): number {
     return TRACKER_STEPS.length - 1;
   }
   return TRACKER_STEPS.indexOf(status as (typeof TRACKER_STEPS)[number]);
+}
+
+/**
+ * Whether this order can still move.
+ *
+ * The tracking page asks twice and must get the same answer both times: once to
+ * decide what to draw, and once — in the browser — to decide whether to keep
+ * watching. `ready` counts as moving: the food is on the counter but nobody has
+ * collected it, and `completed` is still ahead.
+ */
+export function isLive(status: OrderStatus): boolean {
+  return !TERMINAL_ORDER_STATUSES.includes(status);
 }
 
 /** Cancellation is legal only while an order is unpaid (BUSINESS_LOGIC.md §4);

@@ -28,7 +28,7 @@
       "typedRoutes": true
     },
     "extra": {
-      "apiUrl": "http://192.168.27.6:3000/v1"
+      "apiUrl": "http://192.168.27.5:3000/v1"
     }
   }
 }

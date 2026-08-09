@@ -3,6 +3,7 @@ import { api, ApiError } from '@/lib/api';
 import { parseLanguage } from '@/lib/language';
 import { homePath } from '@/lib/site';
 import { readSession, writeSession } from '@/lib/session';
+import { refreshTokens } from '@/lib/session-refresh';
 
 /**
  * Gets the visitor a usable token, then sends them where they were going.
@@ -30,7 +31,11 @@ export async function GET(
   const existing = await readSession();
   if (existing) {
     try {
-      const rotated = await api.refresh(existing.refreshToken);
+      // Shared with the tracking page's status poll and the basket panel, so a
+      // reload landing at the same moment as one of those does not become the
+      // second request to spend one single-use refresh token — the loser of
+      // which used to fall through and mint a guest over a signed-in customer.
+      const rotated = await refreshTokens(existing.refreshToken);
       await writeSession({ ...rotated, verified: existing.verified });
       return NextResponse.redirect(destination(request, language));
     } catch (error) {

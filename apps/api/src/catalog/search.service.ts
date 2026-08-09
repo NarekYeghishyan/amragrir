@@ -155,7 +155,9 @@ export class SearchService {
         rating: Number(row.restaurant.ratingAvg),
         reviewsCount: row.restaurant.reviewsCount,
         priceLevel: row.restaurant.priceLevel,
-        coverUrl: row.restaurant.coverUrl,
+        // A result row is a branch (`id` above), so it wears that branch's
+        // photograph — its own, or the business's when it has none.
+        coverUrl: row.coverUrl ?? row.restaurant.coverUrl,
         prepMin: row.avgPrepMin,
         isOpen: row.isOpen,
         distanceKm: exact === null ? null : roundKm(exact),

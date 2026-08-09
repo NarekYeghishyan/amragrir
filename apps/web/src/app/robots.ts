@@ -14,7 +14,24 @@ import { SITE_URL } from '@/lib/site';
  * basket, reading an order — for a client that keeps no cookies and can never
  * have either.
  */
-const PRIVATE = ['search', 'cart', 'preorder', 'checkout', 'orders', 'signin', 'session'];
+const PRIVATE = [
+  'search',
+  'cart',
+  'preorder',
+  'checkout',
+  'orders',
+  // A visitor's own bookings, for the same reason as the order flow: read per
+  // request for a client that can never have one. Booking itself needs no entry
+  // — it happens on `/checkout`, already listed above.
+  'reservations',
+  'profile',
+  'favorites',
+  'signin',
+  'session',
+  // Not a screen — the JSON the restaurant page's order panel reads. It prices
+  // a basket per request, which is exactly what the paragraph above is about.
+  'basket',
+];
 
 export default function robots(): MetadataRoute.Robots {
   return {

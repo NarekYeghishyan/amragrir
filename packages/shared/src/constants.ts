@@ -106,9 +106,24 @@ export const REMINDER_LEAD_MAX_MINUTES = 24 * 60;
 // numbers. Confirm with product; they are the answers to "how long is a
 // table held" and "when does a deposit stop being refundable".
 
-/** Spacing of the bookable times offered (minutes). The design's 12:30 default
- *  implies half-hour slots. */
-export const RESERVATION_SLOT_MINUTES = 30;
+/**
+ * Spacing of the bookable times offered (minutes).
+ *
+ * **Ten, confirmed by product on 2026-08-08.** It was 30 — read off the
+ * design's 12:30 default, and marked proposed above for exactly this reason.
+ *
+ * This is the *grain of the offer*, not how long anybody keeps the table:
+ * `RESERVATION_SEATING_MINUTES` is that, and it is untouched, so 19:00 and
+ * 19:10 still collide on one table. What changes is that a guest who wants
+ * 19:20 can ask for it. The cost is arithmetic: a twelve-hour day offers about
+ * 63 starts instead of 21, so `GET /availability` answers a longer list and the
+ * pickers scroll.
+ *
+ * Nothing validates against a second copy of this: `isSlotBoundary` tests an
+ * instant by regenerating the day from `slotsFor`, so what is offered and what
+ * is accepted cannot drift apart.
+ */
+export const RESERVATION_SLOT_MINUTES = 10;
 
 /** How long a table is held for one booking (minutes) — a seating, not an
  *  instant. This is what makes 19:00 and 19:30 conflict on the same table. */
@@ -150,3 +165,42 @@ export const REFERRAL_COUPON_VALID_DAYS = 90;
 
 /** Length of the generated referral code (after the name prefix). */
 export const REFERRAL_CODE_LENGTH = 6;
+
+// ── Handover ────────────────────────────────────────────────────────────────
+
+/**
+ * Digits in the pickup code — the number a guest shows to collect an order.
+ *
+ * Six rather than the design's four, because this code stopped being a label
+ * and became a proof. It used to be the last four digits of `orders.code`,
+ * which meant anybody who had seen the order number — on a receipt, over a
+ * shoulder, in a screenshot — already knew it. Now it is generated in its own
+ * right, unrelated to the order number, and the counter cannot close an order
+ * without being told it.
+ *
+ * Four digits is 10,000 codes, and `orders.pickup_code` is unique across the
+ * whole table rather than per branch, so four would run out and start refusing
+ * new orders inside a year of ordinary trade. Six is a million — see
+ * DATABASE.md §5 for what happens when *that* fills up, which is a decision
+ * somebody has to make rather than a limit anything works around quietly.
+ *
+ * Here rather than in the API because the panel's handover box validates the
+ * same length: a field that accepts five digits and an endpoint that refuses
+ * them is a person at a counter typing something twice.
+ */
+export const PICKUP_CODE_LENGTH = 6;
+
+/** What the pickup code must look like, wherever it is typed or parsed. */
+export const PICKUP_CODE_PATTERN = new RegExp(`^\\d{${PICKUP_CODE_LENGTH}}$`);
+
+/**
+ * What the API puts in `error.details.reason` when the code typed at the
+ * counter is not this order's.
+ *
+ * A machine-readable reason rather than a sentence, because the panel has to
+ * say something specific about this one — it is the ordinary outcome of a
+ * mistyped digit, not a failure, and it deserves the panel's own wording in the
+ * shift's own language. Every other 422 from that endpoint is shown as the API
+ * sent it.
+ */
+export const HANDOVER_CODE_MISMATCH = 'pickup_code_mismatch';

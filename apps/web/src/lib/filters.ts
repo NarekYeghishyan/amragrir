@@ -14,9 +14,10 @@ import { homePath } from './site';
  *  - `service` → one of `restaurants.services`, combined with OR server-side
  *                (`service=pickup,reserve`), so several may be on at once.
  *
- * "Near me" from the design is deliberately absent: it needs the visitor's
- * coordinates (`lat`/`lng`), which only the browser can supply, so it belongs
- * to a client geolocation flow rather than a server-rendered link.
+ * The design's "Near me" is `nearest`, and it is the one chip that is not
+ * always offered: sorting by distance needs an origin, and this app's origin is
+ * the district chosen in the header. With no district there is nothing to be
+ * near, so the chip is left out rather than drawn dead — see `chipsFor` below.
  */
 export type ChipKind = 'bool' | 'sort' | 'service';
 
@@ -40,6 +41,7 @@ export interface FilterChip {
 }
 
 export const FILTER_CHIPS: readonly FilterChip[] = [
+  { id: 'nearest', kind: 'sort', value: 'nearest', labelKey: 'filterNearest', icon: '📍' },
   { id: 'openNow', kind: 'bool', labelKey: 'filterOpenNow', icon: '🟢' },
   { id: 'topRated', kind: 'sort', value: 'top_rated', labelKey: 'filterTopRated', icon: '⭐' },
   { id: 'fastest', kind: 'sort', value: 'fastest', labelKey: 'filterFastest', icon: '⏱' },
@@ -47,6 +49,28 @@ export const FILTER_CHIPS: readonly FilterChip[] = [
   { id: 'reserve', kind: 'service', value: 'reserve', labelKey: 'filterReserve', icon: '🍽️' },
   { id: 'dinein', kind: 'service', value: 'dinein', labelKey: 'filterDineIn', icon: '🍴' },
 ];
+
+/**
+ * The chips to draw, given whether the visitor has told us where they are.
+ *
+ * Only `nearest` depends on it. Offering it with no origin would produce a
+ * sort the API cannot honour — it would quietly fall back to its default order
+ * while the chip claimed otherwise, which is worse than not offering it.
+ */
+export function chipsFor(hasOrigin: boolean): readonly FilterChip[] {
+  return hasOrigin ? FILTER_CHIPS : FILTER_CHIPS.filter((chip) => chip.id !== 'nearest');
+}
+
+/**
+ * The same rule applied to a parsed state, for a URL somebody typed.
+ *
+ * `?sort=nearest` with no district chosen is a request the API answers in its
+ * default order — so without this the page would show the chip lit and the
+ * listing unsorted. Dropping it makes the URL mean what the page shows.
+ */
+export function forOrigin(state: FilterState, hasOrigin: boolean): FilterState {
+  return !hasOrigin && state.sort === 'nearest' ? { ...state, sort: undefined } : state;
+}
 
 const SORT_VALUES = new Set(
   FILTER_CHIPS.filter((c) => c.kind === 'sort').map((c) => c.value),
@@ -128,12 +152,23 @@ function serialize(state: FilterState): string {
   return params.toString();
 }
 
+/**
+ * The address of the listing under a given filter state.
+ *
+ * The chips below build their targets with it, and the home page uses it on its
+ * own state to say where a write on it returns to — a heart pressed on a
+ * filtered listing has to come back to that listing, not to the bare feed.
+ */
+export function homeHref(state: FilterState, language: Language): string {
+  const query = serialize(state);
+  const base = homePath(language);
+  return query ? `${base}?${query}` : base;
+}
+
 /** Href for a chip: the home path with that chip toggled. A real URL, so the
  *  link works with JavaScript off and a crawler can follow it. */
 export function chipHref(state: FilterState, chip: FilterChip, language: Language): string {
-  const query = serialize(toggled(state, chip));
-  const base = homePath(language);
-  return query ? `${base}?${query}` : base;
+  return homeHref(toggled(state, chip), language);
 }
 
 /** Href that clears every filter. */

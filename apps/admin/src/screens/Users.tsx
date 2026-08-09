@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
 import { USERS_PAGE_SIZE, api, errorText, type AdminUser } from '../api';
 import { CustomerOrdersDialog } from '../customer-orders';
 import { useT } from '../i18n';
@@ -15,6 +15,8 @@ import {
   SearchInput,
   Skeleton,
   Spinner,
+  Switch,
+  Tooltip,
   useToast,
 } from '../ui';
 
@@ -55,6 +57,20 @@ export function Users({
   // Bumped on every submit, so pressing Search with the term unchanged still
   // refetches. It is the only refresh this screen has.
   const [reload, setReload] = useState(0);
+  /**
+   * Whether the anonymous sessions are in the list.
+   *
+   * Off, because the API leaves them out unless asked and this switch is what
+   * asks. A row is written for every visitor who opens the storefront, so
+   * newest-first they are the whole first page: accounts with no name, no
+   * number and nothing bought, with the people who actually order behind them.
+   * They are still there for anyone who wants to count them.
+   *
+   * State rather than the address, like the search box: it narrows an answer
+   * rather than being one, and there is nothing here worth linking somebody to.
+   */
+  const [guests, setGuests] = useState(false);
+  const guestsId = useId();
 
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [total, setTotal] = useState(0);
@@ -75,10 +91,16 @@ export function Users({
   const [revealing, setRevealing] = useState<string | null>(null);
 
   const load = useCallback(
-    async (term: string, wanted: number, only: string | null) => {
+    async (term: string, wanted: number, only: string | null, withGuests: boolean) => {
       setBusy(true);
       try {
-        const result = await api.users(term || undefined, undefined, wanted, only ?? undefined);
+        const result = await api.users(
+          term || undefined,
+          undefined,
+          wanted,
+          only ?? undefined,
+          withGuests,
+        );
         setUsers(result.items);
         setTotal(result.total);
         setRevealed({});
@@ -129,8 +151,8 @@ export function Users({
   };
 
   useEffect(() => {
-    void load(search, page, person);
-  }, [load, search, page, reload, person]);
+    void load(search, page, person, guests);
+  }, [load, search, page, reload, person, guests]);
 
   /** Back to every customer. The id is in the address, so leaving it is what
    *  clears it — dropping it from state alone would not survive a reload. */
@@ -167,6 +189,25 @@ export function Users({
         <Button type="submit" variant="primary" loading={busy}>
           {t('actionSearch')}
         </Button>
+
+        {/* A `<label>` around both, so the words are the switch's name and are
+            also somewhere to click — and the tooltip says what a guest session
+            is, which is the part the two words cannot carry. */}
+        <Tooltip label={t('customersShowGuestsTip')}>
+          <label className="row row--tight" htmlFor={guestsId}>
+            <Switch
+              id={guestsId}
+              checked={guests}
+              disabled={busy}
+              onCheckedChange={(on) => {
+                setGuests(on);
+                // Page 9 of one list is not page 9 of the other.
+                setPage(1);
+              }}
+            />
+            <span className="faint">{t('customersShowGuests')}</span>
+          </label>
+        </Tooltip>
 
         {/* The one filter with nothing on screen to show it: the search box is
             empty, so a table of one row would otherwise look like a platform

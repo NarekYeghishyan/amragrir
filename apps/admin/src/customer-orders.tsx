@@ -471,7 +471,11 @@ function CustomerOrderRow({
         aria-expanded={open}
         onClick={onToggle}
       >
-        <span className="order-list__code">{order.pickupCode}</span>
+        {/* The order's name. It used to be the pickup code, which is not
+            something this screen has any more — the collection code is the
+            counter's business and the API stopped sending it anywhere near a
+            staff screen. See `StaffOrder`. */}
+        <span className="order-list__code num">{order.code}</span>
         <span className="order-list__where truncate">{placeLine(order)}</span>
         <time className="order-list__at" dateTime={order.createdAt}>
           {formatDateTime(order.createdAt, language)}
@@ -483,9 +487,9 @@ function CustomerOrderRow({
 
       {open && (
         <div className="order-list__detail">
-          {/* The full code, which the row does not show: the four digits are
-              what a counter says out loud, and this is what the order is called
-              everywhere else — in the address bar, in a support ticket. */}
+          {/* The code again, labelled. The row above prints it bare, which is
+              enough to recognise a line by; this is the one that can be read
+              out over a support call as "the order code". */}
           <dl className="order-facts">
             <div>
               <dt>{t('customerOrderCode')}</dt>

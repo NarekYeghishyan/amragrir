@@ -48,7 +48,14 @@ describe('estimatePrepMinutes', () => {
     expect(estimatePrepMinutes([line(1, 1, null)], 0)).toBe(DEFAULT_PREP_MIN);
   });
 
-  it('ignores a non-positive dish prep time', () => {
+  it('is unmoved by a dish that needs no cooking when there is food beside it', () => {
+    // The bottle of water does not make the burger faster.
     expect(estimatePrepMinutes([line(1, 1, 0), line(1, 1, 9)], 30)).toBe(9);
+  });
+
+  it('is zero for a basket of nothing but dishes that need no cooking', () => {
+    // A declared 0 is a claim, not a blank: falling through to the branch
+    // average here would invent a wait for two bottles off the shelf.
+    expect(estimatePrepMinutes([line(1, 1, 0), line(1, 2, 0)], 30)).toBe(0);
   });
 });

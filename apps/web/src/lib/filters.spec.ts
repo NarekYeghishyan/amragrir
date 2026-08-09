@@ -3,7 +3,9 @@ import { Language } from '@amragrir/shared';
 import {
   FILTER_CHIPS,
   chipHref,
+  chipsFor,
   clearHref,
+  forOrigin,
   hasAnyFilter,
   isActive,
   parseFilters,
@@ -28,8 +30,7 @@ describe('parseFilters', () => {
   it('accepts only the sorts the chips expose', () => {
     expect(parseFilters({ sort: 'top_rated' }).sort).toBe('top_rated');
     expect(parseFilters({ sort: 'fastest' }).sort).toBe('fastest');
-    // `nearest` is a real API sort but not a chip, and `bogus` is nothing.
-    expect(parseFilters({ sort: 'nearest' }).sort).toBeUndefined();
+    expect(parseFilters({ sort: 'nearest' }).sort).toBe('nearest');
     expect(parseFilters({ sort: 'bogus' }).sort).toBeUndefined();
   });
 
@@ -113,6 +114,28 @@ describe('chipHref', () => {
 describe('clearHref', () => {
   it('is the bare home path', () => {
     expect(clearHref(Language.En)).toBe('/en');
+  });
+});
+
+describe('near me, which needs somewhere to be near', () => {
+  it('is offered only once a district is chosen', () => {
+    // Without an origin the API answers `sort=nearest` in its default order.
+    // A chip that lit up and changed nothing would be a lie about the listing.
+    expect(chipsFor(false).map((c) => c.id)).not.toContain('nearest');
+    expect(chipsFor(true).map((c) => c.id)).toContain('nearest');
+    // Every other chip is offered either way.
+    expect(chipsFor(false)).toHaveLength(FILTER_CHIPS.length - 1);
+  });
+
+  it('is dropped from a hand-typed URL that has no origin behind it', () => {
+    const typed = parseFilters({ sort: 'nearest', openNow: '1' });
+    expect(forOrigin(typed, false)).toEqual({ ...typed, sort: undefined });
+    expect(forOrigin(typed, true)).toBe(typed);
+  });
+
+  it('leaves the other sorts alone with or without one', () => {
+    const byRating = parseFilters({ sort: 'top_rated' });
+    expect(forOrigin(byRating, false).sort).toBe('top_rated');
   });
 });
 

@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -16,7 +17,13 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { DietaryTag, Language, MenuTab } from '@amragrir/shared';
+import {
+  DietaryTag,
+  Language,
+  MenuTab,
+  RestaurantService,
+  SERVICE_ORDER,
+} from '@amragrir/shared';
 
 /**
  * A localised text column.
@@ -120,9 +127,18 @@ export class CreateMenuItemDto {
   @Type(() => Number)
   caloriesKcal?: number;
 
+  /**
+   * How long it takes to cook — **`0` is a real answer**.
+   *
+   * A bottle of water, a canned drink, a cake already on the counter: they are
+   * handed over, not cooked, and a floor of one minute made the panel refuse the
+   * truest thing somebody could type about them. `0` and absent are still
+   * different: `0` is the dish saying it needs no time, absent is it saying
+   * nothing and letting the branch's average stand in.
+   */
   @IsInt()
   @IsOptional()
-  @Min(1)
+  @Min(0)
   @Max(MAX_PREP_MIN)
   @Type(() => Number)
   prepMin?: number;
@@ -205,10 +221,14 @@ export class UpdateMenuItemDto {
    * `@IsOptional()` skips `null` as well as absent, which is exactly the
    * distinction wanted — absent leaves the estimate alone, `null` removes it.
    * The opposite of `photoUrl` below, and for the opposite reason.
+   *
+   * `0` is a third thing again, and not a way of writing `null`: it is a dish
+   * that takes no cooking (see `CreateMenuItemDto.prepMin`), which is a claim
+   * the kitchen makes rather than a question it declines to answer.
    */
   @IsInt()
   @IsOptional()
-  @Min(1)
+  @Min(0)
   @Max(MAX_PREP_MIN)
   @Type(() => Number)
   prepMin?: number | null;
@@ -376,6 +396,102 @@ export class CreateBranchDto {
   @Max(MAX_PREP_MIN)
   @Type(() => Number)
   avgPrepMin?: number;
+}
+
+/**
+ * How a restaurant will feed people — the whole set, not a delta.
+ *
+ * Sent whole because the rules in `service-offering.ts` are about combinations:
+ * "is dine-in allowed here" cannot be answered without knowing whether the
+ * eat-in option is on, so a body naming one service at a time would have to be
+ * validated against a set the caller may not have looked at since. Whole sets
+ * also make the request idempotent, and make "somebody else changed this while
+ * the form was open" a wrong answer rather than a silent half-merge.
+ *
+ * This only checks the *vocabulary*. Whether the combination describes a real
+ * restaurant is the service's check, because it is a business rule with a
+ * sentence attached rather than a shape.
+ */
+export class SetRestaurantServicesDto {
+  @IsArray()
+  // Longer than the vocabulary is not a set of services, whatever is in it.
+  @ArrayMaxSize(SERVICE_ORDER.length)
+  @IsIn(Object.values(RestaurantService), { each: true })
+  services!: RestaurantService[];
+}
+
+/**
+ * The photograph on the restaurant's card — normally the URL
+ * `POST /uploads/restaurant-cover` just answered with.
+ *
+ * **`null` is a real value here**, and this is the difference from a dish's
+ * `photoUrl`: a dish is required to have a picture, so `null` there is a
+ * mistake to refuse, while a restaurant that wants its photograph taken down
+ * has no other way to say so and the column is nullable for exactly that. Every
+ * client already draws the no-cover state, because until now that state was all
+ * there was.
+ *
+ * `@ValidateIf` rather than `@IsOptional()`: the latter would skip an *absent*
+ * field too, and a PATCH with an empty body would then read as "take it down"
+ * — the one interpretation nobody typing it would have meant. Absent is
+ * refused, `null` removes, a URL replaces.
+ */
+export class SetRestaurantCoverDto {
+  @ValidateIf((dto: SetRestaurantCoverDto) => dto.coverUrl !== null)
+  @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsNotEmpty()
+  @IsUrl(PHOTO_URL)
+  @MaxLength(500)
+  coverUrl!: string | null;
+}
+
+/**
+ * This branch's own cover — or `null` to wear the restaurant's again.
+ *
+ * `null` is **not** "no picture", which is the difference from the restaurant's
+ * own endpoint: a branch that has nothing of its own falls back to the
+ * business, because a blank card beside a business that has a photograph is
+ * worse than showing the business's. There is deliberately no way to be blank
+ * here.
+ */
+export class SetBranchCoverDto {
+  @ValidateIf((dto: SetBranchCoverDto) => dto.coverUrl !== null)
+  @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsNotEmpty()
+  @IsUrl(PHOTO_URL)
+  @MaxLength(500)
+  coverUrl!: string | null;
+}
+
+/**
+ * What this branch offers — or `null` to follow the restaurant again.
+ *
+ * The whole set, for the reasons `SetRestaurantServicesDto` gives; the rules in
+ * `checkServices` now judge one address rather than the business.
+ *
+ * **`[]` and `null` are different answers.** `[]` is this branch declaring it
+ * offers nothing, overriding a parent that offers pickup; `null` is the branch
+ * handing the question back. Every restaurant is created having declared
+ * nothing, so emptiness could never have meant "unset" — which is why the
+ * column carries a separate `services_overridden` flag.
+ */
+export class SetBranchServicesDto {
+  @ValidateIf((dto: SetBranchServicesDto) => dto.services !== null)
+  @IsArray()
+  @ArrayMaxSize(SERVICE_ORDER.length)
+  @IsIn(Object.values(RestaurantService), { each: true })
+  services!: RestaurantService[] | null;
+}
+
+/** Whether this branch takes table bookings, or `null` to follow the
+ *  restaurant's. Its own request rather than a field on the services above,
+ *  because they are two columns and either moves without the other. */
+export class SetBranchBookingsDto {
+  @ValidateIf((dto: SetBranchBookingsDto) => dto.reservationsEnabled !== null)
+  @IsBoolean()
+  reservationsEnabled!: boolean | null;
 }
 
 /** A branch's standing details — the things that outlive a shift. */

@@ -168,6 +168,42 @@ describe('listUsers', () => {
     const args = (prisma.user.findMany as jest.Mock).mock.calls[0][0];
     expect(args.where.id).toBe('user-7');
   });
+
+  it('hides anonymous sessions that never ordered', async () => {
+    // One row is written per visitor to the storefront, so newest-first these
+    // are the whole first page: a screen about people who order food, showing
+    // nobody who has. A guest who *did* order is not one of them.
+    const { service, prisma } = build();
+    await service.listUsers(Object.assign(Object.create(null), { page: 1, limit: 20 }));
+
+    const args = (prisma.user.findMany as jest.Mock).mock.calls[0][0];
+    expect(args.where.NOT).toEqual({ isGuest: true, orders: { none: {} } });
+  });
+
+  it('includes them when the screen asks for guests', async () => {
+    // Hidden, not deleted — the toggle on the Customers screen is what brings
+    // them back, and it has to actually reach the query.
+    const { service, prisma } = build();
+    await service.listUsers(
+      Object.assign(Object.create(null), { page: 1, limit: 20, guests: true }),
+    );
+
+    const args = (prisma.user.findMany as jest.Mock).mock.calls[0][0];
+    expect(args.where.NOT).toBeUndefined();
+  });
+
+  it('never hides the account a link names', async () => {
+    // An id comes from somewhere that already knows who it means. Filtering it
+    // out would answer a link to a real person with "that account no longer
+    // exists", which is what this screen says when an id finds nobody.
+    const { service, prisma } = build();
+    await service.listUsers(
+      Object.assign(Object.create(null), { page: 1, limit: 20, id: 'user-7' }),
+    );
+
+    const args = (prisma.user.findMany as jest.Mock).mock.calls[0][0];
+    expect(args.where.NOT).toBeUndefined();
+  });
 });
 
 describe('revealPhone', () => {
@@ -330,15 +366,25 @@ describe('listCustomerOrders', () => {
     expect(page.items[0]?.itemsCount).toBe(2);
   });
 
-  it('carries the pickup code and where the order was placed', async () => {
+  it('carries the order code and where the order was placed', async () => {
     // All three are what the row is linked *with*: the board is addressable by
     // restaurant, branch and code, so an order here is somewhere to go.
     const { service } = build();
     const page = await service.listCustomerOrders(TARGET, query());
 
-    expect(page.items[0]?.pickupCode).toBe('4821');
+    expect(page.items[0]?.code).toBe('AMR-12344821');
     expect(page.items[0]?.restaurantId).toBe('rest-1');
     expect(page.items[0]?.branchId).toBe('branch-1');
+  });
+
+  it('never sends the collection code to the platform side', async () => {
+    // The counter is not asked for it here, so there is nothing this screen can
+    // do with it except leak it. The kitchen board does not get it either —
+    // see `QueueItem`.
+    const { service } = build();
+    const page = await service.listCustomerOrders(TARGET, query());
+
+    expect(page.items[0]).not.toHaveProperty('pickupCode');
   });
 
   it('says an order was never paid for rather than inventing a status', async () => {

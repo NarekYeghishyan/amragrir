@@ -41,6 +41,14 @@ enum ServiceMode {
   dine_in
 }
 
+/// What a guest does with a pickup order — see `orders.pickup_option`. A
+/// sub-mode of `pickup`, not a fourth service mode: the order is a pickup order
+/// either way, and this only says where the food ends up.
+enum PickupOption {
+  take_away
+  eat_in
+}
+
 enum OrderStatus {
   created
   paid
@@ -179,8 +187,16 @@ model Restaurant {
   /// whose original owner had no email (and so could not be migrated into
   /// `staff_users`) still record who to invite.
   ownerId             String?  @map("owner_id") @db.Uuid
+  /// The business's default, inherited by every branch that has not answered
+  /// for itself (`restaurant_branches.reservations_enabled`).
   reservationsEnabled Boolean  @default(false) @map("reservations_enabled")
+  /// The business's default services, inherited by every branch whose
+  /// `services_overridden` is false. What a guest is actually offered is always
+  /// the *branch's* resolved set — see `resolveBranchOffering` in
+  /// `@amragrir/shared`.
   services            String[]
+  /// The business's default cover, worn by every branch that has none of its
+  /// own.
   coverUrl            String?  @map("cover_url")
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -209,10 +225,44 @@ model RestaurantBranch {
   openHours    Json?    @map("open_hours")
   isOpen       Boolean  @default(true) @map("is_open")
   avgPrepMin   Int?     @map("avg_prep_min") @db.SmallInt
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  restaurant    Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  /// This branch's own cover, or NULL to wear the restaurant's
+  /// (`restaurants.cover_url`). Branches of one business are photographed
+  /// separately or not at all, so the parent is the default rather than the
+  /// answer — a chain sets one picture once and any branch that differs says so.
+  ///
+  /// There is deliberately no "explicitly blank" state here: a branch with no
+  /// photograph of its own falls back, because a card showing nothing while the
+  /// business has a picture is worse than showing the business's.
+  coverUrl String? @map("cover_url")
+
+  /// What this branch offers, when `services_overridden` is true. Meaningless
+  /// otherwise — read `services_overridden` first.
+  ///
+  /// The rules in `checkServices` (BUSINESS_LOGIC.md §2) apply per branch, since
+  /// each set now describes one address rather than the business.
+  services String[]
+
+  /// Whether `services` above is this branch's answer or the restaurant's.
+  ///
+  /// A flag rather than a nullable `services` because **Postgres arrays are
+  /// nullable but Prisma scalar lists are not**, and because `{}` is already a
+  /// legitimate value: every restaurant is created having declared nothing, and
+  /// a branch must be able to override a parent that offers pickup with a
+  /// genuinely empty set. Two columns for one concept is the price of being able
+  /// to tell "declared nothing" from "not declared".
+  servicesOverridden Boolean @default(false) @map("services_overridden")
+
+  /// Whether this branch takes table bookings, or NULL to follow the
+  /// restaurant's `reservations_enabled`. Moved down with `services` because
+  /// `reserve` is one of them: a branch offering `reserve` while the business
+  /// flag said otherwise would be two answers to "can I book a table here".
+  reservationsEnabled Boolean? @map("reservations_enabled")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  restaurant    Restaurant          @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   tables        Table[]
   menuItems     MenuItem[]
   orders        Order[]
@@ -255,18 +305,18 @@ model Category {
 }
 
 model MenuItem {
-  id           String   @id @default(uuid()) @db.Uuid
-  branchId     String   @map("branch_id") @db.Uuid
-  categoryId   String?  @map("category_id") @db.Uuid
-  menuTab      MenuTab  @map("menu_tab")
-  nameI18n     Json     @map("name_i18n")
-  descI18n     Json?    @map("desc_i18n")
-  priceAmd     Int      @map("price_amd")
-  caloriesKcal Int?     @map("calories_kcal")
-  prepMin      Int?     @map("prep_min") @db.SmallInt
-  photoUrl     String?  @map("photo_url")
-  dietaryTags  String[] @map("dietary_tags")
-  isAvailable  Boolean  @default(true) @map("is_available")
+  id           String    @id @default(uuid()) @db.Uuid
+  branchId     String    @map("branch_id") @db.Uuid
+  categoryId   String?   @map("category_id") @db.Uuid
+  menuTab      MenuTab   @map("menu_tab")
+  nameI18n     Json      @map("name_i18n")
+  descI18n     Json?     @map("desc_i18n")
+  priceAmd     Int       @map("price_amd")
+  caloriesKcal Int?      @map("calories_kcal")
+  prepMin      Int?      @map("prep_min") @db.SmallInt
+  photoUrl     String?   @map("photo_url")
+  dietaryTags  String[]  @map("dietary_tags")
+  isAvailable  Boolean   @default(true) @map("is_available")
   /// Off the menu, without leaving the database — `order_items` points here, and
   /// an order that can no longer say what was bought is not an order. Set means
   /// gone: every read path filters it out, including the public menu and the
@@ -276,8 +326,8 @@ model MenuItem {
   /// shift may set it, and it comes back. This one needs `menu:write` and
   /// nothing in the panel undoes it.
   deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   branch     RestaurantBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
   category   Category?        @relation(fields: [categoryId], references: [id])
@@ -289,34 +339,67 @@ model MenuItem {
 }
 
 model Order {
-  id            String      @id @default(uuid()) @db.Uuid
-  code          String      @unique @db.VarChar(12)
-  userId        String      @map("user_id") @db.Uuid
-  branchId      String      @map("branch_id") @db.Uuid
-  serviceMode   ServiceMode @map("service_mode")
-  status        OrderStatus @default(created)
-  subtotalAmd   Int         @map("subtotal_amd")
-  serviceFeeAmd Int         @map("service_fee_amd")
-  depositAmd    Int         @default(0) @map("deposit_amd")
+  id              String        @id @default(uuid()) @db.Uuid
+  /// The order's name: `AMR-` + 8 digits. Printed on the ticket, read out over
+  /// the phone, scanned off the board. It identifies an order; it does not
+  /// prove anything about one — see `pickup_code`.
+  code            String        @unique @db.VarChar(12)
+  /// The number a guest shows to collect the food, and the only thing that lets
+  /// the counter close the order. Six digits, generated in its own right.
+  ///
+  /// **Not derived from `code`, and that is the whole design.** It used to be
+  /// its last four digits — never stored, so the two could not disagree — which
+  /// also meant every receipt, screenshot and shoulder carrying the order
+  /// number carried the collection code with it. A proof derived from a public
+  /// name proves nothing, so this is drawn independently and stored.
+  ///
+  /// Unique across the table, not per branch: a code is checked against the one
+  /// order somebody is standing in front of, but making it globally unique
+  /// means a mistyped code can never quietly match a *different* live order.
+  /// That caps the platform at 1,000,000 orders ever — see DATABASE.md §5,
+  /// which is also where the two ways out are written down. Inserting past that
+  /// point fails on this constraint rather than reusing a code.
+  pickupCode      String        @unique @map("pickup_code") @db.VarChar(6)
+  userId          String        @map("user_id") @db.Uuid
+  branchId        String        @map("branch_id") @db.Uuid
+  serviceMode     ServiceMode   @map("service_mode")
+  /// Where a pickup order ends up: taken away, or eaten in the dining room
+  /// unserved. The kitchen reads it, because a bag and a plate are not the same
+  /// order to prepare and the counter is too late to ask.
+  ///
+  /// **Set exactly when `service_mode` is `pickup`** — a dine-in order has a
+  /// table instead, and there is no such thing as taking away a meal you are
+  /// sitting at. A CHECK constraint holds the two to that
+  /// (`orders_pickup_option_matches_service_mode`); Prisma cannot express it, so
+  /// it lives in the migration and in DATABASE.md §5.
+  ///
+  /// `eat_in` is only accepted from a restaurant that declares the matching
+  /// service — see BUSINESS_LOGIC.md §2, where it is also why such a restaurant
+  /// cannot be doing table service.
+  pickupOption    PickupOption? @map("pickup_option")
+  status          OrderStatus   @default(created)
+  subtotalAmd     Int           @map("subtotal_amd")
+  serviceFeeAmd   Int           @map("service_fee_amd")
+  depositAmd      Int           @default(0) @map("deposit_amd")
   // What a coupon took off, and which coupon did it. Stored rather than
   // recomputed: the coupon's percentage may change later (referral discounts
   // accumulate), and an order must keep saying what was actually charged.
-  discountAmd   Int         @default(0) @map("discount_amd")
-  couponId      String?     @map("coupon_id") @db.Uuid
-  totalAmd      Int         @map("total_amd")
-  readyAt       DateTime?   @map("ready_at") @db.Timestamptz(6)
+  discountAmd     Int           @default(0) @map("discount_amd")
+  couponId        String?       @map("coupon_id") @db.Uuid
+  totalAmd        Int           @map("total_amd")
+  readyAt         DateTime?     @map("ready_at") @db.Timestamptz(6)
   /// The prep estimate this order was priced and scheduled against, in minutes —
   /// the slowest dish, or the branch average, or `DEFAULT_PREP_MIN`. A snapshot
   /// for the same reason `order_items.unit_price_amd` is one: the dish's
   /// `prep_min` may change, and an order must keep saying what it was promised
   /// against. Null on rows written before pre-ordering existed, which is the
   /// honest answer for them — nothing recorded it.
-  prepMin       Int?        @map("prep_min") @db.SmallInt
+  prepMin         Int?          @map("prep_min") @db.SmallInt
   /// When the kitchen has to start, so the food is ready when it was promised —
   /// `ready_at` minus `prep_min`. Stored rather than recomputed because it is
   /// what the board sorts on, and a sort key derived per row is a sort the
   /// database cannot do.
-  prepStartAt   DateTime?   @map("prep_start_at") @db.Timestamptz(6)
+  prepStartAt     DateTime?     @map("prep_start_at") @db.Timestamptz(6)
   /// How long before `ready_at` the branch is warned, in minutes — the number
   /// `reminder_at` is computed from, and the one the shift may move.
   ///
@@ -329,7 +412,7 @@ model Order {
   /// Null exactly when `reminder_at` is null — the two are set together and
   /// cleared together, because a lead with nothing to lead is a number that
   /// means nothing, and a reminder with no lead could not be explained.
-  reminderLeadMin Int?      @map("reminder_lead_min") @db.SmallInt
+  reminderLeadMin Int?          @map("reminder_lead_min") @db.SmallInt
   /// When to warn the branch that this one is coming up: `ready_at` minus
   /// `reminder_lead_min`.
   ///
@@ -344,7 +427,7 @@ model Order {
   /// future, and the order is a booking; passed, and it is this shift's work.
   /// By the clock rather than by `reminder_sent_at`, so an order still lands on
   /// the board on time in a deployment where the reminder job never ran.
-  reminderAt    DateTime?   @map("reminder_at") @db.Timestamptz(6)
+  reminderAt      DateTime?     @map("reminder_at") @db.Timestamptz(6)
   /// Set by the reminder job once it has told the branch. Only ever read to stop
   /// it telling them twice — never to decide which stage an order is in.
   ///
@@ -352,19 +435,19 @@ model Order {
   /// warning already went out: the earlier notice was for a moment that is no
   /// longer the one anybody chose, and leaving this set would mean the new time
   /// silently never fires.
-  reminderSentAt DateTime?  @map("reminder_sent_at") @db.Timestamptz(6)
-  reservationId String?     @unique @map("reservation_id") @db.Uuid
-  notes         String?
-  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  reminderSentAt  DateTime?     @map("reminder_sent_at") @db.Timestamptz(6)
+  reservationId   String?       @unique @map("reservation_id") @db.Uuid
+  notes           String?
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  user        User             @relation(fields: [userId], references: [id])
-  branch      RestaurantBranch @relation(fields: [branchId], references: [id])
-  reservation Reservation?     @relation(fields: [reservationId], references: [id])
-  coupon      Coupon?          @relation(fields: [couponId], references: [id])
-  items       OrderItem[]
-  payment     Payment?
-  events      OrderEvent[]
+  user          User                @relation(fields: [userId], references: [id])
+  branch        RestaurantBranch    @relation(fields: [branchId], references: [id])
+  reservation   Reservation?        @relation(fields: [reservationId], references: [id])
+  coupon        Coupon?             @relation(fields: [couponId], references: [id])
+  items         OrderItem[]
+  payment       Payment?
+  events        OrderEvent[]
   notifications StaffNotification[]
 
   @@index([userId, status])
@@ -516,14 +599,31 @@ model Review {
 }
 
 model Notification {
-  id        String           @id @default(uuid()) @db.Uuid
-  userId    String           @map("user_id") @db.Uuid
-  type      NotificationType
-  title     String           @db.VarChar(160)
-  body      String
+  id     String           @id @default(uuid()) @db.Uuid
+  userId String           @map("user_id") @db.Uuid
+  type   NotificationType
+
+  /// The words, **when the server is the one who wrote them** — a promo, a
+  /// system note. Null for the kinds a client renders itself, which is every
+  /// `order` row: those carry `payload` instead and the client draws them from
+  /// the dictionary it already ships (`statusReady`, `statusReadyDesc`, …).
+  ///
+  /// Nullable rather than always filled, because the alternative is a sentence
+  /// frozen in whatever language the reader preferred the day it was written.
+  /// Switching language in Settings would then leave a bell half-translated,
+  /// and the API cannot reach the shared dictionary to avoid that: it compiles
+  /// to CommonJS with Node resolution, and `@amragrir/i18n` ships TypeScript
+  /// that only a bundler reads. The same reasoning is already written down for
+  /// `staff_notifications` below — a row carries the facts, not a sentence.
+  title String? @db.VarChar(160)
+  body  String?
+
+  /// What the row is about, structured. For `order`: `{ orderId, code, status }`
+  /// — enough for the bell to name the order and deep-link to it without a
+  /// second request.
   payload   Json?
-  isRead    Boolean          @default(false) @map("is_read")
-  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -603,15 +703,15 @@ model StaffUser {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  assignments   StaffAssignment[] @relation("AssignmentHolder")
-  grantedRoles  StaffAssignment[] @relation("AssignmentGrantedBy")
-  invitesSent   StaffInvite[]     @relation("InviteSentBy")
-  auditEntries  AuditLog[]
+  assignments       StaffAssignment[]       @relation("AssignmentHolder")
+  grantedRoles      StaffAssignment[]       @relation("AssignmentGrantedBy")
+  invitesSent       StaffInvite[]           @relation("InviteSentBy")
+  auditEntries      AuditLog[]
   /// Entries written while acting as somebody else — see `AuditLog.actingStaffId`.
-  auditEntriesAs AuditLog[]       @relation("AuditLogActingStaff")
-  orderEvents   OrderEvent[]      @relation("OrderEventStaffActor")
+  auditEntriesAs    AuditLog[]              @relation("AuditLogActingStaff")
+  orderEvents       OrderEvent[]            @relation("OrderEventStaffActor")
   /// Orders moved while acting as somebody else — see `OrderEvent.actingStaffId`.
-  orderEventsAs OrderEvent[]      @relation("OrderEventActingStaff")
+  orderEventsAs     OrderEvent[]            @relation("OrderEventActingStaff")
   /// Branch notifications this person has read — see `StaffNotificationRead`.
   notificationReads StaffNotificationRead[]
 
@@ -744,21 +844,21 @@ model StaffNotificationRead {
 /// Who did what. Once two people share a restaurant, "who marked this sold out"
 /// and "who let this account in" stop being answerable without it.
 model AuditLog {
-  id           String   @id @default(uuid()) @db.Uuid
+  id            String   @id @default(uuid()) @db.Uuid
   /// Null for actions the system took on nobody's behalf, and for staff who
   /// have since been deleted.
-  actorStaffId String?  @map("actor_staff_id") @db.Uuid
+  actorStaffId  String?  @map("actor_staff_id") @db.Uuid
   /// The real human behind an impersonated session, when the account above was
   /// being acted as rather than acting. Null in the ordinary case. Without it an
   /// impersonated change is filed against the innocent party — the same failure
   /// `order_events.acting_staff_id` exists to prevent.
-  actingStaffId String? @map("acting_staff_id") @db.Uuid
+  actingStaffId String?  @map("acting_staff_id") @db.Uuid
   /// `menu_item.update`, `staff.invite`, `order.status` — resource and verb.
-  action       String   @db.VarChar(80)
-  entity       String   @db.VarChar(40)
+  action        String   @db.VarChar(80)
+  entity        String   @db.VarChar(40)
   /// Not a foreign key: it points at whichever table `entity` names, and the
   /// row it refers to may legitimately be gone.
-  entityId     String?  @map("entity_id") @db.Uuid
+  entityId      String?  @map("entity_id") @db.Uuid
   /// Where it happened, so a person's activity can be filtered to the reader's
   /// reach without a join per `entity` value. Both are written wherever both are
   /// known — a menu item names its branch, and that branch names its restaurant.
@@ -768,15 +868,15 @@ model AuditLog {
   /// references, because they decide who may read the row and an access-control
   /// column holding an id that matches nothing hides or reveals history by
   /// accident.
-  restaurantId String?  @map("restaurant_id") @db.Uuid
-  branchId     String?  @map("branch_id") @db.Uuid
+  restaurantId  String?  @map("restaurant_id") @db.Uuid
+  branchId      String?  @map("branch_id") @db.Uuid
   /// Only the fields that changed, not the whole row. `before` is what makes a
   /// deletion readable — it is the only remaining record of what the thing was
   /// called, for the entities that are not soft-deleted.
-  before       Json?
-  after        Json?
-  ip           String?  @db.VarChar(45)
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  before        Json?
+  after         Json?
+  ip            String?  @db.VarChar(45)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   actor       StaffUser?        @relation(fields: [actorStaffId], references: [id], onDelete: SetNull)
   actingStaff StaffUser?        @relation("AuditLogActingStaff", fields: [actingStaffId], references: [id], onDelete: SetNull)

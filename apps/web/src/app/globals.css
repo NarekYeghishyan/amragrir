@@ -14,6 +14,20 @@
   --gutter: 28px;
 }
 
+/* The native date and time pickers on the checkout draw their own popup, in
+   their own chrome, and the only thing that steers it is `color-scheme` —
+   tokens buy nothing there. `tokens.css` sets `light dark`, which follows the
+   system; the header's switch has to beat that here as it does everywhere else,
+   or a page somebody has put into dark opens a white calendar over it. It is
+   here rather than in `tokens.css`, which is generated from
+   `packages/ui/src/tokens.ts` and is not a place to hand-edit. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -24,11 +38,24 @@ body {
   padding: 0;
 }
 
+/* The page is a column: header, content, footer. `min-height` rather than
+   `height`, so a long page still grows past the viewport and scrolls as
+   normal — this only sets the floor. `.wrap` below takes the slack, which is
+   what holds the footer against the bottom of the screen on the short pages
+   (a 404, an empty basket, a profile asking someone to sign in) instead of
+   leaving it stranded mid-screen with page colour underneath.
+
+   `100dvh` after `100vh`: on mobile browsers the viewport unit that counts is
+   the dynamic one, and the plain `vh` line is what old engines keep. */
 body {
   background: var(--bg);
   color: var(--ink);
   font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
   transition: background 0.3s;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
 }
 
 a {
@@ -51,8 +78,17 @@ img {
     transform: none;
   }
 }
+/* `backwards`, not `both`, and the difference is not cosmetic.
+   The `to` frame is the element's natural state (opacity 1, transform none), so
+   retaining it forwards changes nothing to look at — but a retained `transform`
+   keeps the element a **stacking context** for as long as it exists. That trapped
+   the booking calendar's popover inside `section.booking`: the panel's z-index
+   was being compared against its own siblings instead of the page, so the "Ready
+   at" field and the payment rows below were painted straight over it. `backwards`
+   still covers the only frame that matters — the one before the animation starts,
+   which is what stops the flash. */
 .rise {
-  animation: fadeUp 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation: fadeUp 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
 }
 @media (prefers-reduced-motion: reduce) {
   .rise {
@@ -71,10 +107,39 @@ input::placeholder {
   color: var(--ink3);
 }
 
+/* `flex: 1 0 auto`, not `flex: 1`: the shorthand's `1 1 0%` would measure this
+   column from a zero basis and let it shrink, which on a page taller than the
+   viewport is how content ends up squeezed under a footer that pretends there
+   is room. Growing from the content's own height only ever adds the slack.
+
+   `width: 100%` restores what this had as a plain block. A flex item with auto
+   cross-axis margins is never stretched, so `margin: 0 auto` alone would leave
+   the column as wide as its widest row instead of the full `--page`. */
 .wrap {
   max-width: var(--page);
   margin: 0 auto;
   padding: 34px var(--gutter) 80px;
+  flex: 1 0 auto;
+  width: 100%;
+}
+
+/* The artifact gives each screen its own column rather than one width for the
+   whole site: the catalogue is the widest at 1220px, the basket sits on 900 and
+   the checkout on 980, and both are centred. `.wrap` holds the widest; these
+   pull the narrower ones in without laying a second set of gutters inside the
+   first. The numbers are the artifact's `max-width` less its own 28px padding,
+   which `.wrap` has already applied.
+
+   Screens other than the catalogue also start 10px higher up — 24px of air
+   above the back button rather than 34px above the hero. */
+.screen {
+  margin: -10px auto 0;
+}
+.screen--basket {
+  max-width: 844px;
+}
+.screen--checkout {
+  max-width: 924px;
 }
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
@@ -86,6 +151,14 @@ header.site {
   background: var(--glass);
   backdrop-filter: blur(18px) saturate(160%);
   border-bottom: 1px solid var(--line);
+}
+/* A `backdrop-filter` makes its element the containing block for every
+   fixed-position descendant — which would trap the location dialog's overlay
+   inside a 72px strip at the top of the page. The blur comes off while that
+   dialog is open, and nobody sees it go: what covers the header at that moment
+   is the dialog's own scrim, at 50% black. */
+header.site:has(.locpick[open]) {
+  backdrop-filter: none;
 }
 header.site .inner {
   max-width: var(--page);
@@ -117,6 +190,489 @@ header.site .brand svg,
 }
 .wordmark-tld {
   color: var(--accent);
+}
+
+/* ── Location picker ─────────────────────────────────────────────────────── */
+
+/* The artifact's dialog, opened by a `<details>` — the summary is its
+   pin-name-chevron row, and the panel is the overlay rather than a dropdown, so
+   the dialog opens without JavaScript and closes properly with it. Measurements
+   are the artifact's `LOCATION PICKER` overlay verbatim. */
+.locpick {
+  flex: none;
+}
+.locpick > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 4px;
+  color: var(--ink2);
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+}
+/* Safari draws its own disclosure triangle unless both of these are set. */
+.locpick > summary::-webkit-details-marker {
+  display: none;
+}
+.locpick > summary .where {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.locpick[open] > summary .chev {
+  transform: rotate(180deg);
+}
+.locpick-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.locpick-scrim {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.5);
+  cursor: default;
+  animation: fadeUp 0.2s both;
+}
+.locpick-dialog {
+  position: relative;
+  width: 760px;
+  max-width: 100%;
+  height: 88vh;
+  /* The artifact's 640 on its 860px canvas, but never taller than the space
+     the overlay's own padding leaves — a short window would otherwise push the
+     confirm button off the bottom of the screen. */
+  max-height: min(640px, 100%);
+  background: var(--card);
+  border-radius: 26px;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+/* The form is the dialog's whole body, so it — not the box around it — is what
+   carries the column the head, map and foot are laid out in. */
+.locpick-form {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.locpick-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--line);
+}
+.locpick-head strong {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+}
+.locpick-head span {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--ink2);
+  text-wrap: pretty;
+}
+.locpick-close {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* The search box and district chips float over the map rather than sitting
+   above it — the artifact gives the map the whole panel. */
+.locpick-map {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--placeholder);
+}
+.locpick-tools {
+  flex: none;
+  position: relative;
+  z-index: 2;
+  padding: 12px;
+}
+/* It can hold nothing at all now: no geocoder means no search box, and a first
+   visit has no recents. Padding around nothing is a 24px band above the map. */
+.locpick-tools:empty {
+  padding: 0;
+}
+.locpick-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--card);
+  box-shadow: 0 6px 16px var(--shadow);
+}
+.locpick-search:focus-within {
+  border-color: var(--accent);
+}
+.locpick-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14.5px;
+  outline: none;
+}
+/* Before the script arrives this searches nothing, and says so by looking
+   inert rather than by silently ignoring what is typed into it. */
+.locpick-search input:disabled {
+  cursor: not-allowed;
+}
+.locpick-clear {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 12px;
+  background: var(--chip);
+  color: var(--ink2);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+/* Address results sit *over* the map rather than above it: a list that
+   shortened the map every time somebody typed would move the pin they were
+   aiming at. */
+.locpick-results {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 62px;
+  z-index: 3;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  max-height: 232px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--card);
+  box-shadow: 0 18px 44px var(--shadow);
+}
+.locpick-result {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.locpick-result:hover,
+.locpick-result:focus-visible {
+  background: var(--chip);
+}
+.locpick-result svg {
+  flex: none;
+}
+.locpick-note {
+  padding: 10px 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink2);
+}
+
+.locpick-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+}
+/* With no geocoder there is no search box, and this row is the first thing in
+   the strip — its gap belongs under the box, not under nothing. */
+.locpick-chips:first-child {
+  margin-top: 0;
+}
+/* Names the row rather than leaving a line of nameless chips under the box. */
+.locpick-chips-label {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--ink2);
+}
+.locpick-area {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 4px 12px var(--shadow);
+}
+.locpick-area:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* `.on` rather than `:checked`: what wears this is a button, not a radio in a
+   group, because a recent place is a shortcut to a point that also sits in the
+   same space as everything else the map can produce. */
+.locpick-area.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+/* Recents are `<button>`s, which do not inherit the page's font. */
+.locpick-recent {
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  max-width: 260px;
+}
+/* A geocoded label is a whole address — "Northern Avenue, 5, Yerevan, Armenia" —
+   where a district name is three words. It gets its own element because
+   `text-overflow` needs a block to work on, and a bare text node inside a flex
+   row is not one. */
+.locpick-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.locpick-result .locpick-chip-text {
+  flex: 1;
+}
+/* The box the map lives in, real or drawn. It clips: the frame inside it is
+   deliberately bigger than the box on every side, so that panning can slide
+   real tiles into view instead of reloading the widget. */
+.locpick-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  /* Shows for the moment a re-pointed frame takes to load, and reads as a map
+     arriving rather than as a hole. */
+  background: var(--placeholder);
+}
+/* Sized and slid from the component — `BLEED` is one number and it lives in
+   `lib/map-frame.ts`, where the arithmetic that depends on it is. */
+.locpick-frame {
+  position: absolute;
+  display: block;
+  border: 0;
+}
+/* What the pointer touches. The frame under it is `inert`, so this is the only
+   thing on the map that can be dragged, and nothing inside the widget can move
+   the map out from under the pin. */
+.locpick-grab {
+  position: absolute;
+  inset: 0;
+  cursor: grab;
+  /* Or a drag on a phone scrolls the dialog instead of moving the map. */
+  touch-action: none;
+}
+.locpick-grab.dragging {
+  cursor: grabbing;
+}
+.locpick-zoom {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  gap: 6px;
+}
+/* Yandex's credit, put back by hand — the widget draws its own in a corner this
+   box does not show. */
+.locpick-credit {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.locpick-credit:hover,
+.locpick-credit:focus-visible {
+  color: var(--ink);
+}
+.locpick-zoom button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  color: var(--ink);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.locpick-drawn > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* The streets are drawn past the viewBox on purpose — see the component. An
+     SVG clips to its viewBox unless told not to, and the box above is what
+     should be doing the clipping here. */
+  overflow: visible;
+}
+.locpick-pin {
+  cursor: pointer;
+}
+/* The pin on the real map — drawn here rather than by the widget, which is what
+   lets it move without the frame reloading. The shape is the artifact's, out of
+   `MapPin.tsx`, and so is the one on the drawn map; this only sizes and places
+   it. The component sets `left`/`top`, and the translate is what puts the
+   *point* of the pin on the point — 90% down the box, which is where `PIN_TIP`
+   says the tip is. */
+.locpick-mappin {
+  position: absolute;
+  width: 26px;
+  height: 35px;
+  transform: translate(-50%, -90%);
+  pointer-events: none;
+  overflow: visible;
+}
+/* The chosen point, named on the map the way the artifact names it. Transparent
+   to the pointer, or the corner it sits in would be a place the map cannot be
+   dragged from. */
+.locpick-selected {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  margin: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.locpick-selected span {
+  width: 9px;
+  height: 9px;
+  border-radius: 5px;
+  background: var(--accent);
+}
+/* The badge lets taps through to the map under it. This is the one thing in
+   there that must catch them: it is the only way back to the whole city. */
+.locpick-unset {
+  pointer-events: auto;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 10px;
+  background: var(--chip);
+  color: var(--ink2);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.locpick-unset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.locpick-foot {
+  flex: none;
+  display: flex;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--line);
+}
+.locpick-here {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 50px;
+  padding: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.locpick-confirm {
+  flex: 1;
+  height: 50px;
+  border: none;
+  border-radius: 15px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 22px var(--shadow);
+}
+.locpick-error {
+  flex: none;
+  margin: 0;
+  padding: 0 24px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--danger);
 }
 
 /* ── Search ──────────────────────────────────────────────────────────────── */
@@ -432,6 +988,10 @@ p.lede {
 }
 
 .card {
+  /* Relative because the heart is positioned against the whole card: it is a
+     <form>, so it cannot live inside the <a> that wraps the photo and the body,
+     and it is a sibling of that link instead. */
+  position: relative;
   display: block;
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -442,6 +1002,9 @@ p.lede {
 }
 .card:hover {
   transform: translateY(-2px);
+}
+.card-link {
+  display: block;
 }
 .card .media {
   height: 180px;
@@ -506,6 +1069,93 @@ p.lede {
 .badge .star {
   color: var(--star);
 }
+/* The heart takes the top-right corner on a restaurant card — where the app
+   puts it — so the rating shifts left by the button's width plus a gap. Scoped
+   to `.card` so the rating badge keeps its corner wherever there is no heart. */
+.card .badge.rating {
+  right: 56px;
+}
+
+/* The favourite toggle. Same glass as the badges it sits beside, sized to a
+   real touch target rather than to the 17px heart inside it. */
+.fav-form {
+  position: absolute;
+  top: 11px;
+  right: 12px;
+  /* Above the card's link, which covers the photo underneath it. */
+  z-index: 1;
+  line-height: 0;
+}
+.fav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  color: var(--ink2);
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    transform 0.15s;
+}
+.fav:hover {
+  color: var(--destructive);
+  transform: scale(1.08);
+}
+.fav.on {
+  color: var(--destructive);
+}
+/* The keyboard ring, since the button paints its own background. */
+.fav:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* In a row rather than over a photo: an ordinary flex item, so it takes its
+   place between the rating and the chevron instead of floating on glass. The
+   card behind it is `--card`, not a photograph, so it wears the chip fill the
+   rest of that row's furniture uses. */
+.fav-form.in-row {
+  position: static;
+  flex: none;
+}
+.fav-form.in-row .fav {
+  background: var(--chip);
+  backdrop-filter: none;
+}
+
+/* On a restaurant page's banner rather than a card: bigger, to match the back
+   button opposite it, and lifted above `.banner::after` — the gradient is a
+   generated box that paints after the element's children, so without this it
+   would sit over the heart and swallow the press. */
+.fav-form.on-banner {
+  top: 16px;
+  right: 16px;
+  z-index: 1;
+}
+.fav-form.on-banner .fav {
+  width: 42px;
+  height: 42px;
+  /* The photo underneath is arbitrary, so the resting heart is drawn in the
+     foreground ink rather than the muted `--ink2` a card's paler frame allows. */
+  color: var(--ink);
+}
+.fav-form.on-banner .fav.on {
+  color: var(--destructive);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fav {
+    transition: none;
+  }
+  .fav:hover {
+    transform: none;
+  }
+}
 
 .tag {
   padding: 6px 11px;
@@ -556,12 +1206,14 @@ p.lede {
   background: linear-gradient(to top, rgba(0, 0, 0, 0.34), transparent 60%);
 }
 
+/* No `margin-top`: this is the first thing in `.rest-grid`, which already
+   carries the artifact's 26px under the banner. Having both put the title 52px
+   down — the one measurement on this page that did not match the drawing. */
 .rest-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-top: 26px;
 }
 .rest-head .meta {
   font-size: 15px;
@@ -596,37 +1248,89 @@ p.lede {
   color: var(--ink2);
 }
 
-/* The artifact's menu tabs filter the list. These are anchors instead: this
-   page exists so that the whole menu is in the HTML a crawler receives, and a
-   tab that hides three quarters of it would defeat that. Same pill, and it
-   still works with JavaScript off. */
-.menu-nav {
+/* The artifact's menu tabs, which filter the list — one category on the screen
+   at a time, the selected pill dark.
+
+   They filter with no JavaScript: each pill is a `<label>` around a radio, and
+   the section on screen is chosen by `:has(:checked)` below. Every section is in
+   the markup either way, which is what the anchors these replaced were
+   protecting — the whole menu in the HTML a crawler receives. That was never in
+   conflict with the design; it only looked like it. */
+.menu-tabs {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
   margin: 26px 0 4px;
-  padding: 0;
-  list-style: none;
 }
-.menu-nav a {
-  display: inline-block;
+.menu-tab {
   padding: 10px 18px;
   border-radius: 22px;
   background: var(--chip);
   color: var(--ink2);
   font-size: 14.5px;
   font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s;
 }
-.menu-nav a:hover {
+.menu-tab:active {
+  transform: scale(0.96);
+}
+/* The radio is the control; the pill is what it looks like. Same arrangement as
+   the location picker's chips, and for the same reason — the browser tracks
+   which one is chosen, so this works before and without hydration. */
+.menu-tab input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.menu-tab:has(input:checked) {
   background: var(--ink);
   color: var(--bg);
 }
+.menu-tab:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
+/* How a section heading looks when it is drawn at all — which, below, is only
+   in a browser that cannot filter. */
 .menu-section h3 {
   font-size: 17px;
   font-weight: 800;
   margin: 26px 0 0;
   scroll-margin-top: 88px;
+}
+
+/* The filtering itself, and the heading it makes redundant.
+
+   Gated on `:has()` deliberately. Everything above degrades to a row of pills
+   that do nothing, which is survivable; `display:none` on every section without
+   the rule that brings one back would empty the menu, which is not. A browser
+   without `:has()` therefore gets what this page was before the tabs filtered —
+   every section at once, each under its heading — rather than a blank column. */
+@supports selector(:has(*)) {
+  /* The pill above already says this word. The heading stays in the markup for
+     the document outline; these are `.visually-hidden`'s declarations, written
+     out because the fallback needs the same headings visible. */
+  .menu-section h3 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .menu-section {
+    display: none;
+  }
+  .menu:has(input[value='popular']:checked) .menu-section[data-tab='popular'],
+  .menu:has(input[value='mains']:checked) .menu-section[data-tab='mains'],
+  .menu:has(input[value='sides']:checked) .menu-section[data-tab='sides'],
+  .menu:has(input[value='drinks']:checked) .menu-section[data-tab='drinks'] {
+    display: block;
+  }
 }
 
 .dishes {
@@ -673,33 +1377,140 @@ p.lede {
   color: var(--ink3);
   margin-top: 5px;
 }
+/* The artifact's foot row: price left, `＋` right, pushed to the bottom of the
+   text column so every card in a row lines its price up with its neighbours'
+   however long the description above it runs. */
+.dish-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 10px;
+}
 .dish .price {
   font-size: 16px;
   font-weight: 800;
-  margin-top: auto;
-  padding-top: 10px;
 }
 .dish.unavailable .name,
 .dish.unavailable .price {
   color: var(--ink3);
 }
 
-/* ── Order CTA ───────────────────────────────────────────────────────────── */
+/* ── Restaurant page: the order panel beside the menu ────────────────────── */
 
-.cta {
+/* The artifact's `1fr 380px`. Everything the page already had stays in the
+   left column; the panel is the right one. */
+.rest-grid {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 34px;
+  align-items: start;
+  margin-top: 26px;
+}
+.rest-grid > div:first-child {
+  min-width: 0;
+}
+/* The artifact's own box: 50px, a 16px radius, an accent hairline over
+   `--accentSoft`, and the glyph 9px from the words. */
+.order-panel .book-table {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  height: 50px;
+  margin-bottom: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--accent);
   background: var(--accent-soft);
-  border-radius: 20px;
-  padding: 20px;
-  margin: 28px 0;
-}
-.cta strong {
-  display: block;
-  margin-bottom: 4px;
-}
-.cta span {
-  color: var(--ink2);
+  color: var(--accent);
+  font: inherit;
   font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
 }
+.order-panel .book-table:hover:not(:disabled) {
+  opacity: 0.9;
+}
+/* Waiting for a dish, not broken — it keeps its colour and its place, and the
+   panel's own "add a dish to get started" is directly underneath. */
+.order-panel .book-table:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.panel-empty {
+  text-align: center;
+  padding: 26px 6px 10px;
+  color: var(--ink2);
+}
+.panel-empty .glyph {
+  font-size: 40px;
+}
+.panel-empty p {
+  font-size: 14px;
+  margin: 8px 0 0;
+  text-wrap: pretty;
+}
+.panel-lines {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.panel-lines li {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.panel-lines .text {
+  flex: 1;
+  min-width: 0;
+}
+.panel-lines .name {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.panel-lines .each {
+  font-size: 12px;
+  color: var(--ink2);
+}
+/* The panel's steppers are the artifact's smaller 28px pair, not the basket
+   page's 34px ones — same lopsided treatment, one size down. */
+.panel-lines .stepper {
+  gap: 9px;
+}
+.panel-lines .stepper button {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  font-size: 17px;
+}
+.panel-lines .stepper .qty {
+  min-width: 14px;
+  font-size: 14.5px;
+}
+/* Two columns of dishes do not fit beside a 380px panel. */
+@media (max-width: 1180px) {
+  .rest-grid .dishes {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 960px) {
+  .rest-grid {
+    grid-template-columns: 1fr;
+  }
+  .order-panel {
+    position: static;
+  }
+  .rest-grid .dishes {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 /* The one thing this page can offer a visitor who wants to order right now.
    Smaller than `.cta-primary`: the hero's button is the page's main action,
    and this must not compete with it. */
@@ -718,6 +1529,81 @@ p.lede {
 }
 .cta-action:hover {
   opacity: 0.92;
+}
+
+/* ── Not found ───────────────────────────────────────────────────────────── */
+
+/* The artifact draws this one centred on a narrower column than the rest of
+   the site, so it overrides `.wrap` rather than sitting inside its 1220px. */
+.notfound {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 36px 0 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.nf-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.nf-mark .digit {
+  font-size: 150px;
+  font-weight: 800;
+  letter-spacing: -6px;
+  line-height: 1;
+  color: var(--accent);
+}
+.nf-mark .disc {
+  width: 132px;
+  height: 132px;
+  border-radius: 66px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 18px 40px var(--shadow);
+}
+.notfound h1 {
+  font-size: 30px;
+  margin-top: 28px;
+}
+.nf-sub {
+  color: var(--ink2);
+  font-size: 16px;
+  line-height: 1.55;
+  margin: 12px 0 0;
+  max-width: 440px;
+  text-wrap: pretty;
+}
+/* The artifact's 404 button is bigger than the restaurant page's, and rounded
+   to a pill — it is the only thing on the page to press. */
+.notfound .cta-action {
+  margin-top: 30px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 54px;
+  padding: 0 30px;
+  border-radius: 27px;
+  box-shadow: 0 10px 24px var(--shadow);
+}
+
+@media (max-width: 560px) {
+  .nf-mark .digit {
+    font-size: 96px;
+    letter-spacing: -4px;
+  }
+  .nf-mark .disc {
+    width: 88px;
+    height: 88px;
+  }
+  .nf-mark .disc svg {
+    width: 50px;
+    height: 50px;
+  }
 }
 
 /* ── Footer ──────────────────────────────────────────────────────────────── */
@@ -809,14 +1695,12 @@ p.lede {
 }
 
 
-/* ── Narrower screens ────────────────────────────────────────────────────── */
-
 /* ── Ordering ────────────────────────────────────────────────────────────────
-   Transcribed from the CHECKOUT SLIDE-OVER and ORDER CONFIRMED TOAST in
-   docs/design/web-landing.html. The drawer's 440px panel, its 24px qty chips,
-   the uppercase 12px section labels and the 54px CTA are the artifact's; the
-   screens it does not draw (basket, pre-order, sign-in, tracking) reuse those
-   same measurements rather than inventing a second set. */
+   Transcribed from the CHECKOUT and ORDER CONFIRMED screens in
+   `docs/design/Amragrir Web (standalone).html`. Its 24px qty chips, uppercase
+   12px section labels, 340px summary column and 54px CTA are the artifact's;
+   the screens it does not draw (sign-in, tracking) reuse those same
+   measurements rather than inventing a second set. */
 
 .visually-hidden {
   position: absolute;
@@ -827,19 +1711,37 @@ p.lede {
   white-space: nowrap;
 }
 
+/* The artifact's header basket: a solid accent pill carrying the cart glyph and
+   the running total, not an outline icon. It is the one thing in the header
+   meant to be pressed, and it stays put whether the basket is empty or not —
+   a control that vanishes is a control nobody learns the position of. */
 .basket-button {
   position: relative;
   flex: none;
-  width: 44px;
-  height: 44px;
-  border-radius: 22px;
-  border: 1px solid var(--line);
-  background: var(--card);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  gap: 9px;
+  height: 44px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 22px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 6px 16px var(--shadow);
 }
+.basket-button:hover {
+  opacity: 0.92;
+}
+/* Empty, there is no number to show and the pill closes up around the glyph. */
+.basket-button:not(:has(.basket-total)) {
+  padding: 0 13px;
+}
+/* Ink rather than accent: the badge sits *on* an accent pill, so the accent it
+   used to be had nothing to stand out against. */
 .basket-count {
   position: absolute;
   top: -4px;
@@ -848,6 +1750,53 @@ p.lede {
   height: 20px;
   padding: 0 5px;
   border-radius: 10px;
+  border: 2px solid var(--bg);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── The header bell ───────────────────────────────────────────────────────
+   An outline disc like the theme toggle rather than a filled pill like the
+   basket: the basket is the one control in this header meant to be pressed, and
+   a second solid accent shape beside it would compete with it for that. The
+   bell is somewhere to look, not somewhere to go. */
+.bell {
+  position: relative;
+  flex: none;
+}
+.bell-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+}
+.bell-button:hover {
+  opacity: 0.92;
+}
+/* Accent here, where the basket's badge is ink: this badge sits on a card-
+   coloured disc, so accent is what stands out against it — the same decision
+   as the basket's, reached from the opposite background. */
+.bell-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  border: 2px solid var(--bg);
   background: var(--accent);
   color: #fff;
   font-size: 11px;
@@ -856,34 +1805,189 @@ p.lede {
   align-items: center;
   justify-content: center;
 }
-
-/* The design's "View basket" bar. Fixed rather than sticky: it must not stop
-   at the end of the menu section it happens to be inside. */
-.sticky-cta {
-  position: fixed;
-  left: 50%;
-  bottom: 22px;
-  transform: translateX(-50%);
-  z-index: 20;
-  width: min(520px, calc(100vw - 32px));
-  height: 54px;
-  padding: 0 22px;
-  border-radius: 16px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 16px;
+/* Anchored to the bell and capped to the viewport, because this header is the
+   same one a phone gets: a fixed 340px panel hanging off the right edge would
+   push the page sideways on a narrow screen. */
+.bell-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  width: min(340px, calc(100vw - 2 * var(--space-md)));
+  max-height: min(420px, 70vh);
+  overflow-y: auto;
+  padding: var(--space-md);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.bell-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+.bell-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink2);
+}
+/* Muted, not destructive-red: it empties a list of messages, and the thing it
+   destroys — an order's history — is not in this list to begin with. A red
+   button here would claim more consequence than the action has. */
+.bell-clear {
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink2);
+  font-size: 12.5px;
   font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.bell-clear:hover {
+  color: var(--danger);
+}
+/* The opt-in for browser alerts. A quiet row inside the panel rather than a
+   banner on the page: a permission prompt has to come from a press, and this is
+   the one place somebody is already thinking about being told things. It is
+   gone once answered — granted or refused, there is nothing left to ask. */
+.bell-allow {
+  display: block;
+  width: 100%;
+  margin-bottom: var(--space-sm);
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.bell-allow:hover {
+  opacity: 0.85;
+}
+.bell-allowed {
+  margin: 0 0 var(--space-sm);
+  font-size: 12.5px;
+  color: var(--ink2);
+}
+
+.bell-empty {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.bell-empty span {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink2);
+}
+.bell-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.bell-item + .bell-item {
+  border-top: 1px solid var(--line);
+}
+/* The line and its cross sit side by side, so the cross is outside the link
+   rather than inside it — see the component for why that is not optional. */
+.bell-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.bell-item a {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 0;
+  text-decoration: none;
+  color: inherit;
+}
+/* Faint until the row is approached: eight crosses down the side of a list is
+   a column of noise, and the one that matters is the one being pointed at.
+   It stays fully visible on keyboard focus, where there is no pointer to
+   point with — and on a touch screen, where `:hover` never fires. */
+.bell-remove {
+  flex: none;
+  align-self: center;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  box-shadow: 0 10px 24px var(--shadow);
-}
-.sticky-cta .pill {
-  background: rgba(255, 255, 255, 0.22);
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
   border-radius: 12px;
-  padding: 2px 10px;
+  background: none;
+  color: var(--ink2);
+  opacity: 0.45;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+.bell-item:hover .bell-remove,
+.bell-remove:focus-visible {
+  opacity: 1;
+}
+.bell-remove:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+@media (hover: none) {
+  .bell-remove {
+    opacity: 1;
+  }
+}
+.bell-item a:hover .bell-item-title {
+  text-decoration: underline;
+}
+.bell-item-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+/* Unread is marked by a dot rather than by weight or colour: every line in this
+   list is already bold, and a second bold would be no difference at all. */
+.bell-item.is-unread .bell-item-title::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--accent);
+}
+.bell-item-code {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--chip);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink2);
+}
+.bell-item-body {
+  font-size: 13px;
+  color: var(--ink2);
 }
 
 /* The artifact's add button is a solid accent disc that lifts off the card —
@@ -891,7 +1995,6 @@ p.lede {
    accent-soft chip this used to be did not read as a button at all. */
 .dish .add {
   flex: none;
-  align-self: center;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -907,6 +2010,47 @@ p.lede {
 }
 .dish .add:hover {
   opacity: 0.85;
+}
+/* The press, answered. The write no longer rebuilds the page (see
+   `AddDish.tsx`), so this button is the only thing that can say the dish went
+   in — and a `＋` that looks identical after being pressed is a `＋` that gets
+   pressed again. It goes green for a moment and comes back. */
+.dish .add.added {
+  background: var(--good);
+}
+.dish .add span {
+  display: block;
+  line-height: 1;
+}
+/* Only the tick is announced by moving; the `＋` returning is not an event. */
+.dish .add.added span {
+  animation: popIn 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dish .add.added span {
+    animation: none;
+  }
+}
+
+/* Money that is being re-priced.
+   The quantity on a stepper moves on the frame it is pressed; the amounts
+   beside it cannot, because this client computes no money and waits for
+   `POST /cart/quote` like every other screen. Rather than pretend, the old
+   amounts stay legible and say they are settling. Deliberately understated —
+   it is usually one frame, and a spinner for one frame is worse than nothing. */
+.settling {
+  opacity: 0.55;
+  transition: opacity 0.15s;
 }
 
 /* ── Basket ──────────────────────────────────────────────────────────────── */
@@ -925,35 +2069,229 @@ p.lede {
   color: var(--ink);
 }
 
-.lines {
-  list-style: none;
-  margin: 18px 0 0;
-  padding: 0 16px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-}
-.line {
+/* Which restaurant, and which branch of it, the basket belongs to.
+   `components/BranchCard.tsx` says why this exists; the parts are the
+   catalogue's own — `.media`, `.tag`, `.tag.prep`, `.tag.good` — so a
+   restaurant looks the same here as on the card that was pressed to get here.
+   The 20px radius, 16px padding and lifted shadow are the basket line's, since
+   this sits directly above a column of them. */
+.branch-card {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--line);
+  gap: 16px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--card);
+  box-shadow: 0 6px 18px var(--shadow);
 }
-.line:last-child {
-  border-bottom: none;
+.branch-card:hover {
+  border-color: var(--accent);
 }
-.line .text {
+/* The link fills the row and lays out its own contents; the heart and the
+   chevron are the row's other two items. The link cannot *be* the row, because
+   the heart is a <form> and may not live inside an <a>. */
+.branch-link {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   flex: 1;
   min-width: 0;
 }
+.branch-link > .media {
+  flex: none;
+  width: 76px;
+  height: 76px;
+  border-radius: 16px;
+}
+.branch-card .who {
+  flex: 1;
+  min-width: 0;
+}
+.branch-card .name {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+.branch-card .meta {
+  font-size: 13.5px;
+  color: var(--ink2);
+  margin-top: 2px;
+}
+.branch-card .tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+/* A long street address must not push the opening state off the row — it gives
+   way first, as the header's district name does. */
+.branch-card .tag.where {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Not `.score`: that is the restaurant page's bordered box, and a box inside
+   this card is the nested pair the basket had cleaned out of it once already. */
+.branch-card .rating {
+  flex: none;
+  text-align: right;
+}
+.branch-card .rating .value {
+  font-size: 17px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.branch-card .rating .star {
+  color: var(--star);
+}
+.branch-card .rating .reviews {
+  font-size: 11.5px;
+  color: var(--ink2);
+}
+.branch-card .chev {
+  flex: none;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--ink3);
+}
+.branch-card:hover .chev {
+  color: var(--accent);
+}
+
+/* The artifact lays the basket out on a narrower column than the catalogue —
+   lines on the left, money on the right — and keeps the money on screen. */
+.basket-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 28px;
+  align-items: start;
+  margin-top: 26px;
+}
+.order-summary {
+  position: sticky;
+  /* Clears the 72px sticky header, plus the artifact's 24px of air. */
+  top: 96px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 22px;
+  box-shadow: 0 10px 28px var(--shadow);
+}
+.order-summary h2 {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  margin: 0 0 16px;
+}
+/* One class for both a link ("continue to checkout") and a submit button
+   ("place order"), so the last button in a summary column always looks the
+   same whatever it does. `font: inherit` and `border: none` are what a
+   `<button>` needs to stop looking like a form control. */
+.summary-cta {
+  display: block;
+  width: 100%;
+  margin-top: 18px;
+  height: 54px;
+  line-height: 54px;
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 15.5px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 10px 22px var(--shadow);
+}
+.summary-cta:hover {
+  opacity: 0.92;
+}
+/* The second button in this corner, on a booking with no food in it: "order
+   ahead" beside "book the table". Two solid accent buttons would be two primary
+   actions, and the one that finishes what this screen is for is the booking —
+   so this one keeps the shape and gives up the fill. */
+.summary-cta.ghost {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  line-height: 52px;
+}
+.summary-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* The artifact makes every basket line its own card — lifted off the page, with
+   the dish's photo on it — rather than a row in one long list. A basket is short
+   and each line is a thing you are about to buy, so it is worth the room. */
+.lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* Two rows, not the artifact's one: the dish above, and what you do to it —
+   quantity, money — below, with the photo spanning both.
+
+   This is the arrangement the phone breakpoint already used, promoted to every
+   width, and for the reason written there. The basket column is 476px wide, and
+   a photo, a stepper, a line total and a remove button take 347 of them: the
+   dish's name was being asked to fit in about ninety pixels, which is two
+   letters of Armenian and a hyphen. Same card, same height — the photo is
+   taller than both rows together. */
+.line {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  grid-template-areas:
+    'media text    remove'
+    'media stepper total';
+  align-items: center;
+  gap: 10px 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--card);
+  box-shadow: 0 6px 18px var(--shadow);
+}
+.line .media {
+  grid-area: media;
+  width: 72px;
+  height: 72px;
+  border-radius: 15px;
+}
+.line .text {
+  grid-area: text;
+  min-width: 0;
+}
+.line .stepper {
+  grid-area: stepper;
+}
+.line .line-total {
+  grid-area: total;
+}
+/* The remove button is the only `<form>` that is a direct child — the stepper's
+   two are inside `.stepper`. */
+.line > form {
+  grid-area: remove;
+  justify-self: end;
+  align-self: start;
+}
 .line .name {
-  font-size: 15px;
-  font-weight: 650;
+  font-size: 16px;
+  font-weight: 700;
 }
 .line .each {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink2);
+  margin-top: 3px;
 }
 .line.gone .name,
 .line.gone .each {
@@ -967,32 +2305,48 @@ p.lede {
   text-decoration: none;
 }
 .line-total {
-  font-size: 15px;
-  font-weight: 700;
-  min-width: 84px;
+  flex: none;
+  font-size: 16px;
+  font-weight: 800;
+  min-width: 88px;
   text-align: right;
 }
 
+/* The artifact's pair is deliberately lopsided: minus is a quiet chip, plus is
+   the same solid accent disc as the `＋` on a dish. Adding one more is the
+   ordinary thing to want; taking one away is the correction. */
 .stepper {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 11px;
 }
 .stepper button {
-  width: 30px;
-  height: 30px;
-  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 17px;
   border: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--chip);
   color: var(--ink);
-  font-size: 16px;
+  font-size: 19px;
+  line-height: 1;
   cursor: pointer;
 }
+.stepper form:last-of-type button {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+}
+.stepper button:hover {
+  opacity: 0.85;
+}
 .stepper .qty {
-  min-width: 22px;
+  min-width: 18px;
   text-align: center;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 16px;
 }
 .line-remove {
   border: none;
@@ -1051,6 +2405,31 @@ p.lede {
   justify-content: space-between;
   gap: 16px;
   padding: 6px 0;
+}
+
+/* Inside the summary column there is already a card — the aside is one. The
+   artifact puts plain rows in it rather than a second bordered box, and the
+   nested pair read as a mistake. `orders/[id]` shows the same list on its own
+   and keeps the box, which is what the rules above are for. */
+.order-summary .summary,
+.order-summary .order-lines {
+  margin: 14px 0 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+}
+.order-summary .summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.order-summary .summary div {
+  padding: 0;
+}
+.order-summary .summary .grand {
+  margin-top: 8px;
+  padding-top: 12px;
 }
 .summary dt {
   color: var(--ink2);
@@ -1127,77 +2506,677 @@ p.lede {
 .modes {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 10px;
   margin-top: 18px;
 }
+/* Each mode is its own form (switching mode is a server-side change), so the
+   grid items are the forms and the buttons inside them have to be told to fill
+   one — otherwise the tile with the shorter hint stops short of its
+   neighbour's bottom edge and the pair reads as misaligned. */
+.modes > form {
+  display: flex;
+}
+.modes > form > .mode {
+  flex: 1;
+}
+/* The choice *inside* pickup — take it away, or eat it here.
+   Full-width rows behind a rule, as the artifact draws them: indented so they
+   read as belonging to the mode above rather than as a second question of equal
+   weight, and each carrying its own mark on the right. Two rows of identical
+   cards would leave somebody choosing between four things instead of one and
+   then one. */
+.subtiles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 11px 0 0 14px;
+  padding-left: 14px;
+  border-left: 2px solid var(--line);
+}
+.subtile {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 13px 15px;
+  border-radius: 15px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.subtile.on {
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  /* Keeps the row from shifting a pixel when the border doubles. */
+  padding: 12px 14px;
+}
+.subtile .emoji {
+  flex: none;
+  font-size: 22px;
+}
+.subtile .text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.subtile .name {
+  font-size: 14.5px;
+  font-weight: 800;
+}
+.subtile .hint {
+  font-size: 12.5px;
+  color: var(--ink2);
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+.subtile .mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  border: 2px solid var(--ink3);
+  box-sizing: border-box;
+}
+.subtile .mark.chosen {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* "Eat at the restaurant" where eating in means booking a table. It is a door,
+   not a choice: pressing it moves the basket to dine-in and opens the calendar,
+   so it carries an arrow instead of a radio and says what it will cost. */
+.subtile .mark.door {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 13px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.badge-pill {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 7px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
 .mode {
   width: 100%;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  padding: 16px 18px;
-  border-radius: 18px;
+  padding: 14px 16px;
+  border-radius: 16px;
   border: 1px solid var(--line);
   background: var(--card);
   color: var(--ink);
   cursor: pointer;
   text-align: left;
+  /* The selection moves on the frame the tile is pressed — it no longer waits
+     for a page to come back — so it is worth easing. Colour and lift only:
+     `border-width` goes 1px → 2px on `.on` and is corrected by the padding
+     beside it, and transitioning either of those makes the tile twitch. */
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.12s ease;
+}
+.mode:hover {
+  border-color: var(--accent);
+}
+.mode:active {
+  transform: scale(0.985);
 }
 .mode.on {
-  border-color: var(--accent);
+  border: 2px solid var(--accent);
   background: var(--accent-soft);
+  /* Keeps the tile from shifting a pixel when the border doubles. */
+  padding: 13px 15px;
+}
+.subtile {
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    transform 0.12s ease;
+}
+.subtile:hover {
+  border-color: var(--accent);
+}
+.subtile:active {
+  transform: scale(0.99);
+}
+/* The half of the checkout the mode decides, while the server works out what it
+   now says. `.settling` dims it; this seals it, because the controls underneath
+   are describing the mode that is on its way out — a stale "Book the table" is
+   not something to let somebody press on the way past. */
+.mode-swap.settling {
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mode,
+  .subtile {
+    transition: none;
+  }
+  .mode:active,
+  .subtile:active {
+    transform: none;
+  }
 }
 .mode .emoji {
-  font-size: 20px;
+  font-size: 22px;
 }
 .mode .name {
-  font-size: 15.5px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 800;
+  margin-top: 4px;
 }
 .mode .hint {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--ink2);
 }
 
-.daypager,
-.guestpicker,
-.slots {
+/* The artifact's date-and-time and ready-at controls: one 50px row, an accent
+   glyph, and a native field filling the rest of it. The row is the label, so
+   pressing anywhere on it opens the browser's own picker. */
+.field {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.day,
-.guest,
-.slot {
-  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 56px;
-  height: 42px;
-  padding: 0 16px;
-  border-radius: 14px;
+  gap: 10px;
+  height: 50px;
+  padding: 0 14px;
+  border-radius: 15px;
   border: 1px solid var(--line);
   background: var(--card);
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 650;
   cursor: pointer;
 }
-.day.on,
-.guest.on,
-.slot.on {
+.field > svg {
+  flex: none;
+}
+.field-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+}
+/* A field the browser considers out of range — a ready time that has since
+   passed, a table before the next half hour — says so before the press that
+   would have been refused by the API. */
+.field:has(.field-input:out-of-range) {
   border-color: var(--accent);
+}
+
+/* ── The two pickers ─────────────────────────────────────────────────────────
+   "Date & time" and "Ready at" were native fields, which could name a time the
+   restaurant would not take; they open a panel now — a month grid and the
+   API's own slots, a grid of ready times — and the field itself survives as the
+   no-JavaScript fallback. See `DateTimeField` / `ReadyAtField`. */
+.picker {
+  position: relative;
+}
+/* The open one has to outrank the *next* field, not just the page.
+   Both fields are `position: relative` with no z-index, so they paint in DOM
+   order and "Ready at" — which comes after — was drawn straight over the
+   bottom of the calendar, slicing the last week off it. A z-index on the panel
+   alone could not fix that: `.picker` creates no stacking context, so the two
+   siblings were still being compared to each other. Raising the picker is what
+   settles it. */
+.picker:has(> .picker-panel) {
+  z-index: 40;
+}
+/* The trigger wears `.field` so the closed control is the same 50px row it has
+   always been; only the inside differs — a formatted value rather than a
+   browser's own spinners, and a chevron saying it opens. */
+.picker-trigger {
+  width: 100%;
+  color: var(--ink);
+  text-align: left;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.picker-trigger:hover,
+.picker-trigger.on {
+  border-color: var(--accent);
+}
+.field-value {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.field-value strong {
+  font-weight: 800;
+}
+.picker-chev {
+  flex: none;
+  color: var(--ink3);
+  font-size: 15px;
+  line-height: 1;
+}
+.picker-trigger.on .picker-chev {
+  transform: rotate(180deg);
+}
+
+/* Floated over the column rather than pushing it: the checkout is a two-column
+   grid with a sticky summary, and a panel that grew the left column inline
+   would shove the payment section down every time somebody looked at a date. */
+.picker-panel {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  left: 0;
+  width: max-content;
+  max-width: calc(100vw - 48px);
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: 0 18px 44px var(--shadow);
+}
+
+/* Month on the left, times on the right — the shape every desktop picker has,
+   and the one thing a grid under the calendar could not do: show *when* beside
+   *which day*, so moving between the two is a glance rather than a scroll. */
+.picker-split {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+.cal-side {
+  width: 224px;
+}
+/* The rule between the two halves, drawn by the column rather than by a border
+   on the calendar — the calendar does not own the gap.
+
+   **Its three children are taken out of flow on purpose.** The column has to be
+   as tall as the month and no taller, and `align-items: stretch` alone cannot
+   do that: stretch sizes every item to the tallest, and a list of twenty-four
+   times *is* the tallest, so the calendar was stretched to 464px to match a
+   column that was only that tall because it had been stretched. Out of flow, the
+   column contributes no height at all, the month is the only thing left to
+   measure, and stretch then hands that height back. */
+.time-side {
+  position: relative;
+  width: 82px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+.time-arrow {
+  position: absolute;
+  left: 12px;
+  right: 0;
+  height: 20px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink3);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.time-side > .time-arrow:first-child {
+  top: 0;
+}
+.time-side > .time-arrow:last-child {
+  bottom: 0;
+}
+.time-arrow:hover {
   background: var(--accent-soft);
   color: var(--accent);
 }
-.slot:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+/* Fills what the two arrows leave, and scrolls. Inset rather than sized, so the
+   month decides how tall this is — see `.time-side`. */
+.time-scroll {
+  position: absolute;
+  left: 12px;
+  right: 0;
+  top: 24px;
+  bottom: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  scrollbar-width: thin;
+}
+.time-row {
+  flex: none;
+  padding: 7px 6px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  /* Every row is `HH:mm`, so tabular figures keep the colons in one line down
+     the column instead of shuffling by a pixel per digit. */
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+.time-row:hover:not(:disabled):not(.on) {
+  border-color: var(--accent);
+}
+/* A taken table is shown taken rather than removed — that a 20:00 exists and is
+   gone is worth knowing when picking 20:30. */
+.time-row:disabled {
+  opacity: 0.35;
   text-decoration: line-through;
+  cursor: default;
+}
+.time-row.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* Under the panel's own width the two halves stack, and the times become a row
+   of chips again rather than an 82px column squeezed against the calendar. */
+@media (max-width: 420px) {
+  .picker-split {
+    flex-direction: column;
+  }
+  .cal-side {
+    width: auto;
+  }
+  /* Back into flow: stacked, there is no month beside it to take a height
+     from, so the column sizes itself again. */
+  .time-side {
+    position: static;
+    width: auto;
+    padding-left: 0;
+    border-left: none;
+    border-top: 1px solid var(--line);
+    padding-top: 10px;
+  }
+  .time-scroll {
+    position: static;
+    max-height: 148px;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .time-row {
+    flex: 1 1 60px;
+  }
+  .time-arrow {
+    display: none;
+  }
+}
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.cal-month {
+  font-size: 14.5px;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+.cal-arrow {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cal-arrow:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+/* An arrow onto a month with nothing bookable is an arrow to a dead end, so it
+   is disabled rather than removed — the pair keeps its shape. */
+.cal-arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.cal-week,
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+.cal-week {
+  margin-bottom: 4px;
+}
+.cal-week span {
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--ink3);
+}
+.cal-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+.cal-cell:hover:not(:disabled):not(.on) {
+  background: var(--accent-soft);
+}
+/* Drawn, not hidden: a calendar that dropped the days before today would leave
+   a hole where the reader expects the 1st. */
+.cal-cell:disabled {
+  color: var(--ink3);
+  opacity: 0.4;
+  cursor: default;
+}
+.cal-cell.blank {
+  cursor: default;
+}
+.cal-cell.today {
+  border-color: var(--line);
+}
+.cal-cell.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* The ready-at panel's times. Aligned columns rather than a wrapping row, so
+   they read as a block — but a grid rather than the booking picker's column,
+   because there is no calendar here to sit beside and these are two hours of a
+   single evening, not a whole day. */
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 7px;
+}
+.slot-grid.ready {
+  margin-top: 10px;
+}
+.slot {
+  padding: 8px 4px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  /* Every chip is `HH:mm`, so they are all the same width — the columns line up
+     without a `min-width` fighting the grid. */
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+.slot:hover:not(:disabled):not(.on) {
+  border-color: var(--accent);
+}
+/* A taken table is shown taken rather than removed — that a 20:00 exists and is
+   gone is worth knowing when picking 20:30. */
+.slot:disabled {
+  opacity: 0.35;
+  text-decoration: line-through;
+  cursor: default;
+}
+.slot.on {
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 7px 3px;
+}
+/* "As soon as possible" spans the panel and reads left, because it is a
+   sentence rather than a time and is not one of the columns. */
+.slot.wide {
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+}
+.slot.wide.on {
+  padding: 9px 11px;
+}
+.slot-empty,
+.slot-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink2);
+  line-height: 1.4;
+}
+.slot-empty {
+  margin-top: 12px;
+}
+.slot-note {
+  margin-top: 12px;
+}
+.picker-close {
+  width: 100%;
+  margin-top: 12px;
+  padding: 9px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink2);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.picker-close:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+@media (prefers-reduced-motion: reduce) {
+  .picker-trigger,
+  .cal-cell,
+  .slot {
+    transition: none;
+  }
+}
+
+/* The artifact's party-size stepper. Both halves are outlined cards rather
+   than the basket's lopsided quiet-chip-and-solid-disc pair (`.stepper`):
+   there, adding is the ordinary thing and removing is the correction, but a
+   party of two is as ordinary as a party of four, so neither direction is
+   given the louder button. The accent outline on `+` is the only asymmetry,
+   and it marks where the eye should start rather than what to press. */
+.guest-stepper {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 11px;
+}
+/* `guest-step`, not `step`: `.step` is the order tracker's progress segment
+   further down this file, and its `flex: 1` would stretch each button across
+   the column — a `flex-basis` of 0 beats any `width` set beside it. */
+.guest-stepper .guest-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--accent);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+.guest-stepper .guest-step.accent {
+  border-color: var(--accent);
+}
+.guest-stepper .guest-step:active {
+  transform: scale(0.9);
+}
+/* At either end the button stays in place rather than disappearing, so the
+   pair does not reflow the number sideways when a party reaches the limit. */
+.guest-stepper .guest-step:disabled {
+  color: var(--ink3);
+  border-color: var(--line);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.guest-stepper .count {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
+}
+.guest-stepper .value {
+  font-size: 26px;
+  font-weight: 800;
+}
+.guest-stepper .suffix {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink3);
 }
 
 .deposit-card {
@@ -1218,70 +3197,20 @@ p.lede {
   color: var(--ink2);
 }
 
-/* ── Checkout, as the artifact's slide-over ──────────────────────────────── */
+/* ── Checkout ────────────────────────────────────────────────────────────── */
 
-.drawer {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  justify-content: flex-end;
+/* The artifact's checkout is one page in two columns: mode, timing and payment
+   on the left, the order summary sticky on the right. It replaced a 440px
+   slide-over drawer, so the drawer shell and its panel chrome are gone. */
+.checkout-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 32px;
+  align-items: start;
+  margin-top: 26px;
 }
-.drawer-scrim {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.42);
-}
-.drawer-panel {
-  position: relative;
-  width: 440px;
-  max-width: 92vw;
-  height: 100%;
-  background: var(--bg);
-  box-shadow: -14px 0 44px rgba(0, 0, 0, 0.3);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-.checkout-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.panel-head {
-  flex: none;
-  padding: 22px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--line);
-}
-.panel-head h1 {
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: -0.4px;
-  margin: 0;
-}
-.panel-close {
-  width: 36px;
-  height: 36px;
-  border-radius: 18px;
-  border: 1px solid var(--line);
-  background: var(--card);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-}
-.panel-body {
-  padding: 20px 24px;
-}
-.panel-back {
-  display: inline-block;
-  margin-top: 18px;
-  color: var(--ink2);
-  font-size: 14px;
+.checkout-grid > div:first-child {
+  min-width: 0;
 }
 
 .order-lines {
@@ -1294,7 +3223,7 @@ p.lede {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 0;
+  padding: 11px 0;
   border-bottom: 1px solid var(--line);
 }
 .qty-chip {
@@ -1312,26 +3241,13 @@ p.lede {
 }
 .order-line .name {
   flex: 1;
-  font-size: 15px;
+  min-width: 0;
+  font-size: 14.5px;
   font-weight: 600;
 }
 .order-line .amount {
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 700;
-}
-.order-sum {
-  display: flex;
-  justify-content: space-between;
-  padding: 10px 0;
-  font-size: 14px;
-  color: var(--ink2);
-}
-.order-sum span:last-child {
-  font-weight: 600;
-  color: var(--ink);
-}
-.order-sum.good span {
-  color: var(--good);
 }
 
 .fineprint {
@@ -1342,26 +3258,6 @@ p.lede {
   text-wrap: pretty;
 }
 
-.ready-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.ready-value {
-  font-size: 15.5px;
-  font-weight: 700;
-}
-.ready-mode {
-  font-size: 13px;
-  color: var(--ink2);
-}
-.ready-change {
-  margin-left: auto;
-  color: var(--accent);
-  font-size: 13.5px;
-  font-weight: 650;
-}
 
 .pay-form {
   display: flex;
@@ -1373,7 +3269,7 @@ p.lede {
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  border-radius: 16px;
+  border-radius: 14px;
   border: 1px solid var(--line);
   background: var(--card);
   cursor: pointer;
@@ -1400,14 +3296,20 @@ p.lede {
   color: var(--ink3);
 }
 .pay-dot {
-  width: 18px;
-  height: 18px;
-  border-radius: 9px;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 11px;
   border: 2px solid var(--line);
+  box-sizing: border-box;
 }
+/* The artifact marks the chosen method by thickening its border, not by
+   flooding the row: a payment row is a radio, and the tinted fill it used to
+   get made it read like the selected *mode* tiles above it. The 1px of padding
+   given back keeps the row from shifting when the border doubles. */
 .pay-row:has(input:checked) {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border: 2px solid var(--accent);
+  padding: 13px 15px;
 }
 .pay-row:has(input:checked) .pay-dot {
   border-color: var(--accent);
@@ -1419,91 +3321,231 @@ p.lede {
   cursor: not-allowed;
 }
 
-.pay-cta {
-  margin-top: 8px;
+
+/* ── Sign in — the design's AUTH PAGE ────────────────────────────────────── */
+
+/* The design's own `<main>` here only centred the card; `.wrap` in the layout
+   already holds the column width and the page padding. */
+.auth-page {
+  display: flex;
+  justify-content: center;
+  padding-top: 6px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  padding: 34px 34px 30px;
+  box-shadow: 0 18px 40px var(--shadow);
+}
+.auth-head {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+/* Log in / sign up. A chip-coloured track with the showing tab lifted out of
+   it in card white — the same segmented control the design uses. */
+.auth-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--chip);
+  border-radius: 15px;
+  padding: 4px;
+  margin-top: 20px;
+}
+.auth-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  border-radius: 12px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--ink2);
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.auth-tab:hover {
+  opacity: 1;
+  color: var(--ink);
+}
+.auth-tab[aria-selected='true'] {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 2px 8px var(--shadow);
+}
+.auth-tab:active {
+  transform: scale(0.97);
+}
+
+.auth-field {
+  margin-top: 18px;
+}
+/* The label is a block of its own above the field, not a line beside it. */
+.auth-field label,
+.auth-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink2);
+  margin-bottom: 8px;
+}
+.auth-input {
   width: 100%;
   height: 54px;
-  border-radius: 16px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  /* Page-coloured, not card-coloured: the field has to read as a well sunk
+     into the card it sits on, and the card is already `--card`. */
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 15.5px;
+  font-weight: 600;
+  box-sizing: border-box;
+}
+.auth-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* The six digits from the SMS, spaced so they read as a code rather than a
+   number. The design has no OTP step to copy this from. */
+.auth-code {
+  letter-spacing: 6px;
+  font-weight: 700;
+  font-size: 20px;
+  text-align: center;
+}
+.auth-note {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink3);
+  text-wrap: pretty;
+}
+.auth-note.warn {
+  color: var(--accent);
+  font-weight: 650;
+}
+.auth-cta {
+  display: block;
+  width: 100%;
+  height: 56px;
+  margin-top: 22px;
   border: none;
+  border-radius: 16px;
   background: var(--accent);
   color: #fff;
   font-size: 16px;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 10px 24px var(--shadow);
 }
-.pay-cta:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  box-shadow: none;
+.auth-cta:active {
+  transform: scale(0.98);
 }
-
-/* ── Sign in ─────────────────────────────────────────────────────────────── */
-
-.signin {
-  max-width: 420px;
-  margin: 40px auto;
-}
-.stack {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.auth-alt {
+  display: block;
+  text-align: center;
   margin-top: 18px;
-}
-.stack label {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 700;
   color: var(--ink2);
 }
-.stack input {
-  height: 50px;
-  padding: 0 16px;
-  border-radius: 14px;
-  border: 1px solid var(--line);
-  background: var(--card);
-  color: var(--ink);
-  font-size: 16px;
-}
-.stack button {
-  margin-top: 10px;
-  border: none;
-  cursor: pointer;
+.auth-terms {
+  margin: 22px 0 0;
   text-align: center;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink3);
+  text-wrap: pretty;
 }
 
-/* Country, then the number. The select sizes to its content so a long country
-   name does not squeeze the field the number goes in — which is the field the
-   visitor is actually typing into. */
+/* Country, then the number — one pill, split by a hairline, as the design
+   draws its fixed `+374`. The select stands in for that text because the
+   number is not always Armenian: it sizes to its content so a long country
+   name cannot squeeze the field the visitor is actually typing into. */
 .phone-row {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  height: 54px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  padding: 0 8px 0 6px;
+  box-sizing: border-box;
 }
 .phone-row select {
   flex: 0 1 auto;
-  max-width: 45%;
-  height: 50px;
-  padding: 0 10px;
-  border-radius: 14px;
-  border: 1px solid var(--line);
-  background: var(--card);
+  max-width: 46%;
+  height: 100%;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
   color: var(--ink);
-  font-size: 15px;
+  font-size: 15.5px;
+  font-weight: 700;
   cursor: pointer;
+  text-overflow: ellipsis;
+}
+/* The design's hairline: 26px inside a 54px row, as its own element. It used
+   to be the input's `border-left`, which is what made the field 26px tall —
+   a divider's height silently became the field's. */
+.phone-row .divider {
+  flex: none;
+  width: 1px;
+  height: 26px;
+  background: var(--line);
+  margin: 0 12px;
 }
 .phone-row input {
   flex: 1 1 auto;
   min-width: 0;
+  /* Full height, so the whole right half of the pill takes a click — not the
+     26px band the divider's height had left in the middle of it. */
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15.5px;
+  font-weight: 600;
+}
+/* The ring goes on the pill, which is the field somebody sees — and is the
+   shape the error state below already uses. Ringing the controls instead drew
+   a box inside a box, and while the input was 26px it drew that box around a
+   strip floating in the middle of the field. */
+.phone-row:has(:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* The per-control ring is the fallback where `:has` is not supported, so a
+   keyboard still shows focus there; both rules are correct now that each
+   control fills the row's height. */
+.phone-row select:focus-visible,
+.phone-row input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 10px;
+}
+.phone-row:has(:focus-visible) select:focus-visible,
+.phone-row:has(:focus-visible) input:focus-visible {
+  outline: none;
 }
 .field-hint {
-  margin: 2px 0 0;
-  font-size: 13px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
   color: var(--ink2);
 }
 .field-hint.warn {
   color: var(--accent);
   font-weight: 650;
 }
-.phone-row input[aria-invalid='true'] {
+.phone-row:has(input[aria-invalid='true']) {
   border-color: var(--accent);
 }
 
@@ -1599,6 +3641,32 @@ p.lede {
   color: var(--ink2);
 }
 
+/**
+ * The pickup code, drawn for a scanner.
+ *
+ * White plate and `#111` modules in both themes, hardcoded rather than
+ * tokenised — the one surface on the site whose colours are chosen for a
+ * machine rather than a reader. A code that inverted itself under the dark
+ * theme is one a counter's handheld may decline to read, and the theme is not
+ * something the person holding the scanner picked.
+ *
+ * The quiet zone is inside the SVG's own viewBox (see `QR_QUIET_ZONE`), so the
+ * padding here is breathing room on the plate and not the border a scanner
+ * finds the code by.
+ */
+.pickup-qr {
+  width: 148px;
+  padding: 8px;
+  margin: 12px auto;
+  border-radius: 14px;
+  background: #fff;
+}
+.pickup-qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .tracking-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1673,6 +3741,578 @@ p.lede {
   text-align: right;
 }
 
+/* ── Profile ─────────────────────────────────────────────────────────────── */
+
+/* The header's account mark. The artifact fills it with the customer's
+   initial; this one carries a person, because the header cannot know who is
+   looking — see the layout. */
+.avatar-link {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.avatar-link:hover {
+  opacity: 0.92;
+}
+
+/* The artifact's gradient banner: avatar, name, and the counters on the right. */
+.profile-hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  border-radius: 26px;
+  padding: 32px 34px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  box-shadow: 0 18px 40px var(--shadow);
+}
+/* The same translucent disc bleeding off the corner as the home hero, one size
+   down. Decorative, so the stylesheet draws it rather than the markup. */
+.profile-hero::before {
+  content: '';
+  position: absolute;
+  right: -50px;
+  top: -50px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+}
+.profile-hero > * {
+  position: relative;
+}
+.profile-hero .avatar {
+  width: 76px;
+  height: 76px;
+  border-radius: 38px;
+  background: rgba(255, 255, 255, 0.25);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  font-weight: 800;
+  flex: none;
+}
+.profile-hero .who {
+  flex: 1;
+  min-width: 180px;
+}
+.profile-hero .kicker {
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.9;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.profile-hero h1 {
+  font-size: 28px;
+  margin: 4px 0 0;
+}
+.profile-hero .phone {
+  font-size: 14.5px;
+  opacity: 0.92;
+}
+.profile-stats {
+  list-style: none;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+}
+.profile-stats li {
+  min-width: 96px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 16px;
+  padding: 14px 16px;
+}
+.profile-stats strong {
+  display: block;
+  font-size: 24px;
+  font-weight: 800;
+}
+.profile-stats span {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 34px;
+  align-items: start;
+  margin-top: 30px;
+}
+
+.history {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.history li {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px 18px;
+  box-shadow: 0 6px 16px var(--shadow);
+}
+.history .top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.history .who {
+  min-width: 0;
+}
+.history .name {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+}
+.history .meta {
+  font-size: 13px;
+  color: var(--ink2);
+}
+.history .status {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink2);
+  background: var(--chip);
+  padding: 5px 10px;
+  border-radius: 11px;
+}
+.history .bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+}
+.history .amount {
+  font-size: 16px;
+  font-weight: 800;
+}
+.reorder {
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 19px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.reorder:hover {
+  opacity: 0.9;
+}
+
+.account-menu {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 6px 16px var(--shadow);
+}
+.account-menu li + li {
+  border-top: 1px solid var(--line);
+}
+.account-menu a {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 16px 18px;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.account-menu a:hover {
+  background: var(--chip);
+}
+.account-menu .icon {
+  font-size: 19px;
+  width: 24px;
+  text-align: center;
+}
+.account-menu .text {
+  flex: 1;
+}
+.account-menu .value,
+.account-menu .chev {
+  font-size: 13px;
+  color: var(--ink3);
+}
+/* The one destructive action on the page, so it is the one thing here in the
+   danger colour rather than the accent. */
+.ghost-action.danger {
+  width: 100%;
+  margin-top: 18px;
+  color: var(--danger);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ── Waiting for a page ──────────────────────────────────────────────────── */
+
+/* Every screen on this site is rendered on the server — that is what makes the
+   catalogue indexable, and it is also why a press is answered by a round trip
+   rather than by a frame. Left alone the browser keeps showing the *old* page
+   for that second or two, which reads as "nothing happened": people press
+   again, and the second press is the one that feels broken.
+
+   Two things fill the gap, and neither is a spinner laid over the content:
+   the blocks below, which each route's `loading.tsx` assembles out of the real
+   layout classes, and the thread of accent colour at the top of the window.
+   See `components/Skeleton.tsx` and `components/RouteProgress.tsx`. */
+
+/* The placeholder surface. Deliberately given no radius of its own: it goes on
+   `.media`, `.banner` and the sized shapes below, all of which already have
+   one, and a 10px corner inside a card with a 22px corner is a visible
+   mistake. Every shape here brings its own. */
+.skel {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  background: var(--placeholder);
+}
+/* The sweep. A translucent band crossing a still block says "working" for a
+   fraction of the attention a spinner asks for, which is the intent — what
+   should hold the eye is the shape of the page arriving, not the animation.
+   Moved with `transform` so it runs on the compositor: a menu draws thirty of
+   these at once. */
+.skel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--placeholder2), transparent);
+  animation: skelSweep 1.5s cubic-bezier(0.4, 0, 0.25, 1) infinite;
+  animation-delay: var(--skel-delay, 0s);
+}
+@keyframes skelSweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* A wave down the page rather than thirty blocks flashing in step.
+   The delay is a custom property set on each row, not an `animation-delay` on
+   the block: custom properties inherit, so one rule per position reaches the
+   placeholders nested inside a card as well as the bare ones in a rail. */
+.skel-screen :is(.grid, .dishes, .order-list, .lines, .cats, .skel-chip-row) > *:nth-child(2) {
+  --skel-delay: 0.08s;
+}
+.skel-screen :is(.grid, .dishes, .order-list, .lines, .cats, .skel-chip-row) > *:nth-child(3) {
+  --skel-delay: 0.16s;
+}
+.skel-screen :is(.grid, .dishes, .order-list, .lines, .cats, .skel-chip-row) > *:nth-child(4) {
+  --skel-delay: 0.24s;
+}
+.skel-screen :is(.grid, .dishes, .order-list, .lines, .cats, .skel-chip-row) > *:nth-child(5) {
+  --skel-delay: 0.32s;
+}
+.skel-screen :is(.grid, .dishes, .order-list, .lines, .cats, .skel-chip-row) > *:nth-child(n + 6) {
+  --skel-delay: 0.4s;
+}
+
+/* Nothing here is pressable, so nothing here answers a pointer. */
+.skel-screen .card:hover,
+.skel-screen .order-row:hover,
+.skel-screen .dish:hover {
+  transform: none;
+  border-color: var(--line);
+}
+
+/* A line of text, at the height the text will be. */
+.skel-line {
+  height: 13px;
+  border-radius: 7px;
+}
+.skel-line + .skel-line {
+  margin-top: 9px;
+}
+.skel-line.title {
+  height: 19px;
+  width: 62%;
+  border-radius: 9px;
+}
+.skel-line.mid {
+  width: 58%;
+}
+.skel-line.short {
+  width: 38%;
+}
+.skel-lines {
+  margin-top: 16px;
+}
+
+.skel-heading {
+  height: 30px;
+  width: 220px;
+  border-radius: 10px;
+  margin: 32px 0 12px;
+}
+.skel-heading.title {
+  height: 37px;
+  width: 300px;
+  margin: 0;
+}
+/* Inside the listing's heading row, which lays out its own spacing. */
+.section-head .skel-heading {
+  margin: 0;
+}
+.skel-count {
+  height: 14px;
+  width: 88px;
+  border-radius: 7px;
+}
+
+.skel-tag {
+  height: 28px;
+  width: 86px;
+  border-radius: var(--radius-pill);
+}
+.skel-tag:nth-child(2) {
+  width: 66px;
+}
+.skel-pill {
+  height: 24px;
+  width: 74px;
+  border-radius: 12px;
+}
+
+/* The cuisine rail's tiles and the pill rows — quick filters, and a menu's
+   tabs. Widths vary between neighbours because the words they stand in for do;
+   a rail of identical pills looks like a control, not like text arriving. */
+.skel-cat {
+  flex: none;
+  width: 88px;
+  height: 84px;
+  border-radius: 18px;
+}
+.skel-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.skel-chip {
+  height: 41px;
+  width: 112px;
+  border-radius: 22px;
+}
+.skel-chip:nth-child(2n) {
+  width: 138px;
+}
+.skel-chip:nth-child(3n) {
+  width: 94px;
+}
+
+/* The restaurant page: its back button, and the rating box beside the name. */
+.skel-back {
+  width: 152px;
+  height: 40px;
+  border-radius: 20px;
+}
+.skel-score {
+  flex: none;
+  width: 108px;
+  height: 68px;
+  border-radius: 16px;
+}
+/* The screens that open with a back button and a title, rather than with the
+   restaurant page's banner between them. */
+.skel-back + .skel-heading {
+  margin-top: 20px;
+}
+
+/* The sign-in card's field and its button, at the heights they will be. */
+.skel-input {
+  height: 54px;
+  border-radius: 14px;
+  margin-top: 22px;
+}
+.skel-cta {
+  height: 56px;
+  border-radius: 16px;
+  margin-top: 22px;
+}
+.auth-card .skel-heading {
+  margin: 0 0 14px;
+  height: 27px;
+}
+
+/* The banded panels a screen opens with — the profile's gradient header, an
+   order's tracking card. One height for all of them: they differ by less than
+   the jump a wrong guess would cause. */
+.skel-band {
+  height: 150px;
+  border-radius: 24px;
+}
+
+/* A card of stacked lines: the sticky order summary, the account menu, the
+   checkout's payment block. */
+.skel-panel {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--card);
+  box-shadow: 0 10px 26px var(--shadow);
+  padding: 20px 22px;
+}
+.skel-panel .skel-line + .skel-line {
+  margin-top: 16px;
+}
+.skel-panel + .skel-panel {
+  margin-top: 20px;
+}
+
+/* An order's tracking column is centred text, so its blocks centre too — and
+   it stacks its parts with air between them rather than by their own margins. */
+.skel-screen .tracking .skel {
+  margin-left: auto;
+  margin-right: auto;
+}
+.skel-screen .tracking > * + * {
+  margin-top: 18px;
+}
+.skel-mark {
+  width: 72px;
+  height: 72px;
+  border-radius: 36px;
+}
+
+/* The hero's own blocks. White over the accent, like everything else that sits
+   on that panel — there is no token for "on accent" to reach for, which is the
+   same reason `.cta-primary` above writes `#fff`. */
+.skel-hero .skel {
+  background: rgba(255, 255, 255, 0.22);
+}
+.skel-hero .skel::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+}
+.skel-hero .tag {
+  width: 132px;
+  height: 29px;
+  border-radius: 20px;
+}
+.skel-hero .head {
+  height: 46px;
+  border-radius: 12px;
+  margin-top: 18px;
+}
+.skel-hero .head.short {
+  width: 62%;
+  margin-top: 10px;
+}
+.skel-hero .sub {
+  width: 78%;
+  height: 17px;
+  border-radius: 9px;
+  margin-top: 20px;
+}
+.skel-hero .cta {
+  width: 190px;
+  height: 52px;
+  border-radius: 26px;
+  margin-top: 26px;
+}
+/* The account banner wears the same white-on-accent blocks; its name sits at
+   28px rather than the home hero's 44. */
+.skel-hero .name {
+  width: 62%;
+  height: 26px;
+  border-radius: 10px;
+  margin-top: 8px;
+}
+.skel-hero .profile-stats .skel-line + .skel-line {
+  margin-top: 7px;
+}
+
+/* ── Route progress ──────────────────────────────────────────────────────── */
+
+/* Above the header (30) and above the location dialog (55). It reports the
+   state of the whole window; there is nothing it should ever be behind. */
+.route-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 60;
+  pointer-events: none;
+}
+.route-progress .bar {
+  display: block;
+  height: 100%;
+  transform-origin: left center;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  box-shadow: 0 0 10px var(--accent2);
+  transition:
+    transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 0.26s ease 0.06s;
+}
+/* The last thing seen is the bar finishing, not the bar disappearing. */
+.route-progress[data-done] .bar {
+  opacity: 0;
+}
+
+/* What was pressed says that it heard.
+   The bar answers "is anything happening"; this answers "did it hear *me*",
+   which is the question a second press comes from. Breathing rather than
+   spinning: it is the same control, still on screen, on its way out. */
+.is-pending {
+  animation: navPulse 1.15s ease-in-out infinite;
+}
+@keyframes navPulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+/* And the pointer, for the whole page. `cursor` inherits, but the controls
+   below set their own and would keep it. */
+:root[data-navigating],
+:root[data-navigating] a,
+:root[data-navigating] button,
+:root[data-navigating] summary,
+:root[data-navigating] label {
+  cursor: progress;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The blocks stay, still — they are the layout, and the layout is the point.
+     Only the movement goes. */
+  .skel::after {
+    animation: none;
+  }
+  .is-pending {
+    animation: none;
+    opacity: 0.6;
+  }
+  .route-progress .bar {
+    transition: opacity 0.26s ease;
+  }
+}
+
 /* The artifact is drawn at 1280×860 and says nothing about a phone. These are
    the fewest breakpoints that keep it from breaking: the three-up grid steps
    down, the hero's padding and headline shrink, and the header wraps rather
@@ -1681,6 +4321,15 @@ p.lede {
 @media (max-width: 1080px) {
   .grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+  /* The side columns stop being columns and become the row below. */
+  .profile-grid,
+  .basket-grid,
+  .checkout-grid {
+    grid-template-columns: 1fr;
+  }
+  .order-summary {
+    position: static;
   }
 }
 
@@ -1719,6 +4368,21 @@ p.lede {
   .langs {
     margin-left: auto;
   }
+  /* The district name gives way first. It is the only thing in this row that
+     can be shortened rather than removed, and without this the row runs a few
+     pixels long and drops the account mark onto a line of its own — a stray
+     control above a full-width search box. */
+  .locpick {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .locpick > summary {
+    min-width: 0;
+  }
+  .locpick > summary .where {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 @media (max-width: 560px) {
@@ -1731,17 +4395,67 @@ p.lede {
   .rest-head {
     flex-direction: column;
   }
-  /* One column, and the drawer becomes the whole screen — a 440px panel with
-     8% of a page peeking behind it is not a phone layout. */
+  /* One mode per row: two tiles side by side on a phone leaves each of them a
+     word wide. */
   .modes {
     grid-template-columns: 1fr;
   }
-  .drawer-panel {
-    width: 100%;
-    max-width: 100%;
+  /* The location dialog takes the phone's whole screen, and its two footer
+     buttons stack — "use current location" is a sentence, and beside a confirm
+     button on a 360px screen neither of them fits its own label. */
+  .locpick-overlay {
+    padding: 0;
   }
-  .line-total {
+  .locpick-dialog {
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+  }
+  .locpick-head,
+  .locpick-foot {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .locpick-foot {
+    flex-direction: column;
+  }
+  .locpick-here {
+    justify-content: center;
+  }
+  /* `flex: 1` fills the row it was written for. Turned upright it becomes a
+     vertical grow from a zero basis, which in a footer with no spare height
+     leaves the confirm button as tall as the word on it. */
+  .locpick-confirm {
+    flex: none;
+  }
+  /* The two-row line is the arrangement at every width now (see `.line`); a
+     phone only needs it tighter — a smaller photo, less air between the
+     columns, and no reserved width under the totals. */
+  .line {
+    grid-template-columns: 56px 1fr auto;
+    column-gap: 12px;
+  }
+  .line .media {
+    width: 56px;
+    height: 56px;
+  }
+  .line .line-total {
     min-width: 0;
+  }
+
+  /* The rating leaves first — a star and a review count are the least of what
+     this card is for, and on a phone the name, the address and "open" have to
+     have the room. */
+  .branch-card {
+    gap: 13px;
+  }
+  .branch-card > .media {
+    width: 60px;
+    height: 60px;
+  }
+  .branch-card .rating,
+  .branch-card .chev {
+    display: none;
   }
   .steps {
     font-size: 10.5px;

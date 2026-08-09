@@ -34,6 +34,33 @@ export function homePath(language: string): string {
   return prefix(language) || '/';
 }
 
+/**
+ * The page currently being read, in another language.
+ *
+ * What the header's switch links. It used to link `homePath(code)`, which threw
+ * the page away: choosing Russian while reading a restaurant's menu landed on
+ * the Russian home page, with nothing but the back button to get back. A
+ * language is a way of reading this page, not a reason to leave it.
+ *
+ * It accepts a path in either form the app can hand it — the published one
+ * (`/cart`, `/ru/cart`) and the internal `[lang]` one the middleware rewrites to
+ * (`/hy/cart`), which is what a server render of the Armenian tree sees — so the
+ * link comes out the same whether it is built during that render or in the
+ * browser afterwards. A query string is not its business: the caller keeps it.
+ */
+export function translatedPath(pathname: string, language: string): string {
+  return `${prefix(language)}${withoutLanguage(pathname)}` || '/';
+}
+
+/** The path minus its language segment, if it has one. `/rubicon` has not. */
+function withoutLanguage(pathname: string): string {
+  const language = LANGUAGES.find((code) => isUnder(pathname, `/${code}`));
+  const rest = language === undefined ? pathname : pathname.slice(language.length + 1);
+  // `/ru/` and `/ru` name the same page; the trailing slash must not survive
+  // into `/en/`, which is a URL this site does not publish.
+  return rest === '/' ? '' : rest;
+}
+
 export function searchPath(language: string, query?: string): string {
   const path = `${prefix(language)}/search`;
   return query ? `${path}?q=${encodeURIComponent(query)}` : path;
@@ -58,6 +85,54 @@ export function cartPath(language: string): string {
   return `${prefix(language)}/cart`;
 }
 
+/**
+ * The route handler the restaurant page's order panel reads.
+ *
+ * A route rather than a page because it answers JSON, and language-prefixed
+ * like everything else so the strings it formats come back in the language the
+ * visitor is reading. Built here rather than in the component: the component
+ * runs in the browser, where the prefix rule does not live.
+ */
+export function basketApiPath(language: string): string {
+  return `${prefix(language) || ''}/basket`;
+}
+
+/**
+ * The route a pre-rendered restaurant page reads its heart's state from.
+ *
+ * Same reasoning as `basketApiPath` above, and built here for the same reason —
+ * the component that calls it runs in the browser, where the prefix rule does
+ * not live. See `app/[lang]/saved/route.ts` for why a static page cannot answer
+ * this itself.
+ */
+export function savedApiPath(language: string, restaurantId: string): string {
+  return `${prefix(language) || ''}/saved?restaurant=${encodeURIComponent(restaurantId)}`;
+}
+
+/**
+ * The route the checkout's booking calendar reads a day's table times from.
+ *
+ * A route rather than a Server Action, for the reason the handler gives: paging
+ * to Thursday changes nothing else on the checkout, and revalidating would
+ * re-price the basket to fill in a grid of times. Built here, like the panel's
+ * above, because the prefix rule does not live in the browser.
+ */
+export function availabilityApiPath(language: string): string {
+  return `${prefix(language) || ''}/availability`;
+}
+
+/**
+ * The route the location picker searches addresses through.
+ *
+ * A route rather than a call to Yandex from the page, for the reason `api.ts`
+ * gives: the geocoder's key is not domain-restricted, so it stays on the server
+ * and the browser asks this instead. Language-prefixed so an address comes back
+ * written in the language being read.
+ */
+export function geocodeApiPath(language: string): string {
+  return `${prefix(language) || ''}/geocode`;
+}
+
 export function preorderPath(language: string): string {
   return `${prefix(language)}/preorder`;
 }
@@ -72,6 +147,52 @@ export function ordersPath(language: string): string {
 
 export function orderPath(language: string, id: string): string {
   return `${prefix(language)}/orders/${id}`;
+}
+
+/**
+ * The route handler the tracking page watches an order's progress through.
+ *
+ * Built here like the panel's and the calendar's above, for the same reason:
+ * the component that asks runs in the browser, and the language-prefix rule
+ * lives on the server.
+ */
+export function orderStatusApiPath(language: string, id: string): string {
+  return `${prefix(language)}/orders/${id}/status`;
+}
+
+/**
+ * The bell's route handler, same reasoning as `orderStatusApiPath` above: the
+ * session is an httpOnly cookie, so the browser asks this app rather than the
+ * API. Language-prefixed like every other path in the tree, which is also what
+ * keeps `middleware.ts` from treating it as a page to redirect.
+ */
+export function notificationsApiPath(language: string): string {
+  return `${prefix(language)}/notifications`;
+}
+
+/**
+ * The same bell, pushed. A child of the path above rather than a sibling,
+ * because it is the same resource in a different shape — and it keeps the two
+ * from drifting apart when the language rule changes.
+ */
+export function notificationsStreamPath(language: string): string {
+  return `${prefix(language)}/notifications/stream`;
+}
+
+export function reservationsPath(language: string): string {
+  return `${prefix(language)}/reservations`;
+}
+
+export function reservationPath(language: string, id: string): string {
+  return `${prefix(language)}/reservations/${id}`;
+}
+
+export function profilePath(language: string): string {
+  return `${prefix(language)}/profile`;
+}
+
+export function favoritesPath(language: string): string {
+  return `${prefix(language)}/favorites`;
 }
 
 export function signinPath(language: string, next?: string): string {

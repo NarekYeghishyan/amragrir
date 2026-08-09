@@ -41,19 +41,6 @@ export function formatPriceLevel(level: number | null): string | null {
 }
 
 /**
- * A dialable `tel:` URI for a number stored for reading.
- *
- * Branches store `+374 10 555 001`, which is how it should appear on the page
- * — but a `tel:` URI is not free text. RFC 3966 allows visual separators only
- * from a small set, and a space is not one of them; browsers mostly cope,
- * dialers and messaging apps less reliably. Keep the digits and the leading
- * `+`, and let the label carry the formatting.
- */
-export function telHref(phone: string): string {
-  return `tel:${phone.replace(/[^\d+]/g, '')}`;
-}
-
-/**
  * The restaurant's clock, not the visitor's.
  *
  * Every time in this flow is a time somebody has to physically be somewhere —
@@ -64,12 +51,17 @@ export function telHref(phone: string): string {
 const YEREVAN = 'Asia/Yerevan';
 
 export function formatTime(iso: string): string {
+  return yerevanTime(new Date(iso));
+}
+
+/** `HH:mm` in Yerevan — the value an `<input type="time">` takes. */
+function yerevanTime(date: Date): string {
   return new Intl.DateTimeFormat('en-GB', {
     timeZone: YEREVAN,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).format(new Date(iso));
+  }).format(date);
 }
 
 /** `Tue 5 Aug` — enough to tell two days apart without a full date. */
@@ -97,4 +89,88 @@ export function yerevanDate(date: Date): string {
     month: '2-digit',
     day: '2-digit',
   }).format(date);
+}
+
+/**
+ * The two directions the checkout's clock fields need.
+ *
+ * `<input type="datetime-local">` and `<input type="time">` speak wall-clock
+ * readings with no zone on them, and everything either side of them — the
+ * quote's `earliestReadyAt`, `POST /reservations`, `POST /orders` — speaks
+ * instants. The conversion is Yerevan's, for the reason `formatTime` is: the
+ * time in the field is the time somebody has to be at the restaurant, so it
+ * must read the same whether the page is opened from Yerevan or from London.
+ */
+
+/** `YYYY-MM-DDTHH:mm` — the value a `datetime-local` field takes. */
+export function yerevanDateTime(iso: string): string {
+  const date = new Date(iso);
+  return `${yerevanDate(date)}T${yerevanTime(date)}`;
+}
+
+/** The instant a Yerevan reading names: `2026-08-07T19:30` → `…T15:30:00.000Z`.
+ *  Null for anything that is not one, so a hand-edited form fails a check here
+ *  rather than sending `Invalid Date` to the API. */
+export function instantOfYerevan(local: string): string | null {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(local.trim());
+  if (!match) {
+    return null;
+  }
+  const asUtc = Date.parse(`${match[1]}T${match[2]}:${match[3]}:00.000Z`);
+  if (Number.isNaN(asUtc)) {
+    return null;
+  }
+  return new Date(asUtc - yerevanOffsetMs(new Date(asUtc))).toISOString();
+}
+
+/** The instant an `HH:mm` names on the Yerevan day that `onIso` falls in. */
+export function instantOfYerevanTime(time: string, onIso: string): string | null {
+  const match = /^(\d{2}):(\d{2})/.exec(time.trim());
+  const day = new Date(onIso);
+  if (!match || Number.isNaN(day.getTime())) {
+    return null;
+  }
+  return instantOfYerevan(`${yerevanDate(day)}T${match[1]}:${match[2]}`);
+}
+
+/**
+ * The next `stepMinutes` boundary of the Yerevan clock at or after `iso`.
+ *
+ * `min` and `step` on a native field are read together — the browser counts
+ * steps *from* `min` — so a `min` of 14:07 offers 14:07 / 14:37 and a field
+ * drawn with a 30-minute step reads like a bug. Rounding the floor onto the
+ * clock is what makes the offered times the clean ones the design draws.
+ */
+export function yerevanStepUp(iso: string, stepMinutes: number): string {
+  const date = new Date(iso);
+  const [hours, minutes] = yerevanTime(date).split(':').map(Number);
+  const sinceMidnight = hours * 60 + minutes;
+  const rounded = Math.ceil(sinceMidnight / stepMinutes) * stepMinutes;
+  // Through the instant rather than the string, so rounding 23:50 up lands on
+  // the next day instead of on a "24:00" no field would accept.
+  return new Date(date.getTime() + (rounded - sinceMidnight) * 60_000).toISOString();
+}
+
+/**
+ * Yerevan's offset from UTC, in milliseconds.
+ *
+ * Armenia has had no daylight saving since 2012, so this is +04:00 in practice
+ * — but it is asked rather than hardcoded, because a hardcoded offset is the
+ * kind of thing that stays right until a government changes it and then fails
+ * silently by exactly one hour.
+ */
+function yerevanOffsetMs(at: Date): number {
+  const name = new Intl.DateTimeFormat('en-GB', {
+    timeZone: YEREVAN,
+    timeZoneName: 'longOffset',
+  })
+    .formatToParts(at)
+    .find((part) => part.type === 'timeZoneName')?.value;
+
+  const match = /^GMT([+-])(\d{2}):(\d{2})$/.exec(name ?? '');
+  if (!match) {
+    return 4 * 3_600_000;
+  }
+  const minutes = Number(match[2]) * 60 + Number(match[3]);
+  return (match[1] === '-' ? -minutes : minutes) * 60_000;
 }

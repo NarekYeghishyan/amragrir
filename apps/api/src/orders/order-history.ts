@@ -5,6 +5,7 @@ import {
   type OrderStatus,
   type PaymentMethod,
   type PaymentStatus,
+  type PickupOption,
   type ServiceMode,
 } from '@amragrir/shared';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
@@ -59,6 +60,10 @@ export const SYSTEM_ACTOR: OrderActor = { type: OrderActorType.System };
  */
 export interface OrderEventDetail {
   serviceMode?: ServiceMode;
+  /** Where a pickup order was going to end up, as of the entry that placed it.
+   *  Null on a dine-in order. Recorded because it is what the kitchen packs
+   *  for, and the column it mirrors is the only other record of it. */
+  pickupOption?: PickupOption | null;
   itemsCount?: number;
   totalAmd?: number;
   /** When the kitchen promised it, as of this entry. */

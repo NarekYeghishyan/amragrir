@@ -1,8 +1,27 @@
-import { NotFoundException } from '@nestjs/common';
-import { AuditAction, MenuTab, StaffRole } from '@amragrir/shared';
+import {
+  ForbiddenException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
+import {
+  AuditAction,
+  AuditEntity,
+  MenuTab,
+  RestaurantService,
+  StaffRole,
+} from '@amragrir/shared';
 import { MenuService, stripEmpty } from './menu.service';
 
-import { CreateMenuItemDto, ListRestaurantsDto, UpdateMenuItemDto } from './menu.dto';
+import {
+  CreateMenuItemDto,
+  ListRestaurantsDto,
+  SetBranchBookingsDto,
+  SetBranchCoverDto,
+  SetBranchServicesDto,
+  SetRestaurantCoverDto,
+  SetRestaurantServicesDto,
+  UpdateMenuItemDto,
+} from './menu.dto';
 import { AuditService } from '../audit/audit.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
@@ -59,6 +78,7 @@ function build(
       Promise.resolve(itemRow(data)),
     );
   const menuDelete = jest.fn().mockResolvedValue(itemRow());
+  const restaurantUpdate = jest.fn().mockResolvedValue({});
   const auditCreate = jest.fn().mockResolvedValue({});
 
   const prisma = {
@@ -100,6 +120,7 @@ function build(
         ),
       findMany: jest.fn().mockResolvedValue(options.restaurants ?? []),
       count: jest.fn().mockResolvedValue((options.restaurants ?? []).length),
+      update: restaurantUpdate,
     },
   } as unknown as PrismaService;
 
@@ -109,6 +130,7 @@ function build(
     menuCreate,
     menuUpdate,
     menuDelete,
+    restaurantUpdate,
     auditCreate,
   };
 }
@@ -405,6 +427,498 @@ describe('getRestaurant', () => {
     expect(detail.branches).toHaveLength(1);
     expect(detail.branches[0]?.restaurantName).toBe('Sunny Table');
     expect(detail.branches[0]?.menuItemCount).toBe(4);
+  });
+});
+
+describe('setServices', () => {
+  /** The row both lookups in `setServices` answer with — the scope check reads
+   *  `services` off it, and the read-back at the end needs the whole detail. */
+  const row = (services: string[]) => ({
+    id: RESTAURANT_ID,
+    slug: 'sunny-table',
+    name: 'Sunny Table',
+    cuisine: 'Georgian',
+    priceLevel: 2,
+    reservationsEnabled: true,
+    services,
+    ratingAvg: { toString: () => '4.5' },
+    reviewsCount: 12,
+    coverUrl: null,
+    createdAt: new Date('2026-01-05T10:00:00.000Z'),
+    branches: [],
+  });
+
+  const dto = (services: string[]) =>
+    Object.assign(new SetRestaurantServicesDto(), { services } as {
+      services: RestaurantService[];
+    });
+
+  it('refuses a room that both seats walk-ins and books its tables', async () => {
+    // The rule this endpoint exists for. Both are ways of seating somebody and
+    // an address does one of them; declaring both leaves the pre-order screen
+    // unable to say whether "Eat at the Restaurant" is a button or a booking.
+    // The panel cannot reach this set, but a panel is a courtesy, not a check.
+    const { service, restaurantUpdate, auditCreate } = build({
+      restaurant: row([RestaurantService.Pickup]),
+    });
+
+    await expect(
+      service.setServices(
+        admin,
+        RESTAURANT_ID,
+        dto([RestaurantService.Pickup, RestaurantService.DineIn, RestaurantService.Reserve]),
+      ),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+
+    expect(restaurantUpdate).not.toHaveBeenCalled();
+    expect(auditCreate).not.toHaveBeenCalled();
+  });
+
+  it('refuses the pair even with no pre-order under it', async () => {
+    const { service, restaurantUpdate } = build({ restaurant: row([RestaurantService.Pickup]) });
+
+    await expect(
+      service.setServices(
+        admin,
+        RESTAURANT_ID,
+        dto([RestaurantService.DineIn, RestaurantService.Reserve]),
+      ),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(restaurantUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [[RestaurantService.Pickup]],
+    [[RestaurantService.Pickup, RestaurantService.DineIn]],
+    [[RestaurantService.Pickup, RestaurantService.Reserve]],
+    [[RestaurantService.DineIn]],
+    [[RestaurantService.Reserve]],
+  ])('accepts %p — the combinations BUSINESS_LOGIC.md §2 allows', async (services) => {
+    const { service, restaurantUpdate } = build({ restaurant: row([]) });
+    await service.setServices(admin, RESTAURANT_ID, dto(services));
+
+    expect(restaurantUpdate).toHaveBeenCalledWith({
+      where: { id: RESTAURANT_ID },
+      data: { services },
+    });
+  });
+
+  it('stores the set in order and records what the restaurant was left offering', async () => {
+    const { service, restaurantUpdate, auditCreate } = build({
+      restaurant: row([RestaurantService.Pickup]),
+    });
+
+    await service.setServices(
+      admin,
+      RESTAURANT_ID,
+      // As a form might send them, and twice over.
+      dto([RestaurantService.Reserve, RestaurantService.Pickup, RestaurantService.Reserve]),
+    );
+
+    expect(restaurantUpdate).toHaveBeenCalledWith({
+      where: { id: RESTAURANT_ID },
+      data: { services: ['pickup', 'reserve'] },
+    });
+
+    const entry = auditCreate.mock.calls[0]![0].data;
+    expect(entry.action).toBe(AuditAction.RestaurantServices);
+    expect(entry.entity).toBe(AuditEntity.Restaurant);
+    // Filed against the restaurant and no branch: this is one statement about
+    // the whole business, not something that happened at one address.
+    expect(entry.restaurantId).toBe(RESTAURANT_ID);
+    expect(entry.branchId).toBeNull();
+    expect(entry.after).toEqual({ services: ['pickup', 'reserve'] });
+    expect(entry.before).toEqual({ services: ['pickup'] });
+  });
+
+  it('writes no entry for a save that changed nothing', async () => {
+    // Including one that only reorders: a row seeded in another order is stored
+    // canonically from now on, and that is not something somebody did.
+    const { service, restaurantUpdate, auditCreate } = build({
+      restaurant: row(['reserve', 'pickup']),
+    });
+
+    await service.setServices(
+      admin,
+      RESTAURANT_ID,
+      dto([RestaurantService.Pickup, RestaurantService.Reserve]),
+    );
+
+    expect(restaurantUpdate).toHaveBeenCalled();
+    expect(auditCreate).not.toHaveBeenCalled();
+  });
+
+  it('404s on a restaurant the caller may not write to', async () => {
+    const { service, restaurantUpdate } = build({ restaurant: null });
+
+    await expect(
+      service.setServices(admin, RESTAURANT_ID, dto([RestaurantService.Pickup])),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(restaurantUpdate).not.toHaveBeenCalled();
+  });
+
+  it('scopes the lookup by restaurant:write, not by what opens the page', async () => {
+    // `branch:read` opens a restaurant and is held by a shift account; changing
+    // what the business offers is a restaurant admin's decision.
+    const { service, prisma } = build({ restaurant: row([RestaurantService.Pickup]) });
+    await service.setServices(admin, RESTAURANT_ID, dto([RestaurantService.Pickup]));
+
+    const args = (prisma.restaurant.findFirst as jest.Mock).mock.calls[0][0];
+    expect(args.where.id).toBe(RESTAURANT_ID);
+    expect(args.where.OR).toBeDefined();
+  });
+});
+
+describe('a branch answering for itself', () => {
+  const BRANCH_COVER = 'https://api.amragrir.am/uploads/covers/branch.jpg';
+  const RESTAURANT_COVER = 'https://api.amragrir.am/uploads/covers/business.jpg';
+
+  /** The restaurant's defaults, which every branch resolves against. */
+  const parent = {
+    id: RESTAURANT_ID,
+    name: 'Sunny Table',
+    services: [RestaurantService.Pickup, RestaurantService.Reserve],
+    coverUrl: RESTAURANT_COVER,
+    reservationsEnabled: true,
+  };
+
+  /** A branch as the database holds it — following the restaurant on all three
+   *  unless the test says otherwise. */
+  const branchRow = (over: Record<string, unknown> = {}) => ({
+    id: BRANCH_ID,
+    restaurantId: RESTAURANT_ID,
+    restaurant: parent,
+    name: 'Northern Ave',
+    address: null,
+    city: 'Yerevan',
+    phone: null,
+    isOpen: true,
+    avgPrepMin: 12,
+    coverUrl: null,
+    services: [],
+    servicesOverridden: false,
+    reservationsEnabled: null,
+    _count: { menuItems: 3 },
+    ...over,
+  });
+
+  /** Its own mock rather than the shared `build`, because these are the only
+   *  tests that need `restaurantBranch.update` to answer with a whole row. */
+  const build = (row: Record<string, unknown> = branchRow()) => {
+    const branchUpdate = jest
+      .fn()
+      .mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+        Promise.resolve({ ...row, ...data }),
+      );
+    const auditCreate = jest.fn().mockResolvedValue({});
+    const prisma = {
+      $transaction: jest.fn((run: (tx: unknown) => unknown) => Promise.resolve(run(prisma))),
+      auditLog: { create: auditCreate },
+      restaurantBranch: {
+        findFirst: jest.fn().mockResolvedValue(row),
+        update: branchUpdate,
+      },
+    } as unknown as PrismaService;
+
+    return {
+      service: new MenuService(prisma, new AuditService(prisma)),
+      prisma,
+      branchUpdate,
+      auditCreate,
+    };
+  };
+
+  const coverDto = (coverUrl: string | null) =>
+    Object.assign(new SetBranchCoverDto(), { coverUrl });
+  const servicesDto = (services: RestaurantService[] | null) =>
+    Object.assign(new SetBranchServicesDto(), { services });
+  const bookingsDto = (reservationsEnabled: boolean | null) =>
+    Object.assign(new SetBranchBookingsDto(), { reservationsEnabled });
+
+  it('wears the restaurant on all three until it says otherwise', async () => {
+    const { service } = build();
+
+    const branch = await service.setBranchCover(admin, BRANCH_ID, coverDto(null));
+
+    // Nothing of its own...
+    expect(branch.own.coverUrl).toBeNull();
+    expect(branch.own.servicesOverridden).toBe(false);
+    expect(branch.own.reservationsEnabled).toBeNull();
+    // ...so a guest is shown the business's.
+    expect(branch.offering.coverUrl).toBe(RESTAURANT_COVER);
+    expect(branch.offering.services).toEqual([RestaurantService.Pickup, RestaurantService.Reserve]);
+    expect(branch.offering.reservationsEnabled).toBe(true);
+  });
+
+  it('shows its own photograph once it has one', async () => {
+    const { service, branchUpdate, auditCreate } = build();
+
+    const branch = await service.setBranchCover(admin, BRANCH_ID, coverDto(BRANCH_COVER));
+
+    expect(branchUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { coverUrl: BRANCH_COVER } }),
+    );
+    expect(branch.offering.coverUrl).toBe(BRANCH_COVER);
+    // Its own action, not `restaurant.cover`: a different decision by a
+    // different person, and the feed has to be able to tell them apart.
+    expect(auditCreate.mock.calls[0]![0].data.action).toBe(AuditAction.BranchCover);
+    expect(auditCreate.mock.calls[0]![0].data.branchId).toBe(BRANCH_ID);
+  });
+
+  it('hands the photograph back to the business on null', async () => {
+    // Not "no picture" — the branch stops answering and wears the chain's
+    // again, which is the whole difference from the restaurant's endpoint.
+    const { service, branchUpdate } = build(branchRow({ coverUrl: BRANCH_COVER }));
+
+    const branch = await service.setBranchCover(admin, BRANCH_ID, coverDto(null));
+
+    expect(branchUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { coverUrl: null } }),
+    );
+    expect(branch.offering.coverUrl).toBe(RESTAURANT_COVER);
+  });
+
+  it('overrides the services, and sets the flag with them', async () => {
+    const { service, branchUpdate } = build();
+
+    const branch = await service.setBranchServices(
+      admin,
+      BRANCH_ID,
+      servicesDto([RestaurantService.DineIn]),
+    );
+
+    expect(branchUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          services: [RestaurantService.DineIn],
+          servicesOverridden: true,
+        },
+      }),
+    );
+    // The branch down the road still offers what the business declares; this
+    // one seats people and hands nothing over a counter.
+    expect(branch.offering.services).toEqual([RestaurantService.DineIn]);
+  });
+
+  it('tells "offers nothing" apart from "has not declared"', async () => {
+    // `[]` overrides a parent that offers pickup; `null` hands the question
+    // back. Emptiness could never have meant "unset" — every restaurant is
+    // created having declared nothing — which is why the flag exists.
+    const { service: emptying, branchUpdate: emptied } = build();
+    const branch = await emptying.setBranchServices(admin, BRANCH_ID, servicesDto([]));
+
+    expect(emptied).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { services: [], servicesOverridden: true } }),
+    );
+    expect(branch.offering.services).toEqual([]);
+
+    const { service: deferring, branchUpdate: deferred } = build(
+      branchRow({ services: [RestaurantService.DineIn], servicesOverridden: true }),
+    );
+    const back = await deferring.setBranchServices(admin, BRANCH_ID, servicesDto(null));
+
+    expect(deferred).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { services: [], servicesOverridden: false } }),
+    );
+    expect(back.offering.services).toEqual([RestaurantService.Pickup, RestaurantService.Reserve]);
+  });
+
+  it('refuses a combination that is not a place, per branch', async () => {
+    // The same rule as the restaurant's, judging one address: this branch
+    // cannot both seat walk-ins and book its tables either.
+    const { service, branchUpdate } = build();
+
+    await expect(
+      service.setBranchServices(
+        admin,
+        BRANCH_ID,
+        servicesDto([RestaurantService.Pickup, RestaurantService.DineIn, RestaurantService.Reserve]),
+      ),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(branchUpdate).not.toHaveBeenCalled();
+  });
+
+  it('lets one branch stop taking bookings while the business still does', async () => {
+    const { service, branchUpdate, auditCreate } = build();
+
+    const branch = await service.setBranchBookings(admin, BRANCH_ID, bookingsDto(false));
+
+    expect(branchUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { reservationsEnabled: false } }),
+    );
+    expect(branch.offering.reservationsEnabled).toBe(false);
+    expect(auditCreate.mock.calls[0]![0].data.action).toBe(AuditAction.BranchBookings);
+  });
+
+  it('scopes all three by branch:write, which a manager holds', async () => {
+    // The point of moving these down: a `restaurant_manager` answers for one
+    // address, and these are statements about that address. `branch:write` is
+    // the permission that already lets them correct its phone number.
+    const manager: StaffJwtPayload = {
+      sub: 'staff-2',
+      kind: 'staff',
+      scopes: [{ role: StaffRole.RestaurantManager, restaurantId: null, branchId: BRANCH_ID }],
+    };
+    const { service, prisma } = build();
+
+    await service.setBranchCover(manager, BRANCH_ID, coverDto(BRANCH_COVER));
+
+    const args = (prisma.restaurantBranch.findFirst as jest.Mock).mock.calls[0][0];
+    expect(args.where.id).toBe(BRANCH_ID);
+    expect(args.where.OR).toEqual([
+      { restaurantId: { in: [] } },
+      { id: { in: [BRANCH_ID] } },
+    ]);
+  });
+
+  it('writes nothing when the branch already says that', async () => {
+    const { service, branchUpdate, auditCreate } = build(branchRow({ coverUrl: BRANCH_COVER }));
+
+    await service.setBranchCover(admin, BRANCH_ID, coverDto(BRANCH_COVER));
+
+    expect(branchUpdate).toHaveBeenCalled();
+    expect(auditCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('setCover', () => {
+  const UPLOADED = 'https://api.amragrir.am/uploads/covers/a1b2c3d4.jpg';
+  const SEEDED = 'https://www.themealdb.com/images/media/meals/rjhf741585564676.jpg';
+
+  /** As in `setServices`: one row answers both the scope check (which reads
+   *  `coverUrl`) and the read-back at the end. */
+  const row = (coverUrl: string | null) => ({
+    id: RESTAURANT_ID,
+    slug: 'sunny-table',
+    name: 'Sunny Table',
+    cuisine: 'Georgian',
+    priceLevel: 2,
+    reservationsEnabled: true,
+    services: [RestaurantService.Pickup],
+    ratingAvg: { toString: () => '4.5' },
+    reviewsCount: 12,
+    coverUrl,
+    createdAt: new Date('2026-01-05T10:00:00.000Z'),
+    branches: [],
+  });
+
+  const dto = (coverUrl: string | null) =>
+    Object.assign(new SetRestaurantCoverDto(), { coverUrl });
+
+  it('stores the uploaded URL and answers with the restaurant', async () => {
+    const { service, restaurantUpdate } = build({ restaurant: row(null) });
+
+    const detail = await service.setCover(admin, RESTAURANT_ID, dto(UPLOADED));
+
+    expect(restaurantUpdate).toHaveBeenCalledWith({
+      where: { id: RESTAURANT_ID },
+      data: { coverUrl: UPLOADED },
+    });
+    // The shape `GET restaurants/:id` answers with, so the panel re-renders
+    // from what was stored rather than from what it sent.
+    expect(detail.id).toBe(RESTAURANT_ID);
+    expect(detail.branchCount).toBe(0);
+  });
+
+  it('overwrites a seeded cover without ceremony', async () => {
+    // The seed fills this column so the screens can be looked at. A restaurant
+    // putting its own photograph there must not have to get past demo data.
+    const { service, restaurantUpdate } = build({ restaurant: row(SEEDED) });
+
+    await service.setCover(admin, RESTAURANT_ID, dto(UPLOADED));
+
+    expect(restaurantUpdate).toHaveBeenCalledWith({
+      where: { id: RESTAURANT_ID },
+      data: { coverUrl: UPLOADED },
+    });
+  });
+
+  it('takes the cover down on null, and records the URL it had', async () => {
+    const { service, restaurantUpdate, auditCreate } = build({ restaurant: row(UPLOADED) });
+
+    await service.setCover(admin, RESTAURANT_ID, dto(null));
+
+    expect(restaurantUpdate).toHaveBeenCalledWith({
+      where: { id: RESTAURANT_ID },
+      data: { coverUrl: null },
+    });
+    const entry = auditCreate.mock.calls[0]![0].data;
+    expect(entry.action).toBe(AuditAction.RestaurantCover);
+    expect(entry.before).toEqual({ coverUrl: UPLOADED });
+    expect(entry.after).toEqual({ coverUrl: null });
+  });
+
+  it('records the replacement against the restaurant and no branch', async () => {
+    const { service, auditCreate } = build({ restaurant: row(SEEDED) });
+
+    await service.setCover(admin, RESTAURANT_ID, dto(UPLOADED));
+
+    const entry = auditCreate.mock.calls[0]![0].data;
+    expect(entry.action).toBe(AuditAction.RestaurantCover);
+    expect(entry.entity).toBe(AuditEntity.Restaurant);
+    // One cover covers every branch, so it did not happen at one of them.
+    expect(entry.restaurantId).toBe(RESTAURANT_ID);
+    expect(entry.branchId).toBeNull();
+    // The previous URL is the only remaining record of the picture that was
+    // replaced — the file itself is never deleted, so this is what recovers it.
+    expect(entry.before).toEqual({ coverUrl: SEEDED });
+    expect(entry.after).toEqual({ coverUrl: UPLOADED });
+  });
+
+  it('writes nothing at all when the cover is already that one', async () => {
+    // Re-uploading the picture that is there is not an event, and neither is it
+    // an update — the same rule every PATCH here follows.
+    const { service, restaurantUpdate, auditCreate } = build({ restaurant: row(UPLOADED) });
+
+    await service.setCover(admin, RESTAURANT_ID, dto(UPLOADED));
+
+    expect(restaurantUpdate).not.toHaveBeenCalled();
+    expect(auditCreate).not.toHaveBeenCalled();
+  });
+
+  it('404s on a restaurant the caller may not write to', async () => {
+    const { service, restaurantUpdate } = build({ restaurant: null });
+
+    await expect(service.setCover(admin, RESTAURANT_ID, dto(UPLOADED))).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(restaurantUpdate).not.toHaveBeenCalled();
+  });
+
+  it('scopes the lookup by restaurant:write, like the services beside it', async () => {
+    // Not `branch:read`, which opens the page: a manager can reach the
+    // restaurant and may not choose the picture every branch is sold under.
+    const { service, prisma } = build({ restaurant: row(null) });
+    await service.setCover(admin, RESTAURANT_ID, dto(UPLOADED));
+
+    const args = (prisma.restaurant.findFirst as jest.Mock).mock.calls[0][0];
+    expect(args.where.id).toBe(RESTAURANT_ID);
+    expect(args.where.OR).toBeDefined();
+  });
+
+  it('never reaches a query for a branch manager, whatever branch they hold', async () => {
+    // The decision this endpoint exists to enforce: a manager answers for one
+    // branch, and the cover is a statement about the whole business.
+    //
+    // `@RequiresPermission(restaurant:write)` refuses them at the guard, before
+    // any of this runs. What is pinned here is the layer behind it — reach is
+    // built per *permission*, so the branch a manager does hold grants nothing
+    // towards this one, and `reachFor` refuses outright rather than assembling
+    // a filter that merely happens to match nothing. The restaurant is never
+    // loaded, so no path reads a row and then decides.
+    const manager: StaffJwtPayload = {
+      sub: 'staff-2',
+      kind: 'staff',
+      scopes: [{ role: StaffRole.RestaurantManager, restaurantId: null, branchId: BRANCH_ID }],
+    };
+    const { service, prisma, restaurantUpdate } = build({ restaurant: row(null) });
+
+    await expect(service.setCover(manager, RESTAURANT_ID, dto(UPLOADED))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+
+    expect(prisma.restaurant.findFirst).not.toHaveBeenCalled();
+    expect(restaurantUpdate).not.toHaveBeenCalled();
   });
 });
 

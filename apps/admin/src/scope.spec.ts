@@ -19,6 +19,10 @@ const branch = (over: Partial<StaffBranch>): StaffBranch => ({
   isOpen: true,
   avgPrepMin: 20,
   menuItemCount: 12,
+  // Irrelevant to scoping, which is about which branches an account can reach —
+  // present because the type requires them.
+  own: { coverUrl: null, services: [], servicesOverridden: false, reservationsEnabled: null },
+  offering: { coverUrl: null, services: [], reservationsEnabled: false },
   ...over,
 });
 

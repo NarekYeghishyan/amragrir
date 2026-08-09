@@ -157,7 +157,7 @@ export function OrderReminderDialog({
       const reminder = await api.setOrderReminder(order.id, minutes);
       onSet(reminder);
       toast.success(
-        t('orderReminderSaved', { code: order.pickupCode, minutes: reminder.reminderLeadMin }),
+        t('orderReminderSaved', { code: order.code, minutes: reminder.reminderLeadMin }),
       );
       setOpen(false);
     } catch (err) {
@@ -171,7 +171,7 @@ export function OrderReminderDialog({
     <Dialog
       open={open}
       onOpenChange={setOpen}
-      title={t('orderReminderTitle', { code: order.pickupCode })}
+      title={t('orderReminderTitle', { code: order.code })}
       description={t('orderReminderDesc')}
       trigger={<Button icon="clock">{reminderLabel(t, order)}</Button>}
     >

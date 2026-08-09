@@ -1,7 +1,20 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 import {
   OrderStatus,
+  PICKUP_CODE_LENGTH,
+  PICKUP_CODE_PATTERN,
   QueueFilter,
   REMINDER_LEAD_MAX_MINUTES,
   REMINDER_LEAD_MIN_MINUTES,
@@ -25,6 +38,24 @@ export const STAFF_SETTABLE_STATUSES: readonly OrderStatus[] = [
 export class SetOrderStatusDto {
   @IsIn(STAFF_SETTABLE_STATUSES)
   status!: OrderStatus;
+
+  /**
+   * The code the guest showed, on the one move that hands the food over.
+   *
+   * Required exactly when `status` is `completed` and refused as noise on every
+   * other step — `@ValidateIf` rather than `@IsOptional`, so "mark it ready
+   * without a code" stays a legal request and "mark it collected without one"
+   * is rejected before the service is reached.
+   *
+   * The shape is checked here and the *value* in the service, against the order
+   * being closed. Both are needed: this one keeps a stray "1234" from becoming
+   * a database lookup, and only the service knows which order is being asked
+   * about.
+   */
+  @ValidateIf((dto: SetOrderStatusDto) => dto.status === OrderStatus.Completed)
+  @IsString()
+  @Matches(PICKUP_CODE_PATTERN, { message: `pickupCode must be ${PICKUP_CODE_LENGTH} digits` })
+  pickupCode?: string;
 }
 
 /**
@@ -66,8 +97,10 @@ export class ListQueueDto {
    * Order code, pickup code, or customer name.
    *
    * One box rather than three, because whoever is typing knows which of them
-   * they have. The pickup code needs no case of its own: it is the last four
-   * digits of `code`, so a substring match finds an order by either.
+   * they have. The pickup code *does* need a case of its own now that it is not
+   * the tail of `code` — and it is matched whole, not as a substring, so the
+   * box cannot be used to list every order whose code happens to contain a `7`.
+   * See `RestaurantOrdersService.listOrders`.
    */
   @IsString()
   @IsOptional()

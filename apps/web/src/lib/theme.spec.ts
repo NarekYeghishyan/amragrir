@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { THEME_KEY } from './theme';
+import { THEME_KEY, themeShown } from './theme';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const themeSource = readFileSync(join(here, 'theme.ts'), 'utf8');
@@ -33,5 +33,24 @@ describe('THEME_KEY', () => {
     // The script must reference the constant, not a hand-copied literal that
     // could drift from what the toggle writes.
     expect(layoutSource).toContain("getItem('${THEME_KEY}')");
+  });
+});
+
+describe('themeShown', () => {
+  it('lets a chosen theme beat the browser preference, as the tokens do', () => {
+    expect(themeShown('light', true)).toBe('light');
+    expect(themeShown('dark', false)).toBe('dark');
+  });
+
+  it('falls back to the preference when nothing has been chosen', () => {
+    expect(themeShown(undefined, true)).toBe('dark');
+    expect(themeShown(undefined, false)).toBe('light');
+  });
+
+  it('treats a nonsense attribute as no choice at all', () => {
+    // `data-theme` is on the page and hand-editable, and the page it decorates
+    // has exactly two schemes.
+    expect(themeShown('', true)).toBe('dark');
+    expect(themeShown('sepia', false)).toBe('light');
   });
 });

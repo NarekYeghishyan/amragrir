@@ -31,7 +31,6 @@ function order(over: Partial<AdminCustomerOrder> = {}): AdminCustomerOrder {
   return {
     id: 'order-1',
     code: 'AMR-12344821',
-    pickupCode: '4821',
     status: OrderStatus.Completed,
     serviceMode: ServiceMode.Pickup,
     restaurantId: 'rest-1',

@@ -27,7 +27,12 @@ import {
   ListMenuItemsDto,
   ListRestaurantsDto,
   SetAvailabilityDto,
+  SetBranchBookingsDto,
+  SetBranchCoverDto,
+  SetBranchServicesDto,
   SetBranchStatusDto,
+  SetRestaurantCoverDto,
+  SetRestaurantServicesDto,
   UpdateBranchDto,
   UpdateMenuItemDto,
 } from './menu.dto';
@@ -150,6 +155,53 @@ export class RestaurantController {
     return this.menu.getRestaurant(staff, id);
   }
 
+  /**
+   * How the restaurant will feed people — pickup, eating in after collecting
+   * the order, table service, table booking.
+   *
+   * `restaurant:write`, which is held by a restaurant admin and above and by no
+   * branch-level role: this is one statement covering every branch, so a
+   * manager setting it at one branch would be answering for the others. The
+   * permission was declared with services named in it and had no endpoint
+   * behind it until now.
+   *
+   * The whole set at once, because the rules are about combinations — see
+   * `MenuService.setServices`.
+   */
+  @Patch('restaurants/:id/services')
+  @RequiresPermission(Permission.RestaurantWrite)
+  setRestaurantServices(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetRestaurantServicesDto,
+  ) {
+    return this.menu.setServices(staff, id, dto);
+  }
+
+  /**
+   * The photograph on the restaurant's card, on the catalog, and behind its
+   * page in the app.
+   *
+   * The same permission as the services above, and for the same reason: one
+   * cover is shared by every branch, so a `restaurant_manager` running one
+   * branch would be choosing the picture the others advertise under. Uploading
+   * the file is a separate request (`POST /uploads/restaurant-cover`) — this
+   * one only decides which restaurant wears it, which is the half the caller's
+   * scope has to answer for.
+   *
+   * `coverUrl: null` takes it down; the column has always been nullable and
+   * every client draws that state already.
+   */
+  @Patch('restaurants/:id/cover')
+  @RequiresPermission(Permission.RestaurantWrite)
+  setRestaurantCover(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetRestaurantCoverDto,
+  ) {
+    return this.menu.setCover(staff, id, dto);
+  }
+
   /** Who holds a role over the restaurant itself — its admins. Its branches'
    *  people are asked for per branch, below. */
   @Get('restaurants/:id/people')
@@ -220,6 +272,61 @@ export class RestaurantController {
     @Body() dto: UpdateBranchDto,
   ) {
     return this.menu.updateBranch(staff, id, dto);
+  }
+
+  /**
+   * This branch's own photograph — `null` to wear the restaurant's again.
+   *
+   * `branch:write`, so a `restaurant_manager` may set it: branches of one chain
+   * are different places, and the person who answers for this address answers
+   * for what it looks like. The restaurant-level endpoint is the business's
+   * default and stays at `restaurant:write`, which is the distinction — one
+   * says what the chain looks like, this says what this branch looks like.
+   *
+   * Uploading is `POST /uploads/branch-cover`; this only decides which branch
+   * wears the result.
+   */
+  @Patch('branches/:id/cover')
+  @RequiresPermission(Permission.BranchWrite)
+  setBranchCover(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetBranchCoverDto,
+  ) {
+    return this.menu.setBranchCover(staff, id, dto);
+  }
+
+  /**
+   * What this branch offers — `null` to follow the restaurant again.
+   *
+   * The same combination rules as the restaurant's, judging one address:
+   * a branch with waiters has no use for "collect it and seat yourself"
+   * whether or not the branch down the road does.
+   *
+   * `[]` and `null` are different answers — the first is this branch declaring
+   * it offers nothing, the second is handing the question back to the business.
+   */
+  @Patch('branches/:id/services')
+  @RequiresPermission(Permission.BranchWrite)
+  setBranchServices(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetBranchServicesDto,
+  ) {
+    return this.menu.setBranchServices(staff, id, dto);
+  }
+
+  /** Whether this branch takes table bookings, or `null` to follow the
+   *  restaurant. Moved down with the services because `reserve` is one of
+   *  them, and the two must agree per address. */
+  @Patch('branches/:id/bookings')
+  @RequiresPermission(Permission.BranchWrite)
+  setBranchBookings(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetBranchBookingsDto,
+  ) {
+    return this.menu.setBranchBookings(staff, id, dto);
   }
 
   /** Returns the raw `*_i18n` objects — the caller edits every language, so

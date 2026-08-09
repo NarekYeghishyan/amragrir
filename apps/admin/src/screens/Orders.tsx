@@ -5,6 +5,7 @@ import {
   OrderEventType,
   OrderStatus,
   PaymentStatus,
+  PickupOption,
   QueueFilter,
   isInQueueFilter,
 } from '@amragrir/shared';
@@ -25,6 +26,7 @@ import {
 import { useLanguage, useT } from '../i18n';
 import type { Translate } from '../language';
 import { routePath, type OrderScope } from '../navigation';
+import { OrderHandoverDialog } from '../order-handover';
 import { OrderQrDialog } from '../order-qr';
 import { Link, navigate } from '../router';
 import { watchOrders } from '../order-stream';
@@ -40,6 +42,7 @@ import {
   DialogBody,
   EmptyState,
   Icon,
+  IconButton,
   PageHeader,
   Pagination,
   SearchInput,
@@ -175,6 +178,26 @@ export function startsAt(order: Pick<StaffOrder, 'prepStartAt'>): number {
   return order.prepStartAt === null
     ? Number.POSITIVE_INFINITY
     : new Date(order.prepStartAt).getTime();
+}
+
+/**
+ * The address that holds the board on one order, and the one that lets the
+ * queue back in — what the pin beside each code writes.
+ *
+ * The scope is carried through unchanged. Pinning narrows what is already on
+ * screen; it is not a move to another branch's board, and a pin that quietly
+ * widened the restaurant picker would answer a question nobody asked.
+ *
+ * Its own function, and exported, because it is the whole of what the pin does:
+ * the board around it needs a document and a run of effects before it will say
+ * anything, and this is testable without either.
+ */
+export function pinScope(filters: OrderFilters, code: string | null): OrderScope {
+  return {
+    restaurantId: filters.restaurantId || null,
+    branchId: filters.branchId || null,
+    orderCode: code,
+  };
 }
 
 /**
@@ -400,6 +423,29 @@ export function Orders({
     stream.current?.setOrders((orders ?? []).map((order) => order.id));
   }, [orders]);
 
+  /**
+   * The numbers on the stage tabs, re-read after an order has moved.
+   *
+   * The card itself needs no help — it leaves the board on the broadcast the
+   * move triggers, and that is still the only thing the list is set from. But
+   * **no broadcast carries the counts.** They are computed per request, across
+   * every stage and under the whole search, and a socket frame about one order
+   * cannot say what the other tabs now hold. So the strip kept whatever it was
+   * last fetched with until the next poll — up to twenty seconds of Paid
+   * reading "3" over two cards, immediately after somebody watched the third
+   * one go. The one part of this screen that is a running total was the one
+   * part that stood still.
+   *
+   * A re-read rather than arithmetic here, for the same reason the tabs show
+   * the API's numbers at all: a stage is not always a set of statuses
+   * (`scheduled` is a question about a timestamp), and a pre-order is counted
+   * in that stage and in *none* of the others — so adding one here and taking
+   * one away there would drift from the server exactly where the rules are
+   * least obvious, and the symptom would be a tab whose count disagrees with
+   * the list under it.
+   */
+  const recount = (): void => void load(filters, page);
+
   const advance = async (order: StaffOrder, status: OrderStatus): Promise<void> => {
     setBusyId(order.id);
     try {
@@ -407,14 +453,38 @@ export function Orders({
       // The board updates from the broadcast this triggers, so nothing is set
       // optimistically here — what is shown is what the server recorded.
       toast.success(
-        t('orderAdvanced', { code: order.pickupCode, status: t(`orderStatus_${status}`) }),
+        t('orderAdvanced', { code: order.code, status: t(`orderStatus_${status}`) }),
       );
     } catch (err) {
       toast.error(errorText(t, err, 'errorUpdateOrder'));
-      await load(filters, page);
     } finally {
       setBusyId(null);
+      // Both outcomes, and for different reasons: a move that went through
+      // changed what every tab holds, and one that was refused may have been
+      // refused because the order had already moved under somebody else's
+      // hand — in which case the counts on screen are the stale ones that
+      // made the press look reasonable.
+      recount();
     }
+  };
+
+  /**
+   * An order that has just been collected.
+   *
+   * The dialog made the call — it has to, because it is the thing that shows
+   * the refusal — so this is only the announcement. The board itself updates
+   * from the same broadcast every other move rides on, and the tabs above it
+   * are re-read the same way every other move re-reads them: a handover is
+   * `ready → completed`, so Ready and Past both change on it.
+   */
+  const handedOver = (order: StaffOrder): void => {
+    toast.success(
+      t('orderAdvanced', {
+        code: order.code,
+        status: t(`orderStatus_${OrderStatus.Completed}`),
+      }),
+    );
+    recount();
   };
 
   /**
@@ -484,6 +554,34 @@ export function Orders({
       }),
       { replace: true },
     );
+  };
+
+  /**
+   * Hold the board on one order, or let the queue back in.
+   *
+   * The code goes where a link from somebody's activity already puts it —
+   * `&order=` — rather than straight into the search box, because the two are
+   * the same act: naming one order. The box fills from the address (the effect
+   * above), so the term is visible and editable exactly as a typed one is, and
+   * a pinned board has a URL that can be sent to whoever is asking about that
+   * order.
+   *
+   * `replace`, like the pickers: narrowing a queue is not a place in the
+   * browser's history. Nothing is lost by that — on a pinned board the one card
+   * on screen is the one carrying the pin that undoes it.
+   *
+   * Unpinning empties the box itself, because the address effect only ever
+   * *sets* the search from `&order=` and never clears it: an address that names
+   * no order is the ordinary board rather than an instruction to empty a box
+   * somebody is typing in. Taking the pin out is that instruction.
+   */
+  const pin = (code: string | null): void => {
+    navigate(routePath({ tab: 'Orders', scope: pinScope(filters, code) }), { replace: true });
+    if (code === null) {
+      setQuery('');
+      setFilters((current) => (current.q === '' ? current : { ...current, q: '' }));
+      setPage(1);
+    }
   };
 
   const clear = (): void => {
@@ -571,9 +669,16 @@ export function Orders({
               t={t}
               order={order}
               busy={busyId === order.id}
+              // The address, not the search box: somebody who typed the code by
+              // hand is looking for an order, and the pin says the board is
+              // being *held* on one. Only the pin sets that, so only the pin
+              // lights up.
+              pinned={order.code === scopedOrderCode}
               links={links}
               canOpenMenu={canOpenMenu}
+              onPin={() => pin(order.code === scopedOrderCode ? null : order.code)}
               onAdvance={(status) => void advance(order, status)}
+              onHandedOver={() => handedOver(order)}
               onSetReminder={applyReminder}
             />
           ))}
@@ -1013,7 +1118,7 @@ function OrderHistoryDialog({
     <Dialog
       open={open}
       onOpenChange={setOpen}
-      title={t('historyTitle', { code: order.pickupCode })}
+      title={t('historyTitle', { code: order.code })}
       description={t('historyDesc')}
       trigger={<Button icon="history">{t('historyAction')}</Button>}
     >
@@ -1087,18 +1192,31 @@ function OrderCard({
   t,
   order,
   busy,
+  pinned,
   links,
   canOpenMenu,
+  onPin,
   onAdvance,
+  onHandedOver,
   onSetReminder,
 }: {
   t: Translate;
   order: StaffOrder;
   busy: boolean;
+  /** Whether the board is currently being held on this order — see `pin` in
+   *  `Orders`, which is the only thing that sets it. */
+  pinned: boolean;
   links: PeopleLinks;
   /** Whether each line is a link to its dish on the menu — see `Orders`. */
   canOpenMenu: boolean;
+  /** Hold the board on this order, or — when it already is — let the queue back
+   *  in. One handler for both, because it is one control. */
+  onPin: () => void;
   onAdvance: (status: OrderStatus) => void;
+  /** The handover, which the dialog has already performed — this only says so.
+   *  Separate from `onAdvance` because the dialog owns the request: it needs the
+   *  refusal back, to say "that code is not this order's" beside the box. */
+  onHandedOver: () => void;
   onSetReminder: (reminder: OrderReminder) => void;
 }) {
   const { language } = useLanguage();
@@ -1132,12 +1250,54 @@ function OrderCard({
   return (
     <article className={late ? 'order order--late' : 'order'}>
       <div className="row spread">
-        <span className="order__code">{order.pickupCode}</span>
-        <Badge tone={statusTone(order.status)}>{t(`orderStatus_${order.status}`)}</Badge>
+        {/* The order's name, which is what a card has to be identifiable by.
+            It used to be the pickup code — four digits, big, at the top —
+            and that is exactly what made "confirm at handover" theatre: a
+            counter reading the code off its own board never had to ask the
+            guest for anything. The code is not on this screen at all now, and
+            the API does not send it. */}
+        <span className="order__title">
+          {/* The pin, before the code and about it: it puts that code in the
+              search box and leaves the one order on the board. What a counter
+              does while somebody is on the phone about an order — read it out,
+              check what is in it, say when it will be ready — is done over a
+              board of fifty cards that reorders itself every twenty seconds,
+              and the alternative was retyping twelve characters somebody is
+              reading off the screen they are trying not to lose.
+
+              Its own name says which order, because a board is a list of these
+              and "Pin" fifty times over is a list of buttons rather than a list
+              of orders. Pressed again it lets the queue back in — and the
+              pinned board is one card, so the way out is the thing that is in
+              front of whoever pinned it. */}
+          <IconButton
+            icon="pin"
+            label={pinned ? t('orderUnpin') : t('orderPin', { code: order.code })}
+            title={pinned ? t('orderUnpin') : t('orderPin', { code: order.code })}
+            className={pinned ? 'order__pin order__pin--on' : 'order__pin'}
+            onClick={onPin}
+          />
+          <span className="order__code num">{order.code}</span>
+        </span>
+        <span className="row row--tight">
+          {/* Only the ending that changes what the pass does.
+
+              Every pickup order is taken away unless somebody said otherwise,
+              so a "take away" badge on nine cards out of ten would be a label
+              nobody reads — and the tenth one, the one that needs a plate
+              rather than a bag, would be lost among them. This is the
+              exception, and it is marked as one. */}
+          {order.pickupOption === PickupOption.EatIn && (
+            <Badge tone="accent">{t('orderEatsIn')}</Badge>
+          )}
+          <Badge tone={statusTone(order.status)}>{t(`orderStatus_${order.status}`)}</Badge>
+        </span>
       </div>
 
+      {/* The code moved up into the heading, so this is the branch and the wait
+          alone rather than the same string printed twice. */}
       <div className="order__meta">
-        {order.code} · {order.branch.name ?? t('orderBranchFallback')} ·{' '}
+        {order.branch.name ?? t('orderBranchFallback')} ·{' '}
         {formatWaiting(t, order.createdAt)}
         {/* A countdown on a pre-order would read "ready in 8,640 min", which is
             not a number anybody can act on — the day and hour it is due are
@@ -1231,10 +1391,21 @@ function OrderCard({
         </div>
 
         {nextStatuses(order.status).map((next, index) =>
-          next === OrderStatus.Cancelled ? (
+          // Handing the food over is not a status the counter asserts — it is
+          // one the guest proves, by showing a code the card does not carry.
+          // Its own dialog, and the only way to reach `completed`.
+          next === OrderStatus.Completed ? (
+            <OrderHandoverDialog
+              key={next}
+              t={t}
+              order={order}
+              busy={busy}
+              onDone={onHandedOver}
+            />
+          ) : next === OrderStatus.Cancelled ? (
             <ConfirmDialog
               key={next}
-              title={t('orderCancelTitle', { code: order.pickupCode })}
+              title={t('orderCancelTitle', { code: order.code })}
               description={t('orderCancelDesc')}
               confirmLabel={t('orderCancelConfirm')}
               busy={busy}

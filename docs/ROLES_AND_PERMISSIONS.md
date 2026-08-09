@@ -102,7 +102,7 @@ screens from the same map the API enforces.
 | `tables:write` | ❌ | ✅ | ✅ | ✅ | ✅ |
 | `menu:write` (prices, dishes) | ❌ | ❌ | ✅ | ✅ | ✅ |
 | `branch:create` | ❌ | ❌ | ✅ | ✅ | ✅ |
-| `restaurant:write` | ❌ | ❌ | ✅ | ✅ | ✅ |
+| `restaurant:write` (services) | ❌ | ❌ | ✅ | ✅ | ✅ |
 | `analytics:read` | ❌ | ❌ | ✅ | ✅ | ✅ |
 | `staff:read` / `:invite` / `:revoke` | ❌ | ❌ | ✅ | ✅ | ✅ |
 | `staff:activity` (what someone did) | ❌ | ❌ | ✅ | ✅ | ✅ |
@@ -143,6 +143,9 @@ is reading a column.
 |---|---|---|
 | `menu_item.create` / `.update` / `.delete` | `MenuService` | `menu:write` |
 | `menu_item.availability` | `MenuService` | `menu:availability` |
+| `restaurant.services` | `MenuService` | `restaurant:write` |
+| `restaurant.cover` | `MenuService` | `restaurant:write` |
+| `branch.cover` / `branch.services` / `branch.bookings` | `MenuService` | `branch:write` |
 | `branch.create` | `MenuService` | `branch:create` |
 | `branch.update` | `MenuService` | `branch:write` |
 | `branch.status` | `MenuService` | `branch:hours` |
@@ -308,6 +311,81 @@ exists.
 
 ---
 
+## Covers, services and bookings: the business's default, the branch's answer
+
+**Revised 2026-08-04, the same day the restaurant-level version was built.**
+The first version put all three on the restaurant, covering every branch at
+once. That was the wrong shape and was changed on the evidence: branches of one
+chain are genuinely different places, and one row could not say that one has a
+dining room while another is a counter in a mall.
+
+Both levels now exist, and the split is the permission:
+
+| | Sets | Permission | Means |
+|---|---|---|---|
+| `restaurants.*` | `restaurant_admin`+ | `restaurant:write` | The **default** every branch inherits |
+| `restaurant_branches.*` | `restaurant_manager`+ | `branch:write` | What **this address** offers |
+
+A manager already holds `branch:write` for their branch's address and phone, so
+a photograph and a service list for that same address fit it exactly — they
+answer for one place and nothing else. Changing what the *chain* defaults to is
+still a restaurant admin's decision, which is what keeps a manager from
+answering for branches they do not run.
+
+**`resolveBranchOffering` in `@amragrir/shared` is the one place inheritance
+happens.** Every read path goes through it — the catalog, an order's validation,
+the reservation check, the back office — so a guest is never shown a service the
+order endpoint then refuses.
+
+**Three settings, three resolutions**, and the differences are deliberate:
+
+- **The cover falls back on `null`.** "No cover here" and "not answered here"
+  are the same state on purpose; there is no reason a branch would want to be
+  blank while its restaurant has a photograph.
+- **The services need an explicit flag** (`services_overridden`). `[]` is
+  already a legitimate answer — every restaurant is created having declared
+  nothing — so a branch must be able to override a parent that offers pickup
+  with a genuinely empty set, which falling back on emptiness would make
+  unsayable.
+- **Bookings fall back on `null`**, a plain nullable boolean, because `false` is
+  a real answer and absent is not.
+
+The catalog's service filter asks each branch the same question the resolver
+does: an overriding branch is matched on its own array, every other on its
+parent's. Filtering the restaurant alone would return branches that had
+withdrawn the very service somebody filtered for.
+
+**It is two requests, like a dish photograph.**
+`POST /uploads/restaurant-cover` stores the file and answers with a URL;
+`PATCH /restaurant/restaurants/:id/cover` puts that URL on the restaurant. The
+upload grants no reach on its own — it writes a file and names it — and the
+PATCH is where the caller's scope decides *which* restaurant may wear it. An
+abandoned form therefore costs an orphaned image rather than a half-changed row,
+which is the same known trade the menu photos make (nothing sweeps the orphans
+yet).
+
+The file lands in `covers/` rather than beside the dishes in `menu/`: the two
+sit behind different permissions and are wanted at different sizes, so whoever
+later adds thumbnailing or a sweep can act on one without reasoning about the
+other.
+
+**`coverUrl: null` takes a cover down**, and is the one place this differs from
+a dish, which is required to have a picture. The column has always been
+nullable, every client already draws that state, and a restaurant that wants its
+photograph gone has no other way to say so. The DTO refuses an *absent* field
+for the same reason it accepts an explicit null — an empty body would otherwise
+read as "remove it", which nobody typing it would have meant.
+
+**A replaced cover is not deleted from disk**, and the `restaurant.cover` audit
+entry carries the URL it replaced — which is what makes a cover replaced by
+accident recoverable at all.
+
+**The seed fills the column** (`prisma/restaurant-covers.ts`) so the screens
+that read it can be looked at, and the upload overwrites a seeded value freely
+while the seed keeps refusing to overwrite an upload (`isSeedCover`). The mobile
+side needed nothing: its `Photo` component already rendered the URL and fell
+back to the placeholder surface without one.
+
 ## Implementation status
 
 Implemented in `apps/api`:
@@ -386,6 +464,10 @@ Implemented in `apps/api`:
   inside the caller's own reach. Someone who works for two restaurants shows each
   admin only their own half — seeing that a person works for you does not mean
   seeing what they did for somebody else.
+- **A restaurant's cover is uploaded and set behind `restaurant:write`**
+  (`POST /uploads/restaurant-cover`, then
+  `PATCH /restaurant/restaurants/{id}/cover`) — a `restaurant_manager` holds
+  neither. See "Who uploads a restaurant's cover photo" above.
 - **Taking a dish off the menu is a soft delete**, so a dish that has been
   ordered can finally be removed. It needs `menu:write`; `menu:availability` only
   reaches the reversible sold-out flag.

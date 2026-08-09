@@ -191,6 +191,36 @@ describe('branch entries', () => {
   });
 });
 
+describe('restaurant entries', () => {
+  it('says what the restaurant was left offering, in the reader language', () => {
+    // What it *became*, not what moved: turning table booking off withdraws the
+    // dining room with it, and naming only the switch somebody touched would
+    // hide the half a guest would notice.
+    const line = headline(
+      t,
+      audit({
+        action: AuditAction.RestaurantServices,
+        entity: 'restaurant',
+        before: { services: ['pickup', 'dinein', 'reserve'] },
+        after: { services: ['pickup'] },
+      }),
+      Language.En,
+    );
+
+    expect(line).toBe('Changed what the restaurant offers: Pre-Order');
+  });
+
+  it('reads a restaurant left offering nothing', () => {
+    const line = headline(
+      t,
+      audit({ action: AuditAction.RestaurantServices, entity: 'restaurant', after: { services: [] } }),
+      Language.En,
+    );
+
+    expect(line).toBe('Changed what the restaurant offers: —');
+  });
+});
+
 describe('staff entries', () => {
   it('tells an invitation from a role granted outright', () => {
     const invited = headline(

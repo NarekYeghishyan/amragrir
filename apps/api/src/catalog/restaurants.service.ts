@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { Language } from '@amragrir/shared';
+import { Language, resolveBranchOffering } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { localize, type I18nField } from '../common/i18n';
 import { LIVE_MENU_ITEM } from '../common/menu-visibility';
@@ -30,6 +30,15 @@ const MAX_GROUPED_CANDIDATES = 500;
 
 export interface RestaurantListItem {
   id: string;
+  /**
+   * The business behind the row, since `id` is the branch's.
+   *
+   * A favourite is stored against the restaurant, not the branch (DATABASE.md
+   * §13), so a card with a heart on it has to be able to name the restaurant it
+   * would save — and it could not, when the only id it carried was the branch's.
+   * `SearchRestaurant` has always sent both for the same reason.
+   */
+  restaurantId: string;
   slug: string;
   name: string;
   cuisine: string | null;
@@ -267,6 +276,12 @@ export class RestaurantsService {
     }
 
     const { restaurant } = branch;
+    // What *this address* offers, which is what the page is about — a branch
+    // that answers for itself overrides the business, and one that does not
+    // wears its defaults. The response shape is unchanged: these three have
+    // always described the branch the card resolves to, and until now that was
+    // only true because every branch was the same.
+    const offering = resolveBranchOffering(branch, restaurant);
     return {
       id: branch.id,
       restaurantId: restaurant.id,
@@ -276,9 +291,9 @@ export class RestaurantsService {
       priceLevel: restaurant.priceLevel,
       rating: Number(restaurant.ratingAvg),
       reviewsCount: restaurant.reviewsCount,
-      services: restaurant.services,
-      reservationsEnabled: restaurant.reservationsEnabled,
-      coverUrl: restaurant.coverUrl,
+      services: [...offering.services],
+      reservationsEnabled: offering.reservationsEnabled,
+      coverUrl: offering.coverUrl,
       branch: {
         id: branch.id,
         name: branch.name,
@@ -386,9 +401,6 @@ export class RestaurantsService {
     if (query.minRating !== undefined) {
       restaurant.ratingAvg = { gte: query.minRating };
     }
-    if (query.service?.length) {
-      restaurant.services = { hasSome: query.service };
-    }
     if (query.q) {
       restaurant.OR = [
         { name: { contains: query.q, mode: 'insensitive' } },
@@ -405,6 +417,24 @@ export class RestaurantsService {
     // rather than the parent restaurant.
     if (query.openNow) {
       where.isOpen = true;
+    }
+
+    // Services are answered per branch now, so this asks each row the same
+    // question `resolveBranchOffering` does: a branch that overrides is matched
+    // on its own array, and one that does not on its restaurant's. Filtering
+    // the parent alone would hand back branches that have withdrawn the very
+    // service the guest filtered for — and hide ones that added it.
+    //
+    // Top-level `OR`, which is free here: the `q` search above builds its `OR`
+    // inside `restaurant`, so the two do not collide.
+    if (query.service?.length) {
+      where.OR = [
+        { servicesOverridden: true, services: { hasSome: query.service } },
+        {
+          servicesOverridden: false,
+          restaurant: { services: { hasSome: query.service } },
+        },
+      ];
     }
 
     // Category and dietary filters describe dishes, so they select branches
@@ -493,9 +523,15 @@ export class RestaurantsService {
     const { restaurant } = row;
     const exact = this.exactDistanceKm(row, origin);
     const distance = exact === null ? null : roundKm(exact);
+    // A card *is* a branch — `id` above is the branch's — so these three are
+    // resolved for that branch rather than copied off the parent. Two branches
+    // of one chain can now show different photographs and different services,
+    // which is the whole point of the columns this reads.
+    const offering = resolveBranchOffering(row, restaurant);
 
     return {
       id: row.id,
+      restaurantId: restaurant.id,
       slug: restaurant.slug,
       name: restaurant.name,
       cuisine: restaurant.cuisine,
@@ -505,9 +541,9 @@ export class RestaurantsService {
       distanceKm: distance,
       prepMin: row.avgPrepMin,
       isOpen: row.isOpen,
-      services: restaurant.services,
-      reservationsEnabled: restaurant.reservationsEnabled,
-      coverUrl: restaurant.coverUrl,
+      services: [...offering.services],
+      reservationsEnabled: offering.reservationsEnabled,
+      coverUrl: offering.coverUrl,
     };
   }
 }

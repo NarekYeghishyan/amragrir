@@ -1,6 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { RestaurantService, StaffRole } from '@amragrir/shared';
-import type { AdminTranslationKey } from '@amragrir/i18n/admin';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
+import {
+  RestaurantService,
+  SERVICE_ORDER,
+  StaffRole,
+  serviceToggleBreach,
+  toggleService,
+} from '@amragrir/shared';
 import {
   NO_RESTAURANT_FILTERS,
   RESTAURANTS_PAGE_SIZE,
@@ -19,6 +32,8 @@ import type { Translate } from '../language';
 import { routePath, tabPath, type RestaurantTarget } from '../navigation';
 import { Link } from '../router';
 import { branchesOf, restaurantsOf, showsBranchFilter } from '../scope';
+import { PhotoField, usePhotoUpload } from '../photo';
+import { SERVICE_HINT_KEYS, blockedReason, serviceList, serviceName } from '../services';
 import {
   Badge,
   Banner,
@@ -64,6 +79,8 @@ const SEARCH_DEBOUNCE_MS = 300;
 export function Restaurants({
   branches,
   canCreate,
+  canEditRestaurant,
+  canEditBranch,
   canReadStaff,
   canOpenOrders,
   open,
@@ -72,6 +89,25 @@ export function Restaurants({
   /** The shell's flat branch list — what the two pickers are built from. */
   branches: StaffBranch[];
   canCreate: boolean;
+  /**
+   * Whether each branch offers its own cover, services and bookings.
+   *
+   * `branch:write`, which a `restaurant_manager` holds — these are statements
+   * about one address, so the person who answers for the address answers for
+   * them. Distinct from `canEditRestaurant`, which is the *business's*
+   * defaults.
+   */
+  canEditBranch: boolean;
+  /**
+   * Whether an opened restaurant can be *changed* here — its services offered
+   * as switches rather than a line of text, and its cover photograph
+   * replaceable.
+   *
+   * `restaurant:write`, which no branch-level role holds. Both are one
+   * statement covering every branch of the business, which is exactly why a
+   * `restaurant_manager` running one branch does not get either.
+   */
+  canEditRestaurant: boolean;
   /** Whether to ask who works at a restaurant when one is opened. A shift
    *  account reaches its branch without holding `staff:read`, and would get a
    *  403 where the section goes. */
@@ -203,6 +239,8 @@ export function Restaurants({
         openBranchId={open.branchId}
         markAssignmentId={open.assignmentId}
         canCreate={canCreate}
+        canEditRestaurant={canEditRestaurant}
+        canEditBranch={canEditBranch}
         canReadStaff={canReadStaff}
         canOpenOrders={canOpenOrders}
         acting={acting}
@@ -435,6 +473,7 @@ function BranchRow({
   canOpenOrders,
   onToggle,
   people,
+  settings,
 }: {
   t: Translate;
   branch: StaffBranch;
@@ -443,9 +482,23 @@ function BranchRow({
   canOpenOrders: boolean;
   onToggle: (isOpen: boolean) => void;
   people?: Disclosure;
+  /**
+   * This branch's own cover, services and bookings, for an account that may
+   * change them (`branch:write`).
+   *
+   * Behind the same disclosure as the team rather than always on: these are
+   * three settings apiece, and a chain of forty branches would otherwise be a
+   * page nobody can find a branch on. Passed as a node because the state and
+   * the requests belong to the restaurant's page, which owns the branch list
+   * this row is one of.
+   */
+  settings?: ReactNode;
 }) {
   const name = branch.name ?? branch.city;
   const teamId = `team-${branch.id}`;
+  // The name is a disclosure when there is anything under it — a team, this
+  // branch's settings, or both. Without either it is plain text, as before.
+  const opens = people !== undefined || settings !== undefined;
 
   return (
     // Identified so that a jump landing on this branch can scroll to it — the
@@ -463,7 +516,7 @@ function BranchRow({
           {/* The name opens the team, when there is one to open — not the whole
               row, which holds a switch that would then be a trap. A button, so
               it is reachable by keyboard and announced as a disclosure. */}
-          {people === undefined ? (
+          {!opens || people === undefined ? (
             <div className="strong">{name}</div>
           ) : (
             <button
@@ -553,15 +606,152 @@ function BranchRow({
           hidden={!people.open}
         >
           {people.open && (
-            <RoleGroups
-              team={people.team}
-              empty={t('branchTeamEmpty')}
-              mark={people.mark}
-              acting={people.acting}
-            />
+            <>
+              {/* This branch's own answers first, then who works here. The
+                  settings are what the person opening a branch came to change;
+                  the team is who they would be telling about it. */}
+              {settings}
+              <RoleGroups
+                team={people.team}
+                empty={t('branchTeamEmpty')}
+                mark={people.mark}
+                acting={people.acting}
+              />
+            </>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * What one branch answers for itself: its photograph, its services, its
+ * bookings.
+ *
+ * Each has a **"this branch decides for itself" switch**, and that switch is
+ * the data model rather than a nicety: the row stores "not answered" separately
+ * from every answer, because a branch declaring exactly what the business
+ * declares is a different state from one that has not declared — and only the
+ * first survives the business changing its mind. With the switch off the
+ * controls show the restaurant's values, disabled, so the screen still says
+ * what this address offers rather than going blank.
+ *
+ * `offering` is what a guest sees and is what the controls reflect; `own` is
+ * what this branch has stored, and decides only whether the switches are on.
+ */
+function BranchOffering({
+  t,
+  branch,
+  saving,
+  onCover,
+  onServices,
+  onBookings,
+}: {
+  t: Translate;
+  branch: StaffBranch;
+  saving: boolean;
+  onCover: (coverUrl: string | null) => void;
+  onServices: (services: string[] | null) => void;
+  onBookings: (reservationsEnabled: boolean | null) => void;
+}) {
+  // The hook lives here rather than on the restaurant's page so each branch
+  // gets its own file input: one shared hook holds one input ref, and with two
+  // branches disclosed at once it would belong to whichever rendered last.
+  const cover = usePhotoUpload((url) => onCover(url), api.uploadBranchCover);
+  const ownServices = branch.own.servicesOverridden;
+  const ownBookings = branch.own.reservationsEnabled !== null;
+
+  return (
+    <div className="branch__settings">
+      <div className="branch__setting">
+        <div className="row row--between">
+          <span className="strong">{t('branchCoverTitle')}</span>
+          {/* Only when there is one to give back. "Use the restaurant's" rather
+              than "remove": the branch stops answering, it does not go blank. */}
+          {branch.own.coverUrl !== null && !saving && (
+            <Button variant="secondary" onClick={() => onCover(null)}>
+              {t('branchUseRestaurant')}
+            </Button>
+          )}
+        </div>
+        <div className="cover">
+          {branch.offering.coverUrl === null ? (
+            <p className="faint cover__none">{t('restaurantCoverNone')}</p>
+          ) : (
+            <img
+              className="cover__image"
+              src={branch.offering.coverUrl}
+              alt={t('restaurantCoverAlt')}
+            />
+          )}
+          <div className="cover__actions">
+            <PhotoField id={`branch-cover-${branch.id}`} url="" upload={cover} disabled={saving} />
+            {saving && <span className="faint">{t('restaurantCoverSaving')}</span>}
+            {branch.own.coverUrl === null && (
+              <span className="faint">{t('branchFollowsRestaurant')}</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="branch__setting">
+        <div className="row row--between">
+          <span className="strong">{t('restaurantDetailServices')}</span>
+          <span className="row row--tight">
+            <span className="faint">{t('branchDecidesItself')}</span>
+            <Switch
+              checked={ownServices}
+              disabled={saving}
+              ariaLabel={t('branchServicesOwnLabel', { branch: branch.name ?? branch.city })}
+              // On: start from what it is already showing, so turning the
+              // switch on changes nothing by itself — it only moves who decides.
+              // Off: hand the question back.
+              onCheckedChange={(on) => onServices(on ? [...branch.offering.services] : null)}
+            />
+          </span>
+        </div>
+        <ServiceRows
+          t={t}
+          services={branch.offering.services}
+          reservationsEnabled={branch.offering.reservationsEnabled}
+          saving={null}
+          disabled={!ownServices || saving}
+          onToggle={(service, on) =>
+            onServices(toggleService(branch.offering.services, service, on))
+          }
+        />
+      </div>
+
+      <div className="branch__setting">
+        <div className="row row--between">
+          <span className="strong">{t('restaurantDetailBookings')}</span>
+          <span className="row row--tight">
+            <span className="faint">{t('branchDecidesItself')}</span>
+            <Switch
+              checked={ownBookings}
+              disabled={saving}
+              ariaLabel={t('branchBookingsOwnLabel', { branch: branch.name ?? branch.city })}
+              onCheckedChange={(on) =>
+                onBookings(on ? branch.offering.reservationsEnabled : null)
+              }
+            />
+          </span>
+        </div>
+        <div className="row row--between">
+          <span className="faint">
+            {branch.offering.reservationsEnabled
+              ? t('restaurantTakesBookings')
+              : t('restaurantNoBookings')}
+          </span>
+          <Switch
+            checked={branch.offering.reservationsEnabled}
+            disabled={!ownBookings || saving}
+            ariaLabel={t('branchBookingsLabel', { branch: branch.name ?? branch.city })}
+            onCheckedChange={(on) => onBookings(on)}
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -663,14 +853,95 @@ function RoleGroups({
   );
 }
 
-/** What `restaurants.services` can hold, as translation keys. A value outside
- *  this vocabulary is shown as it is stored rather than dropped — a service
- *  nobody translated is still a service the restaurant advertises. */
-const SERVICE_KEYS: Record<string, AdminTranslationKey> = {
-  [RestaurantService.Pickup]: 'restaurantService_pickup',
-  [RestaurantService.DineIn]: 'restaurantService_dinein',
-  [RestaurantService.Reserve]: 'restaurantService_reserve',
-};
+/**
+ * How the restaurant will feed people, as switches.
+ *
+ * The rule this screen exists to hold: **table service and the eat-in pickup
+ * option cancel each other out**. A room with waiters has no use for "collect
+ * it at the counter and find a seat yourself", so whichever of the two is on,
+ * the other cannot be — and rather than letting somebody turn it on and take a
+ * refusal from the API, the switch is dead and the row says which switch to
+ * turn off first.
+ *
+ * What decides that is `serviceToggleBreach`, the same function the API
+ * validates with. Neither side restates the rule, which is what stops a panel
+ * from offering a combination the API is about to refuse.
+ *
+ * There is no "take away" switch: it is what pickup *is*. Its absence is
+ * explained in the row rather than left to be noticed.
+ */
+function ServiceRows({
+  t,
+  services,
+  reservationsEnabled,
+  saving,
+  disabled = false,
+  onToggle,
+}: {
+  t: Translate;
+  services: string[];
+  /** The resolved `reservations_enabled` for whatever this set belongs to — the
+   *  restaurant's own, or a branch's, which may differ from its parent's. A
+   *  second switch on the same thing; see the note in the row below. */
+  reservationsEnabled: boolean;
+  /** The service whose save is in flight, or null. Every switch waits for it —
+   *  two overlapping saves would each send a whole set built from a state the
+   *  other has already moved. */
+  saving: RestaurantService | null;
+  /**
+   * Everything dead, whatever the rules say.
+   *
+   * Used by a branch that has not taken the services over: the switches then
+   * show the restaurant's set, so the screen still says what this address
+   * offers, but moving one would be answering a question this branch has not
+   * claimed. Separate from `saving`, which is momentary.
+   */
+  disabled?: boolean;
+  onToggle: (service: RestaurantService, on: boolean) => void;
+}) {
+  return (
+    <div>
+      {SERVICE_ORDER.map((service) => {
+        const on = services.includes(service);
+        const breach = serviceToggleBreach(services, service, !on);
+        const name = serviceName(t, service);
+
+        // Advertising bookings and taking them are two columns, and a booking
+        // needs both (see `RestaurantReservationsService`). Nothing here can
+        // set the second one, so the row says so rather than leaving somebody
+        // to switch this on and wonder why no table can be booked.
+        const hintKey =
+          service === RestaurantService.Reserve && on && !reservationsEnabled
+            ? 'restaurantServiceReserveOff'
+            : SERVICE_HINT_KEYS[service];
+
+        return (
+          <div className="list-row" key={service}>
+            <div className="grow">
+              <div className="strong">{name}</div>
+              {/* The reason wins the line when there is one: what a switch does
+                  matters less than why it will not move. Both are plain text
+                  rather than a tooltip — a tooltip is not there on a touch
+                  screen, and this is the whole answer. */}
+              {breach !== null ? (
+                <div className="faint">{blockedReason(t, breach, service)}</div>
+              ) : (
+                hintKey !== undefined && <div className="faint">{t(hintKey)}</div>
+              )}
+            </div>
+
+            <Switch
+              checked={on}
+              disabled={disabled || saving !== null || breach !== null}
+              ariaLabel={t('restaurantServiceSwitchLabel', { service: name })}
+              onCheckedChange={(checked) => onToggle(service, checked)}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /** The order the roles read in — seniority, matching what the API sorts by. */
 const ROLE_ORDER: readonly StaffRole[] = [
@@ -702,6 +973,8 @@ function RestaurantDetail({
   openBranchId,
   markAssignmentId,
   canCreate,
+  canEditRestaurant,
+  canEditBranch,
   canReadStaff,
   canOpenOrders,
   acting,
@@ -717,6 +990,11 @@ function RestaurantDetail({
    *  two the role is over. */
   markAssignmentId: string | null;
   canCreate: boolean;
+  /** Whether the services are switches here rather than a line in the facts,
+   *  and the cover can be replaced — see `Restaurants`. */
+  canEditRestaurant: boolean;
+  /** Whether each branch answers for itself — see `Restaurants`. */
+  canEditBranch: boolean;
   canReadStaff: boolean;
   canOpenOrders: boolean;
   /** Signing in as one of the people on these teams, or null for an account
@@ -733,6 +1011,8 @@ function RestaurantDetail({
   );
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [savingService, setSavingService] = useState<RestaurantService | null>(null);
+  const [savingCover, setSavingCover] = useState(false);
   const [addingBranch, setAddingBranch] = useState(false);
   const toast = useToast();
 
@@ -866,6 +1146,117 @@ function RestaurantDetail({
     }
   };
 
+  /**
+   * Turns one service on or off, and stores what the whole set becomes.
+   *
+   * `toggleService` rather than adding to or removing from the array by hand,
+   * because one switch is not always one change: turning pickup off takes the
+   * eat-in option with it, since that option is a choice made *inside* pickup
+   * and has nothing to attach to without it.
+   *
+   * The restaurant is replaced with what the API answers rather than with what
+   * was sent, so the screen shows what was actually stored — including a
+   * cascade the click did not spell out.
+   */
+  const flipService = async (service: RestaurantService, on: boolean): Promise<void> => {
+    if (restaurant === null) {
+      return;
+    }
+    setSavingService(service);
+    try {
+      const updated = await api.setRestaurantServices(
+        restaurant.id,
+        toggleService(restaurant.services, service, on),
+      );
+      setRestaurant(updated);
+      const name = serviceName(t, service);
+      toast.success(
+        on ? t('restaurantServiceOn', { service: name }) : t('restaurantServiceOff', { service: name }),
+      );
+    } catch (err) {
+      toast.error(errorText(t, err, 'errorUpdateServices'));
+    } finally {
+      setSavingService(null);
+    }
+  };
+
+  // `restaurant:write`, not `menu:write` — a cover is not a dish, and a panel
+  // asking the wrong endpoint would 403 at the moment somebody picks a file
+  // rather than never offering the control at all.
+  //
+  // Unlike a dish, there is no form to submit afterwards: the restaurant
+  // already exists, so the upload's answer goes straight on to it.
+  const coverUpload = usePhotoUpload(
+    (url) => void applyCover(url),
+    api.uploadRestaurantCover,
+  );
+
+  /**
+   * One branch's own cover, services or bookings.
+   *
+   * All three go through here because they are the same shape of thing: a
+   * request that answers with the branch, and a list that has to be replaced
+   * with what came back rather than with what was sent — a branch handing its
+   * services back to the business is a change to what it *offers*, and only the
+   * response knows what that resolved to.
+   *
+   * `busyBranchId` holds every control on that branch, so two overlapping saves
+   * cannot each send a set built from a state the other has already moved.
+   */
+  const applyToBranch = async (
+    branchId: string,
+    save: () => Promise<StaffBranch>,
+    fallback: 'errorUpdateCover' | 'errorUpdateServices' | 'errorUpdateBranch',
+  ): Promise<void> => {
+    setBusyId(branchId);
+    try {
+      const updated = await save();
+      setRestaurant((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              branches: current.branches.map((each) => (each.id === branchId ? updated : each)),
+            },
+      );
+    } catch (err) {
+      toast.error(errorText(t, err, fallback));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  /**
+   * Puts a cover on the restaurant, or takes the one there down.
+   *
+   * The upload has already happened by the time this runs — `usePhotoUpload`
+   * stores the file on choosing and hands back its URL — so this is only the
+   * second half, the half that needs the restaurant's id. Storing what the API
+   * answers rather than the URL that was sent keeps the page showing what is
+   * actually on the row.
+   *
+   * A failed save leaves the previous cover on screen, which is the true one:
+   * nothing was stored, and the toast is what says so.
+   */
+  const applyCover = async (coverUrl: string | null): Promise<void> => {
+    if (restaurant === null) {
+      return;
+    }
+    setSavingCover(true);
+    try {
+      setRestaurant(await api.setRestaurantCover(restaurant.id, coverUrl));
+      toast.success(coverUrl === null ? t('restaurantCoverRemoved') : t('restaurantCoverSet'));
+    } catch (err) {
+      toast.error(errorText(t, err, 'errorUpdateCover'));
+    } finally {
+      setSavingCover(false);
+      // The input keeps the chosen file otherwise, and choosing the same
+      // picture again fires no `change` — so a retry after a failed save would
+      // do nothing at all.
+      coverUpload.clear();
+    }
+  };
+
   // The way back is the list's own address, so it behaves like the browser's
   // back button rather than only looking like it — and a restaurant opened
   // cold, from a pasted link with no history behind it, still has one.
@@ -932,19 +1323,16 @@ function RestaurantDetail({
             label={t('restaurantDetailRating')}
             value={`${restaurant.ratingAvg.toFixed(1)} · ${t.plural('reviewCount', restaurant.reviewsCount)}`}
           />
-          <Fact
-            label={t('restaurantDetailServices')}
-            value={
-              restaurant.services.length === 0
-                ? t('restaurantDetailNone')
-                : restaurant.services
-                    .map((service) => {
-                      const key = SERVICE_KEYS[service];
-                      return key === undefined ? service : t(key);
-                    })
-                    .join(' · ')
-            }
-          />
+          {/* A line of text for whoever may only read it. An account that can
+              change the services gets the section below instead, rather than
+              both — one place saying what is offered, and it is the one with
+              the switches in it when there are switches. */}
+          {!canEditRestaurant && (
+            <Fact
+              label={t('restaurantDetailServices')}
+              value={serviceList(t, restaurant.services)}
+            />
+          )}
           <Fact
             label={t('restaurantDetailBookings')}
             value={
@@ -979,6 +1367,90 @@ function RestaurantDetail({
         )}
       </Card>
 
+      {/* Directly under the facts, because it is one of them — what this
+          restaurant looks like on a card, next to what it is called and what it
+          cooks. Its own section rather than a row in the `<dl>` above only
+          because a picture and a file input are not a labelled value.
+
+          A small block, not a banner: this is here to answer "is there one, and
+          is it the right photograph", which a thumbnail answers as well as a
+          full-width crop would — and a hero image at the top of the page would
+          push the branches, which is what somebody usually came for, below the
+          fold. Shown to everyone who can open the restaurant, since a cover is
+          public the moment it is set; the controls are for whoever may change
+          it. */}
+      <SectionTitle
+        aside={
+          canEditRestaurant ? <span className="faint">{t('restaurantCoverHint')}</span> : undefined
+        }
+      >
+        {t('restaurantDetailCover')}
+      </SectionTitle>
+      {/* Since branches answer for themselves, this is the business's default
+          rather than the answer — said once, here, so the section below is not
+          read as "the picture every branch shows". */}
+      <p className="faint section-note">{t('restaurantDefaultNote')}</p>
+      <Card>
+        <div className="cover">
+          {restaurant.coverUrl === null ? (
+            <p className="faint cover__none">{t('restaurantCoverNone')}</p>
+          ) : (
+            <img
+              className="cover__image"
+              src={restaurant.coverUrl}
+              alt={t('restaurantCoverAlt')}
+            />
+          )}
+
+          {canEditRestaurant && (
+            <div className="cover__actions">
+              <PhotoField
+                id={`cover-${restaurant.id}`}
+                // The picture is drawn beside this, at the size the section
+                // shows it — passing it here too would render it twice.
+                url=""
+                upload={coverUpload}
+                disabled={savingCover}
+              />
+              {savingCover && <span className="faint">{t('restaurantCoverSaving')}</span>}
+              {/* Only when there is one to take down. Nothing else here can
+                  send `null`, which is the API's way of clearing the column. */}
+              {restaurant.coverUrl !== null && !savingCover && (
+                <Button
+                  variant="secondary"
+                  icon="trash"
+                  disabled={coverUpload.uploading}
+                  onClick={() => void applyCover(null)}
+                >
+                  {t('restaurantCoverRemove')}
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Its own section rather than a row in the facts above: these are four
+          switches with a rule between them, and a `<dl>` of labelled values is
+          the wrong shape for something you operate. */}
+      {canEditRestaurant && (
+        <>
+          <SectionTitle aside={<span className="faint">{t('restaurantServicesHint')}</span>}>
+            {t('restaurantDetailServices')}
+          </SectionTitle>
+          <p className="faint section-note">{t('restaurantDefaultNote')}</p>
+          <Card>
+            <ServiceRows
+              t={t}
+              services={restaurant.services}
+              reservationsEnabled={restaurant.reservationsEnabled}
+              saving={savingService}
+              onToggle={(service, on) => void flipService(service, on)}
+            />
+          </Card>
+        </>
+      )}
+
       <SectionTitle
         aside={canReadStaff ? <span className="faint">{t('branchTeamHint')}</span> : undefined}
       >
@@ -1011,6 +1483,36 @@ function RestaurantDetail({
                         acting,
                       }
                     : undefined
+                }
+                settings={
+                  canEditBranch ? (
+                    <BranchOffering
+                      t={t}
+                      branch={branch}
+                      saving={busyId === branch.id}
+                      onCover={(coverUrl) =>
+                        void applyToBranch(
+                          branch.id,
+                          () => api.setBranchCover(branch.id, coverUrl),
+                          'errorUpdateCover',
+                        )
+                      }
+                      onServices={(services) =>
+                        void applyToBranch(
+                          branch.id,
+                          () => api.setBranchServices(branch.id, services),
+                          'errorUpdateServices',
+                        )
+                      }
+                      onBookings={(reservationsEnabled) =>
+                        void applyToBranch(
+                          branch.id,
+                          () => api.setBranchBookings(branch.id, reservationsEnabled),
+                          'errorUpdateBranch',
+                        )
+                      }
+                    />
+                  ) : undefined
                 }
               />
             ))}

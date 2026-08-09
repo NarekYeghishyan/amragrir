@@ -92,14 +92,20 @@ describe('dishFormValid', () => {
     ['a price that is not a number', { priceAmd: '2500 dram' }],
     ['a price with a decimal point — dram has no minor unit', { priceAmd: '2500.5' }],
     ['a negative price', { priceAmd: '-100' }],
-    ['a prep time of zero, which is not an estimate', { prepMin: '0' }],
     ['a prep time that is not a number', { prepMin: 'quick' }],
+    ['a negative prep time', { prepMin: '-5' }],
   ])('refuses %s', (_case, over) => {
     expect(dishFormValid(typed(over))).toBe(false);
   });
 
   it('accepts an empty prep time, which is a dish that does not say', () => {
     expect(dishFormValid(typed({ prepMin: '' }))).toBe(true);
+  });
+
+  it('accepts a prep time of zero, which is a dish that needs no cooking', () => {
+    // A bottle of water is handed over, not made. Different from empty: empty
+    // lets the branch average stand in and promises a wait that is not there.
+    expect(dishFormValid(typed({ prepMin: '0' }))).toBe(true);
   });
 
   it('leaves the ceilings to the API, which answers in a sentence', () => {
@@ -145,6 +151,12 @@ describe('dishPatch', () => {
     // estimate can turn out to be wrong, and a panel that could set one but
     // never unset it would make every guess permanent.
     expect(dishPatch(DISH, typed({ prepMin: '' }))).toEqual({ prepMin: null });
+  });
+
+  it('sends a prep time of zero rather than mistaking it for an empty box', () => {
+    // The falsy trap: `0` is a claim the kitchen makes, `null` is it declining
+    // to make one, and the two schedule an order differently.
+    expect(dishPatch(DISH, typed({ prepMin: '0' }))).toEqual({ prepMin: 0 });
   });
 
   it('does not send a prep time that was already absent', () => {

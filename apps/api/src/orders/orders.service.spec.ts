@@ -10,8 +10,10 @@ import {
   OrderActorType,
   OrderEventType,
   OrderStatus,
+  PICKUP_CODE_PATTERN,
   PaymentMethod,
   PaymentStatus,
+  PickupOption,
   SERVICE_FEE_AMD,
   ServiceMode,
 } from '@amragrir/shared';
@@ -26,6 +28,15 @@ const BRANCH_ID = '11111111-1111-4111-8111-111111111111';
 const BURGER = '22222222-2222-4222-8222-222222222222';
 const FRIES = '33333333-3333-4333-8333-333333333333';
 
+/**
+ * `services` is on the restaurant here because it is on every real row — the
+ * column is a NOT NULL array, empty at worst — and because the pickup sub-mode
+ * is checked against it. `['pickup', 'dinein']` is a **counter with tables**:
+ * no bookings but a room that seats whoever turns up, so both endings are on
+ * offer. The tests about a booking restaurant pass `reserve` in explicitly, and
+ * `dinein` is what says the tables exist — a bare `['pickup']` is a hatch with
+ * nowhere to sit and offers take-away alone.
+ */
 function branch(over: Record<string, unknown> = {}) {
   return {
     id: BRANCH_ID,
@@ -33,7 +44,7 @@ function branch(over: Record<string, unknown> = {}) {
     address: 'Northern Ave 5',
     isOpen: true,
     avgPrepMin: 12,
-    restaurant: { name: 'Sunny Table', coverUrl: null },
+    restaurant: { name: 'Sunny Table', coverUrl: null, services: ['pickup', 'dinein'] },
     ...over,
   };
 }
@@ -54,6 +65,8 @@ function orderRow(over: Record<string, unknown> = {}) {
   return {
     id: 'order-1',
     code: 'AMR-12344821',
+    // Nothing of `code` in it, which is the column's whole purpose.
+    pickupCode: '730914',
     status: OrderStatus.Created,
     serviceMode: ServiceMode.Pickup,
     subtotalAmd: 5800,
@@ -185,6 +198,156 @@ function dto(over: Partial<CreateOrderDto> = {}): CreateOrderDto {
     ...over,
   });
 }
+
+describe('the pickup sub-mode', () => {
+  /**
+   * A booking restaurant: it seats people through the calendar, so eating in
+   * there is a table rather than an ending chosen on a pre-order
+   * (BUSINESS_LOGIC.md §2). `reserve` excludes `dinein` — they are the two ways
+   * of seating somebody and an address does one of them.
+   *
+   * The default `branch()` above is the other kind — `['pickup', 'dinein']`,
+   * tables but no bookings — which is where both endings are real.
+   */
+  const bookingBranch = branch({
+    restaurant: { name: 'Dolmama', coverUrl: null, services: ['pickup', 'reserve'] },
+  });
+
+  it('defaults to take-away when the client says nothing', async () => {
+    // Which is what makes this field addable at all: a client that has never
+    // heard of it still places the order it always placed, and the column stays
+    // non-null for every pickup row.
+    const { service, orderCreate } = build();
+    await service.create('user-1', dto(), Language.En);
+
+    expect(orderCreate.mock.calls[0][0].data.pickupOption).toBe(PickupOption.TakeAway);
+  });
+
+  it('stores the ending the guest chose, and puts it on the created entry', async () => {
+    const { service, orderCreate } = build();
+    await service.create('user-1', dto({ pickupOption: PickupOption.EatIn }), Language.En);
+
+    const data = orderCreate.mock.calls[0][0].data;
+    expect(data.pickupOption).toBe(PickupOption.EatIn);
+    expect(data.events.create.detail.pickupOption).toBe(PickupOption.EatIn);
+  });
+
+  it('refuses eating in at a restaurant that seats people by booking', async () => {
+    // Checked against the restaurant rather than trusted from the basket: a
+    // basket outlives the page it was built on, and a branch can start taking
+    // bookings between the choice and the payment.
+    const { service } = build({ branch: bookingBranch });
+
+    await expect(
+      service.create('user-1', dto({ pickupOption: PickupOption.EatIn }), Language.En),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('refuses it on the quote too, not only on the order', async () => {
+    // Otherwise the refusal lands at the payment, on a basket the guest has
+    // been looking at for ten minutes.
+    const { service } = build({ branch: bookingBranch });
+
+    await expect(
+      service.quote(dto({ pickupOption: PickupOption.EatIn }), Language.En, 'user-1'),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('refuses a dine-in order that also chose one', async () => {
+    // A dine-in order is food brought to a table it is already sitting at.
+    // The database says the same with a CHECK constraint; this says it in a
+    // sentence, before the insert turns it into a 500.
+    const { service } = build();
+
+    await expect(
+      service.quote(
+        dto({ serviceMode: ServiceMode.DineIn, pickupOption: PickupOption.TakeAway }),
+        Language.En,
+        'user-1',
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('tells the client which endings to draw, and leaves dine-in with none', async () => {
+    const { service } = build();
+
+    const pickup = await service.quote(dto(), Language.En, 'user-1');
+    expect(pickup.pickupOptions).toEqual([PickupOption.TakeAway, PickupOption.EatIn]);
+    expect(pickup.pickupOption).toBe(PickupOption.TakeAway);
+    expect(pickup.eatInRequiresBooking).toBe(false);
+
+    const dineIn = await service.quote(dto({ serviceMode: ServiceMode.DineIn }), Language.En, 'user-1');
+    expect(dineIn.pickupOption).toBeNull();
+  });
+
+  it('offers take-away alone once bookings are on, and says why', async () => {
+    // One button is not a question, so the pair would vanish — and the guest
+    // would be left to discover the rule by not finding it. The flag is what
+    // keeps "eat at the restaurant" on the screen, dead, pointing at the
+    // calendar.
+    const { service } = build({ branch: bookingBranch });
+    const quote = await service.quote(dto(), Language.En, 'user-1');
+
+    expect(quote.pickupOptions).toEqual([PickupOption.TakeAway]);
+    expect(quote.eatInRequiresBooking).toBe(true);
+  });
+
+  it('says a table can be booked only where `reserve` is declared and bookings are on', async () => {
+    // What the clients draw the booking mode from. `eatInRequiresBooking` above
+    // cannot answer it: that one is the *declaration*, so it stays true through
+    // a pause — and a client trusting it would offer a mode whose only
+    // destination is "this restaurant does not take bookings".
+    const taking = branch({
+      restaurant: {
+        name: 'Dolmama',
+        coverUrl: null,
+        services: ['pickup', 'reserve'],
+        reservationsEnabled: true,
+      },
+    });
+    const paused = branch({
+      restaurant: {
+        name: 'Dolmama',
+        coverUrl: null,
+        services: ['pickup', 'reserve'],
+        reservationsEnabled: false,
+      },
+    });
+    const walkIn = branch({
+      restaurant: {
+        name: 'Sunny Table',
+        coverUrl: null,
+        services: ['pickup', 'dinein'],
+        reservationsEnabled: true,
+      },
+    });
+
+    const open = await build({ branch: taking }).service.quote(dto(), Language.En, 'user-1');
+    expect(open.reservationsEnabled).toBe(true);
+
+    // The pair that made this field necessary: still a booking restaurant, not
+    // taking bookings today.
+    const off = await build({ branch: paused }).service.quote(dto(), Language.En, 'user-1');
+    expect(off.reservationsEnabled).toBe(false);
+    expect(off.eatInRequiresBooking).toBe(true);
+
+    // The switch is on, but a room that seats walk-ins has nothing to book.
+    const seats = await build({ branch: walkIn }).service.quote(dto(), Language.En, 'user-1');
+    expect(seats.reservationsEnabled).toBe(false);
+  });
+
+  it('still takes a take-away order from a restaurant that has declared nothing', async () => {
+    // Every restaurant is created with an empty `services`, and pickup is what
+    // the platform does. Refusing here would break every new restaurant for a
+    // rule that is about eating *in*.
+    const { service, orderCreate } = build({
+      branch: branch({ restaurant: { name: 'New Place', coverUrl: null, services: [] } }),
+    });
+    await service.create('user-1', dto(), Language.En);
+
+    expect(orderCreate.mock.calls[0][0].data.pickupOption).toBe(PickupOption.TakeAway);
+  });
+});
 
 describe('quote', () => {
   it('prices from the database, ignoring anything the client thinks a dish costs', () => {
@@ -504,11 +667,26 @@ describe('create', () => {
     );
   });
 
-  it('derives the pickup code from the order code', async () => {
-    const { service } = build({ order: orderRow({ code: 'AMR-99994821' }) });
+  it('gives the customer the collection code the order carries', async () => {
+    // Read straight off the column. It used to be sliced off the end of `code`,
+    // which meant the receipt gave it away — see `order-code.ts`.
+    const { service } = build({
+      order: orderRow({ code: 'AMR-99994821', pickupCode: '730914' }),
+    });
     const order = await service.create('user-1', dto(), Language.En);
 
-    expect(order.pickupCode).toBe('4821');
+    expect(order.pickupCode).toBe('730914');
+  });
+
+  it('draws a collection code that owes nothing to the order code', async () => {
+    // Both are generated for the INSERT; the row the test hands back is fixed,
+    // so what is asserted is the write.
+    const { service, prisma } = build();
+    await service.create('user-1', dto(), Language.En);
+
+    const data = (prisma.order.create as jest.Mock).mock.calls[0][0].data;
+    expect(data.pickupCode).toMatch(PICKUP_CODE_PATTERN);
+    expect(data.code).not.toContain(data.pickupCode);
   });
 });
 
