@@ -634,6 +634,113 @@ export interface StaffBranch {
   };
 }
 
+// ── how a branch takes bookings ─────────────────────────────────────────────
+
+export interface StaffTable {
+  id: string;
+  tableNo: string;
+  seats: number;
+  zone: string | null;
+  isActive: boolean;
+  /** Live bookings still to come on this table. What makes switching one off a
+   *  decision rather than a click. */
+  upcomingBookings: number;
+}
+
+/** A day this branch does not run on its usual hours. */
+export interface StaffClosure {
+  id: string;
+  date: string;
+  kind: 'closed' | 'custom_hours';
+  open: string | null;
+  close: string | null;
+  reason: string | null;
+}
+
+export interface DayHours {
+  open?: string;
+  close?: string;
+  closed?: boolean;
+}
+export type WeeklyHours = Record<string, DayHours>;
+
+/** The eight numbers behind the offer, as a level stores them — `null` is
+ *  inheritance, never zero. */
+export interface BookingPolicyFields {
+  seatingMinutes: number | null;
+  slotMinutes: number | null;
+  maxGuests: number | null;
+  maxLeadDays: number | null;
+  minLeadMinutes: number | null;
+  depositPerGuestAmd: number | null;
+  freeCancelHours: number | null;
+  autoConfirm: boolean | null;
+}
+
+export type ResolvedPolicy = { [K in keyof BookingPolicyFields]: NonNullable<BookingPolicyFields[K]> };
+
+/** Which level an answer came from — what the form greys out. */
+export type PolicySource = 'branch' | 'restaurant' | 'platform';
+
+/**
+ * A level's settings, in the three states a form needs at once.
+ *
+ * Without `sources` a field can only show the resolved number, and a manager
+ * cannot tell a deliberate 90 from an inherited one — so they set it again to
+ * be sure, the branch acquires an override nobody wanted, and it stops
+ * following the chain forever.
+ */
+export interface BookingPolicyView {
+  own: BookingPolicyFields;
+  inherited: ResolvedPolicy;
+  effective: ResolvedPolicy;
+  sources: Record<keyof BookingPolicyFields, PolicySource>;
+  limits: Record<string, { min: number; max: number }>;
+}
+
+export interface BookingPreview {
+  date: string;
+  guests: number;
+  reservationsEnabled: boolean;
+  opens: string | null;
+  closes: string | null;
+  closureReason: string | null;
+  slotCount: number;
+  firstSlot: string | null;
+  lastSlot: string | null;
+  depositAmd: number;
+  maxSeats: number;
+  maxGuests: number;
+}
+
+/** One booking a proposed change would leave the branch unable to honour. */
+export interface BookingConflict {
+  reservationId: string;
+  reservedFor: string;
+  localDate: string;
+  localTime: string;
+  guests: number;
+  tableNo: string | null;
+  customerName: string | null;
+  reason: 'table_gone' | 'table_too_small' | 'day_closed' | 'outside_hours';
+}
+
+/**
+ * The conflicts inside a refused save, or null when the failure was anything
+ * else.
+ *
+ * The API answers `409` with them under `error.details`; this is the one place
+ * that shape is read, so a screen asks "were there conflicts" rather than
+ * digging through an error body.
+ */
+export function conflictsIn(error: unknown): BookingConflict[] | null {
+  if (!(error instanceof ApiError) || error.status !== 409) {
+    return null;
+  }
+  const details = error.details as { conflicts?: unknown } | undefined;
+  return Array.isArray(details?.conflicts) ? (details.conflicts as BookingConflict[]) : null;
+}
+
 /** What the restaurants list is narrowed to. Same shape of idea as
  *  `OrderFilters`, minus the stage — a restaurant has no stages. */
 export interface RestaurantFilters {
@@ -1285,6 +1392,86 @@ export const api = {
     request<StaffBranch>(`/restaurant/branches/${id}/bookings`, {
       method: 'PATCH',
       body: { reservationsEnabled },
+    }),
+
+  // ── how a branch takes bookings ───────────────────────────────────────────
+  //
+  // Everything that narrows what a branch offers takes `force`. Sent as `true`
+  // only after the panel has shown the bookings the change would strand and
+  // somebody has said go ahead; it saves the setting and cancels nothing.
+
+  tables: (branchId: string) =>
+    request<{ items: StaffTable[] }>(`/restaurant/branches/${branchId}/tables`),
+
+  createTable: (branchId: string, table: { tableNo: string; seats: number; zone?: string }) =>
+    request<StaffTable>(`/restaurant/branches/${branchId}/tables`, {
+      method: 'POST',
+      body: table,
+    }),
+
+  updateTable: (
+    id: string,
+    patch: { tableNo?: string; seats?: number; zone?: string | null; isActive?: boolean },
+    force = false,
+  ) =>
+    request<StaffTable>(`/restaurant/tables/${id}`, {
+      method: 'PATCH',
+      body: patch,
+      query: force ? { force: 'true' } : {},
+    }),
+
+  bookingHours: (branchId: string, bookingHours: WeeklyHours | null, force = false) =>
+    request<{ bookingHours: WeeklyHours | null }>(
+      `/restaurant/branches/${branchId}/booking-hours`,
+      { method: 'PATCH', body: { bookingHours }, query: force ? { force: 'true' } : {} },
+    ),
+
+  closures: (branchId: string) =>
+    request<{ items: StaffClosure[] }>(`/restaurant/branches/${branchId}/closures`),
+
+  createClosure: (
+    branchId: string,
+    closure: {
+      date: string;
+      kind: 'closed' | 'custom_hours';
+      open?: string;
+      close?: string;
+      reason?: string;
+    },
+    force = false,
+  ) =>
+    request<StaffClosure>(`/restaurant/branches/${branchId}/closures`, {
+      method: 'POST',
+      body: closure,
+      query: force ? { force: 'true' } : {},
+    }),
+
+  deleteClosure: (id: string) =>
+    request<{ id: string }>(`/restaurant/closures/${id}`, { method: 'DELETE' }),
+
+  branchPolicy: (branchId: string) =>
+    request<BookingPolicyView>(`/restaurant/branches/${branchId}/booking-policy`),
+
+  /** An explicit `null` in a field hands that question back to the restaurant —
+   *  the only way an override is ever undone. */
+  setBranchPolicy: (branchId: string, patch: Partial<BookingPolicyFields>) =>
+    request<BookingPolicyView>(`/restaurant/branches/${branchId}/booking-policy`, {
+      method: 'PATCH',
+      body: patch,
+    }),
+
+  restaurantPolicy: (restaurantId: string) =>
+    request<BookingPolicyView>(`/restaurant/restaurants/${restaurantId}/booking-policy`),
+
+  setRestaurantPolicy: (restaurantId: string, patch: Partial<BookingPolicyFields>) =>
+    request<BookingPolicyView>(`/restaurant/restaurants/${restaurantId}/booking-policy`, {
+      method: 'PATCH',
+      body: patch,
+    }),
+
+  bookingPreview: (branchId: string, date: string, guests: number) =>
+    request<BookingPreview>(`/restaurant/branches/${branchId}/booking-preview`, {
+      query: { date, guests: String(guests) },
     }),
 
   menu: (branchId: string) =>

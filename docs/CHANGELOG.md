@@ -7,6 +7,47 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — A restaurant can set all of it from the panel
+
+Stage three, and the one that makes table booking work in production at all. A
+restaurant could not previously enter its own tables — they existed only in the
+seed — so `GET /availability` answered with nothing and the calendar was empty
+for every real branch. Now the branch card carries five blocks: the tables, the
+booking hours, the dated exceptions, the policy, and a preview of what a guest
+would be shown.
+
+**It loads when opened, not when rendered.** A chain's card carries every branch
+under it, and three requests apiece across seventy-eight branches is ten seconds
+spent fetching settings nobody asked to see. It also appears only where the
+branch actually takes bookings — tables and seating lengths for a counter in a
+mall would be a form about nothing.
+
+**Every policy row says which level answered it** — decided here, from the
+chain, from the platform. That is the difference between a form somebody can
+read and one they cannot: without it a manager cannot tell a deliberate 90 from
+an inherited one, so they set it again to be sure, the branch acquires an
+override nobody wanted, and it stops following the chain forever. Switching a
+row off sends an explicit `null`; switching it on sends the figure already in
+force, so taking a decision over changes nothing by itself.
+
+**A refused save becomes a list, not a message.** The dialog names each booking
+the change would strand — date, time, party, table, whom to ring — and offers to
+save anyway. It states outright that nothing will be cancelled, which is longer
+than "these bookings will be cancelled" and has the advantage of being true.
+
+The week of hours is stored sparse and edited as seven rows, and the two
+conversions are held to being inverses of each other: a form that reads a week
+differently from the way it writes one loses a Sunday every time somebody saves.
+Writing always names all seven days, because a day left unsaid falls through to
+the kitchen's hours and quietly reopens. A closing time at or before the opening
+one is not an error but a night that runs past midnight, and the row says so
+rather than inviting somebody to "fix" it.
+
+83 dictionary entries in all three languages, including sentences for the eight
+audit actions stage two started recording — the feed had been falling back to
+printing the raw verb, which it is designed to do but is not where this should
+have been left.
+
 ### 2026-08-10 — The back office can finally write those numbers
 
 Stage two: fourteen endpoints under `/restaurant` for the room's tables, the

@@ -27,6 +27,7 @@ import {
   type StaffRestaurantDetail,
 } from '../api';
 import { ActAsButton, type Acting } from '../acting';
+import { BookingSettings } from '../booking-settings';
 import { useLanguage, useT } from '../i18n';
 import type { Translate } from '../language';
 import { routePath, tabPath, type RestaurantTarget } from '../navigation';
@@ -81,6 +82,7 @@ export function Restaurants({
   canCreate,
   canEditRestaurant,
   canEditBranch,
+  canSetBookingHours,
   canReadStaff,
   canOpenOrders,
   open,
@@ -98,6 +100,16 @@ export function Restaurants({
    * defaults.
    */
   canEditBranch: boolean;
+  /**
+   * Whether the shift's half of the booking settings is editable — when tables
+   * are held, and which days they are not.
+   *
+   * `branch:hours`, which a `branch_staff` account holds and `branch:write`
+   * does not imply anything about. Closing tomorrow because the freezer died is
+   * a thing the person on the floor has to be able to do at 6pm without ringing
+   * a manager; moving the furniture is not.
+   */
+  canSetBookingHours: boolean;
   /**
    * Whether an opened restaurant can be *changed* here — its services offered
    * as switches rather than a line of text, and its cover photograph
@@ -241,6 +253,7 @@ export function Restaurants({
         canCreate={canCreate}
         canEditRestaurant={canEditRestaurant}
         canEditBranch={canEditBranch}
+        canSetBookingHours={canSetBookingHours}
         canReadStaff={canReadStaff}
         canOpenOrders={canOpenOrders}
         acting={acting}
@@ -644,6 +657,8 @@ function BranchOffering({
   t,
   branch,
   saving,
+  canWrite,
+  canSetHours,
   onCover,
   onServices,
   onBookings,
@@ -651,6 +666,8 @@ function BranchOffering({
   t: Translate;
   branch: StaffBranch;
   saving: boolean;
+  canWrite: boolean;
+  canSetHours: boolean;
   onCover: (coverUrl: string | null) => void;
   onServices: (services: string[] | null) => void;
   onBookings: (reservationsEnabled: boolean | null) => void;
@@ -752,6 +769,19 @@ function BranchOffering({
           />
         </div>
       </div>
+
+      {/* Only where this address actually takes bookings. Tables and seating
+          lengths for a counter in a mall would be a form about nothing, and the
+          switch just above is where somebody turns that on. */}
+      {branch.offering.reservationsEnabled && (
+        <BookingSettings
+          t={t}
+          branchId={branch.id}
+          branchName={branch.name ?? branch.city}
+          canWrite={canWrite}
+          canSetHours={canSetHours}
+        />
+      )}
     </div>
   );
 }
@@ -975,6 +1005,7 @@ function RestaurantDetail({
   canCreate,
   canEditRestaurant,
   canEditBranch,
+  canSetBookingHours,
   canReadStaff,
   canOpenOrders,
   acting,
@@ -995,6 +1026,7 @@ function RestaurantDetail({
   canEditRestaurant: boolean;
   /** Whether each branch answers for itself — see `Restaurants`. */
   canEditBranch: boolean;
+  canSetBookingHours: boolean;
   canReadStaff: boolean;
   canOpenOrders: boolean;
   /** Signing in as one of the people on these teams, or null for an account
@@ -1490,6 +1522,8 @@ function RestaurantDetail({
                       t={t}
                       branch={branch}
                       saving={busyId === branch.id}
+                      canWrite={canEditBranch}
+                      canSetHours={canSetBookingHours}
                       onCover={(coverUrl) =>
                         void applyToBranch(
                           branch.id,

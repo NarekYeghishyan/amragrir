@@ -434,6 +434,10 @@ function Shell({
               canCreate={can(Permission.BranchCreate)}
               canEditRestaurant={can(Permission.RestaurantWrite)}
               canEditBranch={can(Permission.BranchWrite)}
+              // Separate from the one above, because they are separate jobs:
+              // closing tomorrow because the freezer died happens at 6pm and is
+              // a shift's to do, while the room's furniture is a manager's.
+              canSetBookingHours={can(Permission.BranchHours)}
               canReadStaff={can(Permission.StaffRead)}
               canOpenOrders={can(Permission.OrdersRead)}
               open={route?.tab === 'Restaurants' ? route.open : null}

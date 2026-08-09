@@ -6,6 +6,7 @@ import { LanguageProvider } from './i18n';
 import { createTranslator } from './language';
 import { ActAsButton } from './acting';
 import { ActivityDialog } from './activity';
+import { BookingSettings } from './booking-settings';
 import { CustomerOrdersDialog } from './customer-orders';
 import { dishForm } from './dish';
 import { DishFields, EditDish } from './dish-form';
@@ -151,6 +152,7 @@ describe('every screen renders', () => {
           canCreate
           canEditRestaurant
           canEditBranch
+          canSetBookingHours
           canReadStaff
           canOpenOrders
           open={null}
@@ -168,6 +170,7 @@ describe('every screen renders', () => {
         canCreate
         canEditRestaurant
         canEditBranch
+        canSetBookingHours
         canReadStaff
         canOpenOrders
         open={{ restaurantId: 'r1', branchId: 'b1', assignmentId: null }}
@@ -506,6 +509,7 @@ describe('every screen renders in every language', () => {
         canCreate
         canEditRestaurant
         canEditBranch
+        canSetBookingHours
         canReadStaff
         canOpenOrders
         open={null}
@@ -563,5 +567,41 @@ describe('every screen renders in every language', () => {
     // it has to change with the language rather than being baked in.
     expect(render(<Users />, Language.Hy)).toContain('Հաճախորդներ');
     expect(render(<Users />, Language.Ru)).toContain('Клиенты');
+  });
+});
+
+describe('the booking-settings section', () => {
+  // The section is closed on first paint and loads nothing until somebody opens
+  // it — a chain's card carries every branch under it, and four requests apiece
+  // across seventy-eight branches is a page that spends ten seconds fetching
+  // settings nobody asked to see. So this checks the shut state, which is the
+  // one every visitor gets.
+  const section = (language: Language = Language.En) =>
+    render(
+      <BookingSettings
+        t={createTranslator(language)}
+        branchId="b1"
+        branchName="Northern Ave"
+        canWrite
+        canSetHours
+      />,
+      language,
+    );
+
+  it('renders shut, with its own heading and a way in', () => {
+    const markup = section();
+    expect(markup).toContain('Booking settings');
+    expect(markup).toContain('Set up');
+    // Nothing from inside it: the blocks are behind the disclosure.
+    expect(markup).not.toContain('Tables');
+  });
+
+  it('says what is behind it rather than only naming itself', () => {
+    expect(section()).toContain('the numbers behind the offer');
+  });
+
+  it('speaks the panel’s language', () => {
+    expect(section(Language.Ru)).toContain('Настройки бронирования');
+    expect(section(Language.Hy)).toContain('Ամրագրման կարգավորումներ');
   });
 });

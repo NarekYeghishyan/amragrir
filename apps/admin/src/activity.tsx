@@ -467,6 +467,40 @@ export function headline(t: Translate, entry: ActivityEntry, language: Language)
     case AuditAction.ReservationStatus:
       return t('activity_reservation_status', { status: reservationStatus(t, after.status) });
 
+    case AuditAction.ReservationTable:
+      // Numbers, not ids — which is why the API records them that way. "Moved
+      // from 4 to 11" is readable a year later; a pair of UUIDs is not.
+      return t('activity_reservation_table', {
+        from: text(before.tableNo) || '—',
+        to: text(after.tableNo) || '—',
+      });
+
+    case AuditAction.TableCreate:
+      return t('activity_table_create', { table: text(after.tableNo) });
+
+    case AuditAction.TableUpdate:
+      return t('activity_table_update', { table: text(before.tableNo) });
+
+    case AuditAction.TableDelete:
+      return t('activity_table_delete', { table: text(before.tableNo) });
+
+    case AuditAction.BranchBookingHours:
+      // Null in `after` is the branch handing the question back to its opening
+      // hours — a different event from writing hours that happen to match them,
+      // and the one somebody would come looking for.
+      return after.bookingHours === null
+        ? t('activity_booking_hours_follow')
+        : t('activity_booking_hours');
+
+    case AuditAction.BranchClosureCreate:
+      return t('activity_closure_create', { date: text(after.date) });
+
+    case AuditAction.BranchClosureDelete:
+      return t('activity_closure_delete', { date: text(before.date) });
+
+    case AuditAction.BookingPolicy:
+      return t('activity_booking_policy');
+
     default:
       // An action the API records and this build has no sentence for — a panel
       // deployed behind the API. Showing the raw verb is ugly and honest; the

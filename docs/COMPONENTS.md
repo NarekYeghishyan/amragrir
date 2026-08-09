@@ -1096,6 +1096,65 @@ Exported from the same module and tested on their own (`menu-history-ui.spec.ts`
 
 ---
 
+### BookingSettings (`apps/admin/src/booking-settings.tsx`)
+The five blocks that decide how a branch takes bookings — its tables, the hours
+it holds them, the days it does not, the numbers behind the offer, and what a
+guest would actually be shown. Rendered inside the branch disclosure on the
+Restaurants screen, under the switches that already live there.
+
+- **Only where the branch takes bookings at all.** Tables and seating lengths
+  for a counter in a mall would be a form about nothing, and the switch
+  immediately above it is where somebody turns that on.
+- **Loaded when opened, not when rendered.** A chain's card carries every branch
+  under it; three requests apiece across seventy-eight branches is ten seconds
+  spent fetching settings nobody asked to see.
+- **Two permissions inside one section.** The tables and the policy are
+  `branch:write`; the hours and the closed days are `branch:hours`, which a
+  shift holds — closing tomorrow because the freezer died happens at 6pm and
+  cannot wait for a manager. A person with one and not the other sees both and
+  can work only their half.
+- **A policy row shows which level answered it.** Without that a manager cannot
+  tell a deliberate 90 from an inherited one, sets it again to be sure, and the
+  branch acquires an override nobody wanted and stops following the chain
+  forever. Turning a row's switch off sends an explicit `null`; turning it on
+  sends the figure already in force, so taking the decision over changes nothing
+  by itself.
+- **Numbers save on blur, not on keystroke.** A PATCH per digit would write
+  `seating: 1` on the way to 120.
+- **The preview re-runs after every save**, which is what makes it a preview of
+  the settings rather than of the settings as they were. An empty calendar is
+  the mistake it exists to catch: hours that close before they open, a seating
+  longer than the evening.
+
+### ConflictDialog (inside the same module)
+What a refused save turns into: the bookings the change would strand — date,
+time, party, table, who to ring — and the offer to save it anyway.
+- **It says outright that nothing is cancelled.** The shorter wording ("these
+  bookings will be cancelled") would be false: the rows survive untouched and
+  somebody still has to ring these people.
+- The retry closes over the exact request that was refused rather than
+  rebuilding it, so "save anyway" cannot send something subtly different from
+  what was shown.
+
+### booking-model.ts (`apps/admin/src/booking-model.ts`)
+The conversions behind the form, kept out of the component and tested on their
+own (`booking-model.spec.ts`).
+- **A week is stored sparse and edited as seven rows**, and the two directions
+  are held to being inverses: a form that reads a week differently from the way
+  it writes one loses a Sunday every time somebody saves.
+- **Writing always names all seven days.** A day left unsaid falls through to
+  the kitchen's hours and quietly reopens.
+- **`null` hours come back as the kitchen's own**, so switching "decide here" on
+  starts from what is already true. Starting blank would make that switch a
+  destructive act.
+- **A closing time at or before the opening one is not an error** — it is a
+  night that runs past midnight, and the row says so rather than inviting
+  somebody to "fix" it.
+- **An empty number box is neither zero nor inheritance.** It is somebody
+  mid-edit, and saving on it would wipe a setting or set the deposit to nothing.
+
+---
+
 ## Providers / hooks (shared)
 
 - `ThemeProvider` + `useTheme()` — light/dark theme tokens, 3 expressive parameters (accent, surface temp, depth).
