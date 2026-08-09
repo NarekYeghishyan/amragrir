@@ -258,6 +258,13 @@ and pre-rendered, and it has no client data layer at all:
   `main` directly.
 - Conventional commits. CI: lint + typecheck + tests.
 - Commit messages explain **why**, not what — the diff already shows what.
+- **Line endings are LF in the working tree, not only in the repository** —
+  `.gitattributes` pins `* text=auto eol=lf`. `packages/ui/src/tokens.spec.ts`
+  compares the generated `tokens.css` files to `renderTokensCss()` byte for
+  byte, so a Windows checkout with `core.autocrlf=true` and no attributes file
+  turned that guard into a failure about invisible characters after every
+  branch switch. Do not remove it, and do not "fix" a failing token test by
+  normalising line endings inside the assertion — the assertion is the point.
 
 ---
 

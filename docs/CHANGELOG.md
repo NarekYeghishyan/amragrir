@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+### 2026-08-09 — The working tree is LF, so the token guard tests colours again
+
+`packages/ui/src/tokens.spec.ts` compares the generated `tokens.css` in
+`apps/web` and `apps/admin` to `renderTokensCss()` **byte for byte** — that
+comparison is what stops the web accent drifting from the phone's. The
+generator emits `\n`; the repository had `core.autocrlf=true` and no
+`.gitattributes`, so a Windows checkout wrote those files back as CRLF and the
+guard failed on line endings after any branch switch, and on every fresh
+Windows clone.
+
+`.gitattributes` now pins `* text=auto eol=lf`, and the working tree was
+renormalised. The check is back to failing only when a colour actually
+diverges. Recorded in DEVELOPMENT_GUIDE.md §3 "Git / process" so the next
+person to meet a red token test does not fix it by loosening the assertion.
+
 ### 2026-08-09 — A press is answered on the frame it happens
 
 The complaint: pages take a moment to load, nothing on screen says so, and it
