@@ -1155,6 +1155,45 @@ own (`booking-model.spec.ts`).
 
 ---
 
+### Bookings (`apps/admin/src/screens/Bookings.tsx`)
+The book for one service. The endpoints behind it were written months ago and
+had nothing calling them: `GET /restaurant/reservations` and its status PATCH
+were tested, permissioned and unreachable, and `reservations:read` opened
+nothing.
+- **A day at a time, with the date in the address** beside the branch, so "look
+  at Saturday at Northern Ave" is a link somebody can send rather than a
+  sentence they re-enter at the other end. Arrows either side of the picker,
+  because a date field alone makes "tomorrow" three clicks.
+- **Two views of the same day.** The list answers "who is coming next" and fits
+  a phone; the room answers "what is free at nine", which is what somebody at
+  the door with four people is asking and which no list answers well.
+- **The room needs one branch.** Across every branch in reach there is no single
+  set of rows to draw, so the grid says which of the two reasons it fell back to
+  a list rather than silently showing one.
+- **Every table gets a row, including the empty ones** — a grid of only the busy
+  tables hides exactly the answer being looked for.
+- **The buttons come from the shared transition table**, so the panel cannot
+  offer a move the API is about to refuse.
+- The customer's phone number is a `tel:` link on every row: a booking nobody
+  can ring is a table nobody can free.
+
+### bookings.ts (`apps/admin/src/bookings.ts`)
+The book's arithmetic, tested on its own (`bookings.spec.ts`).
+- **A sitting after midnight keeps counting** — 01:00 on the night of the 1st is
+  1500 minutes, not 60 — so it lands to the right of the evening it belongs to
+  rather than at the far left of the wrong day.
+- **The span comes from the bookings**, rounded out to whole hours: a day with
+  two bookings at eight should not be drawn as thirteen empty hours with a mark
+  in it. An empty book still gets a shape to be empty in.
+- **Bars are placed as percentages of the span**, so the grid scales with its
+  container instead of with a pixel-per-minute constant that would need a second
+  copy in the stylesheet.
+- **A booking whose table has gone is set aside, not dropped.** It is still a
+  guest arriving, and a grid that silently omitted them would be worse than one
+  with an awkward row underneath.
+
+---
+
 ## Providers / hooks (shared)
 
 - `ThemeProvider` + `useTheme()` — light/dark theme tokens, 3 expressive parameters (accent, surface temp, depth).

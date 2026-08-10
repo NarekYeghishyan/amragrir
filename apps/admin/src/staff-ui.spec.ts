@@ -9,9 +9,11 @@ const permissionsOf = (...roles: StaffRole[]): Permission[] => [
 ];
 
 describe('which tabs an account sees', () => {
-  it('gives a shift the queue and the menu, and nothing about people or money', () => {
+  it('gives a shift the queue, the book and the menu, and nothing about people or money', () => {
+    // The book is a shift's screen: `reservations:read` is what opens it, and
+    // seating people is the job somebody on the floor does all evening.
     const tabs = visibleTabs(permissionsOf(StaffRole.BranchStaff));
-    expect(tabs).toEqual(['Orders', 'Menu', 'Restaurants']);
+    expect(tabs).toEqual(['Orders', 'Bookings', 'Menu', 'Restaurants']);
   });
 
   it('adds People for a restaurant admin', () => {
@@ -24,6 +26,7 @@ describe('which tabs an account sees', () => {
   it('gives a super admin everything', () => {
     expect(visibleTabs(permissionsOf(StaffRole.SuperAdmin))).toEqual([
       'Orders',
+      'Bookings',
       'Menu',
       'Restaurants',
       'People',

@@ -7,6 +7,39 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — The book gets a screen, five months late
+
+Stage four. `GET /restaurant/reservations` and `PATCH .../status` were written,
+tested and permissioned months ago, and nothing has ever called them:
+`reservations:read` was granted to every restaurant role and opened nothing at
+all. There is now a **Bookings tab**, between the queue and the menu, which is
+where a shift would look for it.
+
+**A day at a time, with the date in the address** — `/bookings?branch=&date=` —
+so "look at Saturday at Northern Ave" is a link rather than a sentence somebody
+re-types at the other end. Arrows either side of the picker, because a date
+field alone makes "tomorrow" three clicks.
+
+**Two views.** The list answers "who is coming next" and fits a phone. The room
+— tables down the side, time across the top — answers "what is free at nine",
+which is the question somebody at the door with four people is actually asking
+and which a list answers badly. Every table gets a row, including the empty
+ones, since a grid of only the busy tables hides exactly the answer being looked
+for. The room needs one branch chosen, and says which of the two reasons it fell
+back to a list rather than quietly showing one.
+
+A sitting after midnight keeps counting — 01:00 on the night of the 1st is 1500
+minutes, not 60 — so it is drawn to the right of the evening it belongs to
+instead of at the far left of the wrong day. The bars are placed as percentages
+of the span so the grid scales with its container, and the span is taken from
+the bookings themselves rather than from the branch's hours: a day with two
+bookings at eight should not be drawn as thirteen empty hours with a mark in it.
+
+The action buttons come from the shared transition table, so the panel cannot
+draw a move the API is about to refuse. Reseating is a picker on the row. The
+customer's number is a `tel:` link on every one of them, because a booking
+nobody can ring is a table nobody can free.
+
 ### 2026-08-10 — A restaurant can set all of it from the panel
 
 Stage three, and the one that makes table booking work in production at all. A

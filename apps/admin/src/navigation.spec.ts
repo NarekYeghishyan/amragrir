@@ -23,6 +23,7 @@ describe('every screen has an address', () => {
         open: null,
         scope: null,
         menu: null,
+        book: null,
         person: null,
       });
     }
@@ -30,12 +31,13 @@ describe('every screen has an address', () => {
 
   it('is stable through a round trip, with a restaurant open or a queue scoped', () => {
     const routes: Route[] = [
-      { tab: 'Orders', open: null, scope: null, menu: null, person: null },
+      { tab: 'Orders', open: null, scope: null, menu: null, book: null, person: null },
       {
         tab: 'Orders',
         open: null,
         scope: { restaurantId: 'r1', branchId: 'b2', orderCode: null },
         menu: null,
+        book: null,
         person: null,
       },
       {
@@ -43,6 +45,7 @@ describe('every screen has an address', () => {
         open: null,
         scope: { restaurantId: 'r1', branchId: null, orderCode: null },
         menu: null,
+        book: null,
         person: null,
       },
       // The picker's own leftover: widening back out to "all restaurants" while
@@ -52,6 +55,7 @@ describe('every screen has an address', () => {
         open: null,
         scope: { restaurantId: null, branchId: 'b2', orderCode: null },
         menu: null,
+        book: null,
         person: null,
       },
       // One order, which is what a line in somebody's activity links to. Both
@@ -63,6 +67,7 @@ describe('every screen has an address', () => {
         open: null,
         scope: { restaurantId: 'r1', branchId: 'b2', orderCode: 'ORD-7QK3' },
         menu: null,
+        book: null,
         person: null,
       },
       {
@@ -70,18 +75,20 @@ describe('every screen has an address', () => {
         open: null,
         scope: { restaurantId: null, branchId: null, orderCode: 'ORD-7QK3' },
         menu: null,
+        book: null,
         person: null,
       },
-      { tab: 'Restaurants', open: null, scope: null, menu: null, person: null },
+      { tab: 'Restaurants', open: null, scope: null, menu: null, book: null, person: null },
       // A branch's menu, and one dish on it — what a line of an order on the
       // board links to. Both states are real: the dish is where the link lands,
       // the bare branch is what the picker leaves once somebody moves off it.
-      { tab: 'Menu', open: null, scope: null, menu: null, person: null },
+      { tab: 'Menu', open: null, scope: null, menu: null, book: null, person: null },
       {
         tab: 'Menu',
         open: null,
         scope: null,
         menu: { branchId: 'b2', itemId: null },
+        book: null,
         person: null,
       },
       {
@@ -89,18 +96,20 @@ describe('every screen has an address', () => {
         open: null,
         scope: null,
         menu: { branchId: 'b2', itemId: 'dish-1' },
+        book: null,
         person: null,
       },
       // The two lists of people, pointed at one of them and not — what a name
       // in an order's history links to.
-      { tab: 'People', open: null, scope: null, menu: null, person: null },
-      { tab: 'People', open: null, scope: null, menu: null, person: 'staff-1' },
-      { tab: 'Customers', open: null, scope: null, menu: null, person: 'user-1' },
+      { tab: 'People', open: null, scope: null, menu: null, book: null, person: null },
+      { tab: 'People', open: null, scope: null, menu: null, book: null, person: 'staff-1' },
+      { tab: 'Customers', open: null, scope: null, menu: null, book: null, person: 'user-1' },
       {
         tab: 'Restaurants',
         open: { restaurantId: 'r1', branchId: null, assignmentId: null },
         scope: null,
         menu: null,
+        book: null,
         person: null,
       },
       {
@@ -108,6 +117,7 @@ describe('every screen has an address', () => {
         open: { restaurantId: 'r1', branchId: 'b2', assignmentId: null },
         scope: null,
         menu: null,
+        book: null,
         person: null,
       },
       {
@@ -115,6 +125,7 @@ describe('every screen has an address', () => {
         open: { restaurantId: 'r1', branchId: 'b2', assignmentId: 'a3' },
         scope: null,
         menu: null,
+        book: null,
         person: null,
       },
       {
@@ -122,6 +133,7 @@ describe('every screen has an address', () => {
         open: { restaurantId: 'r1', branchId: null, assignmentId: 'a3' },
         scope: null,
         menu: null,
+        book: null,
         person: null,
       },
     ];
@@ -163,6 +175,26 @@ describe('every screen has an address', () => {
     );
     expect(routePath({ tab: 'People', person: 'staff-1' })).toBe('/people?person=staff-1');
     expect(routePath({ tab: 'Customers', person: 'user-1' })).toBe('/customers?person=user-1');
+    // "Look at Saturday at Northern Ave" — a sentence somebody would otherwise
+    // have to re-enter by hand at the other end.
+    expect(routePath({ tab: 'Bookings', book: { branchId: 'b2', date: '2026-09-05' } })).toBe(
+      '/bookings?branch=b2&date=2026-09-05',
+    );
+    expect(routePath({ tab: 'Bookings', book: { branchId: 'b2', date: null } })).toBe(
+      '/bookings?branch=b2',
+    );
+  });
+
+  it('reads the book back out of its own address', () => {
+    const parsed = parseRoute('/bookings', '?branch=b2&date=2026-09-05');
+    expect(parsed?.book).toEqual({ branchId: 'b2', date: '2026-09-05' });
+
+    // Neither half named is the bare screen: every branch in reach, today —
+    // and that has to keep meaning today tomorrow, so it is not written out.
+    expect(parseRoute('/bookings')?.book).toBeNull();
+
+    // A key somebody half-deleted is not a branch whose id is the empty string.
+    expect(parseRoute('/bookings', '?branch=')?.book).toBeNull();
   });
 
   it('ignores a person on a screen that is not a list of people', () => {
@@ -206,6 +238,7 @@ describe('every screen has an address', () => {
       open: null,
       scope: null,
       menu: null,
+      book: null,
       person: null,
     });
   });
@@ -243,6 +276,7 @@ describe('every screen has an address', () => {
       open,
       scope: null,
       menu: null,
+      book: null,
       person: null,
     });
 
@@ -256,6 +290,7 @@ describe('every screen has an address', () => {
       open: null,
       scope,
       menu: null,
+      book: null,
       person: null,
     });
   });
@@ -292,6 +327,7 @@ describe('an address that means nothing', () => {
       open: null,
       scope: null,
       menu: null,
+      book: null,
       person: null,
     });
     expect(parseRoute('/restaurants/r1/')).toEqual({
@@ -299,6 +335,7 @@ describe('an address that means nothing', () => {
       open: { restaurantId: 'r1', branchId: null, assignmentId: null },
       scope: null,
       menu: null,
+      book: null,
       person: null,
     });
   });
@@ -309,6 +346,7 @@ describe('an address that means nothing', () => {
       open: { restaurantId: 'r1', branchId: null, assignmentId: null },
       scope: null,
       menu: null,
+      book: null,
       person: null,
     });
   });
@@ -319,6 +357,7 @@ describe('an address that means nothing', () => {
       open: null,
       scope: null,
       menu: null,
+      book: null,
       person: null,
     });
   });
@@ -331,6 +370,7 @@ describe('an address that means nothing', () => {
       open: null,
       scope: null,
       menu: null,
+      book: null,
       person: null,
     });
   });
@@ -361,6 +401,7 @@ describe('an address this account may not open', () => {
         open: null,
         scope: null,
         menu: null,
+        book: null,
         person: null,
       });
     }

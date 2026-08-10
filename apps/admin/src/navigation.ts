@@ -36,6 +36,16 @@ export const TABS = [
     description: 'ordersDesc',
   },
   {
+    name: 'Bookings',
+    path: '/bookings',
+    needs: Permission.ReservationsRead,
+    group: 'restaurant',
+    icon: 'clock',
+    label: 'navBookings',
+    title: 'bookingsTitle',
+    description: 'bookingsDesc',
+  },
+  {
     name: 'Menu',
     path: '/menu',
     needs: Permission.MenuRead,
@@ -213,6 +223,27 @@ export interface OrderScope {
 }
 
 /**
+ * Which day's book a link is about, and whose.
+ *
+ * `/bookings?branch=:branchId&date=YYYY-MM-DD`. Both are addresses rather than
+ * state, for the reason the order board's pickers are: they answer "whose, and
+ * when", which is exactly what a link to the book is *for* — a message saying
+ * "look at Saturday at Northern Ave" is otherwise a sentence somebody has to
+ * re-enter by hand.
+ *
+ * Both are separately optional. No branch is every branch the account can
+ * reach; no date is today, which is what the screen opens on and what a bare
+ * `/bookings` should keep meaning tomorrow.
+ */
+export interface BookingScope {
+  branchId: string | null;
+  /** A local Yerevan date, `YYYY-MM-DD`, or null for today. Stored as the
+   *  string rather than a `Date` because that is what the API takes and what
+   *  compares correctly without a zone. */
+  date: string | null;
+}
+
+/**
  * Which menu a link is about, and which dish on it.
  *
  * `/menu?branch=:branchId&dish=:menuItemId`. Every line of an order on the
@@ -264,6 +295,10 @@ export interface Route {
    *  ones the account can reach. Only ever set on the Orders tab; ignored when
    *  formatting any other. */
   scope: OrderScope | null;
+  /** Which day's book this URL is showing, and whose, or null for the screen's
+   *  own defaults — every reachable branch, today. Only ever set on the
+   *  Bookings tab; ignored when formatting any other. */
+  book: BookingScope | null;
   /** Whose menu this URL is showing, and which dish on it is the one somebody
    *  was sent to. Only ever set on the Menu tab; ignored when formatting any
    *  other. Null for the menu the screen would pick for itself — the first
@@ -307,6 +342,11 @@ const BRANCH = 'branch';
 /** The query key that narrows the board to one order. */
 const ORDER = 'order';
 
+/** The day the book is open at. `branch` is shared with the board and the menu
+ *  — it is the same word about the same thing, and a second key for it would
+ *  only mean a link between the screens had to translate one into the other. */
+const DATE = 'date';
+
 /** The query key that marks one dish on the menu it names. */
 const DISH = 'dish';
 
@@ -335,6 +375,9 @@ export function routePath(route: RouteInput): string {
   }
   if (route.tab === 'Menu') {
     return base + menuQuery(route.menu ?? null);
+  }
+  if (route.tab === 'Bookings') {
+    return base + bookQuery(route.book ?? null);
   }
   if (PEOPLE_TABS.includes(route.tab)) {
     const person = route.person ?? null;
@@ -378,6 +421,24 @@ function orderQuery(scope: OrderScope | null): string {
   return query === '' ? '' : `?${query}`;
 }
 
+/** The book's address as a query string, empty when it names neither a branch
+ *  nor a day — which is the bare screen: every branch the account can reach,
+ *  today. Written through `URLSearchParams` for the same reason as the others. */
+function bookQuery(scope: BookingScope | null): string {
+  if (scope === null) {
+    return '';
+  }
+  const params = new URLSearchParams();
+  if (scope.branchId !== null) {
+    params.set(BRANCH, scope.branchId);
+  }
+  if (scope.date !== null) {
+    params.set(DATE, scope.date);
+  }
+  const query = params.toString();
+  return query === '' ? '' : `?${query}`;
+}
+
 /** A menu's address as a query string, empty when it names no branch. Built
  *  through `URLSearchParams` for the same reason the board's is: an id needing
  *  encoding is encoded once, by the same code that will decode it. */
@@ -400,6 +461,16 @@ function menuTarget(search: string): MenuTarget | null {
   const params = new URLSearchParams(search);
   const branchId = params.get(BRANCH) || null;
   return branchId === null ? null : { branchId, itemId: params.get(DISH) || null };
+}
+
+/** Which day's book a query names, or null when it names neither half. An
+ *  empty value is dropped rather than carried: `?date=` is a key somebody
+ *  half-deleted, not a booking day whose name is the empty string. */
+function bookScope(search: string): BookingScope | null {
+  const params = new URLSearchParams(search);
+  const branchId = params.get(BRANCH) || null;
+  const date = params.get(DATE) || null;
+  return branchId === null && date === null ? null : { branchId, date };
 }
 
 /** What a board's query says it is showing, or null when it says nothing.
@@ -466,6 +537,7 @@ export function parseRoute(pathname: string, search = ''): Route | null {
       open: null,
       scope: tab === 'Orders' ? orderScope(search) : null,
       menu: tab === 'Menu' ? menuTarget(search) : null,
+      book: tab === 'Bookings' ? bookScope(search) : null,
       person: PEOPLE_TABS.includes(tab) ? new URLSearchParams(search).get(PERSON) || null : null,
     };
   }
@@ -474,7 +546,7 @@ export function parseRoute(pathname: string, search = ''): Route | null {
   const [, restaurantId, branches, branchId] = segments;
 
   if (segments.length === 1) {
-    return { tab, open: null, scope: null, menu: null, person: null };
+    return { tab, open: null, scope: null, menu: null, book: null, person: null };
   }
   if (segments.length === 2 && restaurantId !== undefined) {
     return {
@@ -482,6 +554,7 @@ export function parseRoute(pathname: string, search = ''): Route | null {
       open: { restaurantId, branchId: null, assignmentId },
       scope: null,
       menu: null,
+      book: null,
       person: null,
     };
   }
@@ -496,6 +569,7 @@ export function parseRoute(pathname: string, search = ''): Route | null {
       open: { restaurantId, branchId, assignmentId },
       scope: null,
       menu: null,
+      book: null,
       person: null,
     };
   }

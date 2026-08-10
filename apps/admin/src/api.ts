@@ -634,6 +634,41 @@ export interface StaffBranch {
   };
 }
 
+// ── the book itself ─────────────────────────────────────────────────────────
+
+export type ReservationStatusValue =
+  | 'pending'
+  | 'confirmed'
+  | 'seated'
+  | 'completed'
+  | 'cancelled'
+  | 'no_show';
+
+/** One booking, as the host's screen needs it: who, when, how many, where. */
+export interface StaffReservation {
+  id: string;
+  status: ReservationStatusValue;
+  branch: { id: string; name: string | null; address: string | null };
+  restaurantName: string;
+  reservedFor: string;
+  localTime: string;
+  localDate: string;
+  guests: number;
+  tableNo: string | null;
+  depositAmd: number;
+  depositStatus: string | null;
+  depositCredited: boolean;
+  /** While cancelling still returns the deposit. Null once it cannot be
+   *  cancelled at all. */
+  freeCancellationUntil: string | null;
+  /** The food order placed against this booking, if there is one — a link
+   *  through to the board. */
+  orderId: string | null;
+  createdAt: string;
+  customerName: string | null;
+  customerPhone: string | null;
+}
+
 // ── how a branch takes bookings ─────────────────────────────────────────────
 
 export interface StaffTable {
@@ -1399,6 +1434,40 @@ export const api = {
   // Everything that narrows what a branch offers takes `force`. Sent as `true`
   // only after the panel has shown the bookings the change would strand and
   // somebody has said go ahead; it saves the setting and cancels nothing.
+
+  /**
+   * The book for one service.
+   *
+   * A date rather than a range: a host reads one day at a time, and "today" is
+   * the question the screen opens on. Omitting the status asks for everything
+   * still live, which is what a book *is* — the cancelled ones are history.
+   */
+  reservations: (query: { branchId?: string; date?: string; status?: string }) =>
+    request<{ items: StaffReservation[]; total: number; page: number }>(
+      '/restaurant/reservations',
+      {
+        query: {
+          ...(query.branchId ? { branchId: query.branchId } : {}),
+          ...(query.date ? { date: query.date } : {}),
+          ...(query.status ? { status: query.status } : {}),
+          limit: '50',
+        },
+      },
+    ),
+
+  setReservationStatus: (id: string, status: ReservationStatusValue) =>
+    request<StaffReservation>(`/restaurant/reservations/${id}/status`, {
+      method: 'PATCH',
+      body: { status },
+    }),
+
+  /** Moves a booking to another table. The guest, the time and the money are
+   *  untouched — this is furniture, not a renegotiation. */
+  setReservationTable: (id: string, tableId: string) =>
+    request<StaffReservation>(`/restaurant/reservations/${id}/table`, {
+      method: 'PATCH',
+      body: { tableId },
+    }),
 
   tables: (branchId: string) =>
     request<{ items: StaffTable[] }>(`/restaurant/branches/${branchId}/tables`),

@@ -42,6 +42,7 @@ import {
   TooltipProvider,
 } from './ui';
 import { SignIn, modeFromUrl } from './screens/SignIn';
+import { Bookings } from './screens/Bookings';
 import { Orders } from './screens/Orders';
 import { Menu as MenuScreen } from './screens/Menu';
 import { Restaurants } from './screens/Restaurants';
@@ -428,6 +429,12 @@ function Shell({
               a restaurant with no branches is not in `branches` at all. Which
               restaurant is open comes from the address, so the screen has no
               opinion about it — that is what makes one linkable. */}
+          {active === 'Bookings' && (
+            <Bookings
+              branches={branches ?? []}
+              scope={route?.tab === 'Bookings' ? route.book : null}
+            />
+          )}
           {active === 'Restaurants' && (
             <Restaurants
               branches={branches ?? []}

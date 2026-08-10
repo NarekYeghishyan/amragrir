@@ -15,6 +15,7 @@ import { OrderQrDialog, QrPlate } from './order-qr';
 import type { PhotoUpload } from './photo';
 import { Pagination, ToastProvider, TooltipProvider } from './ui';
 import type { StaffBranch, StaffMenuItem, StaffOrder } from './api';
+import { Bookings } from './screens/Bookings';
 import { Orders } from './screens/Orders';
 import { Menu } from './screens/Menu';
 import { Restaurants } from './screens/Restaurants';
@@ -603,5 +604,32 @@ describe('the booking-settings section', () => {
   it('speaks the panel’s language', () => {
     expect(section(Language.Ru)).toContain('Настройки бронирования');
     expect(section(Language.Hy)).toContain('Ամրագրման կարգավորումներ');
+  });
+});
+
+describe('the book', () => {
+  // The screen a shift lives on. Its first paint is the loading state — effects
+  // do not run here, so nothing is fetched — and a panel that crashes before
+  // its data arrives is broken for everyone.
+  it('renders its own header and both views', () => {
+    const markup = render(<Bookings branches={[BRANCH]} scope={null} />);
+    expect(markup).toContain('Bookings');
+    expect(markup).toContain('Who is coming, when, and to which table.');
+    expect(markup).toContain('List');
+    expect(markup).toContain('Room');
+  });
+
+  it('opens on the day an address names rather than on today', () => {
+    const markup = render(
+      <Bookings branches={[BRANCH]} scope={{ branchId: 'b1', date: '2026-09-05' }} />,
+    );
+    expect(markup).toContain('2026-09-05');
+  });
+
+  it('speaks the panel’s language', () => {
+    expect(render(<Bookings branches={[BRANCH]} scope={null} />, Language.Ru)).toContain('Брони');
+    expect(render(<Bookings branches={[BRANCH]} scope={null} />, Language.Hy)).toContain(
+      'Ամրագրումներ',
+    );
   });
 });

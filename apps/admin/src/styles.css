@@ -2598,3 +2598,152 @@ p {
   flex-direction: column;
   gap: 8px;
 }
+
+/* ── the book ─────────────────────────────────────────────────────────────
+   One service, two views. The list answers "who is coming next"; the room
+   answers "what is free at nine", which is the question somebody at the door
+   with four people is asking and which a list answers badly. */
+.book__date {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.book__date .input {
+  width: 10.5rem;
+}
+.book__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+}
+.book__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+}
+.book__row:nth-child(odd) {
+  background: var(--chip);
+}
+.book__time {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5em;
+}
+.book__who {
+  display: flex;
+  flex-direction: column;
+  min-width: 10em;
+}
+.book__actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+/* The room. Tables down the side, time across the top; the track is a
+   percentage span so it scales with the container rather than with a
+   pixel-per-minute constant that would need a second copy here. */
+.book__grid {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.book__scroll {
+  /* A twelve-hour evening does not fit a narrow window, and the page itself
+     must never scroll sideways. */
+  overflow-x: auto;
+  min-width: 0;
+}
+.book__head,
+.book__lane {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  min-width: 36rem;
+}
+.book__lane {
+  border-top: 1px solid var(--line);
+  padding: 6px 0;
+}
+.book__marks {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.book__mark {
+  color: var(--ink-3, inherit);
+  opacity: 0.6;
+}
+.book__table {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.book__track {
+  position: relative;
+  height: 34px;
+  background: var(--chip);
+  border-radius: var(--radius-sm);
+}
+.book__bar {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  overflow: hidden;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.15;
+  color: var(--ink);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.book__bar--good {
+  background: var(--good-soft, var(--accent-soft));
+  box-shadow: inset 2px 0 0 var(--good);
+}
+.book__bar--warn {
+  background: var(--warn-soft, var(--accent-soft));
+  box-shadow: inset 2px 0 0 var(--star);
+}
+.book__bar--danger,
+.book__bar--neutral {
+  background: var(--chip);
+  box-shadow: inset 2px 0 0 var(--line);
+}
+.book__bar-time {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.book__bar-who {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.book__bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.book__unplaced,
+.book__chosen {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
