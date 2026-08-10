@@ -1,10 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { monthGrid, monthHasBookableDay, type Language } from '@amragrir/shared';
+import {
+  monthGrid,
+  monthHasBookableDay,
+  upcomingSlots,
+  type Language,
+} from '@amragrir/shared';
 import { formatDay, formatTime, instantOfYerevan, yerevanDateTime } from '@/lib/format';
 import { useScripted } from '@/lib/scripted';
-import { upcomingSlots } from '@/lib/slots';
 import type { Slot } from '@/lib/api';
 import type { DayAvailability } from '@/app/[lang]/availability/route';
 
@@ -309,8 +313,8 @@ export function DateTimeField({
           {/* The times the API says exist for that day and that party. Nothing
               here can be refused for being shut, off the grid or too small —
               only for having gone while somebody decided. The times already
-              past are dropped; see `lib/slots.ts` for why past and taken are
-              not the same state. */}
+              past are dropped; see `booking-slots.ts` in `@amragrir/shared` for
+              why past and taken are not the same state. */}
           <div className="time-side">
             <button
               type="button"

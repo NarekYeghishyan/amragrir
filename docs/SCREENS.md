@@ -25,7 +25,7 @@ calling either:
 
 | Screen | State |
 |---|---|
-| Book a table alone (`app/book/[branchId].tsx`) | built — from a button on the restaurant page, with no basket |
+| Book a table alone (`app/book/[branchId].tsx`) | built — from a button on the restaurant page, with no basket; the same picker as § 5 and its own "Book the table · deposit" footer |
 | My bookings (`app/bookings.tsx`) | built — upcoming and past, from the profile |
 | One booking (`app/booking/[id].tsx`) | built — the deposit's fate, and the button that gives the table back |
 
@@ -81,12 +81,27 @@ artifact does not draw it, and "serving right now" on a screen for ordering
 
 **Purpose:** log in or register before accessing the app (auth-gate).
 **User:** new or returning guest.
-**Elements:** logo + tagline, Login / Sign up switch, "Full name" field (register only), "Phone number" field (placeholder `99 123 456`), OTP note, "Continue" button, "OR" divider, social buttons (Apple, Google), "Continue as guest", Terms/Privacy text.
-**Actions:** enter phone/name → Continue (send OTP); pick social login; continue as guest; toggle login/register.
+**Elements:** logo + tagline, Login / Sign up switch, "Full name" field (register only), a country-and-number field (placeholder: the chosen country's own specimen number, `99 12 34 56` for Armenia), OTP note, "Continue" button, "OR" divider, social buttons (Apple, Google), "Continue as guest", Terms/Privacy text.
+**Actions:** pick a country; enter phone/name → Continue (send OTP); pick social login; continue as guest; toggle login/register.
 **Transitions:** Continue → (OTP screen → ) Home. Guest/social → Home. `authed:true`.
 **API:** `POST /auth/send-code`, `POST /auth/verify-code`, `POST /auth/social`, `POST /auth/guest`. On register — profile creation (`name`, `phone`).
 
 > In the current prototype the SMS-code step is not rendered as a separate screen — **add an OTP screen** between sending the code and Home (see USER_FLOW).
+
+**The `+374` the artifact prints is a country picker** (2026-08-10), as it
+already was on the web (§14c). It was a constant on the phone, so a customer
+holding a Russian, Georgian or French number — the diaspora and the visitors
+`PHONE_COUNTRIES` exists for — could not sign in from the app at all: whatever
+they typed was sent as Armenian and refused. Pressing it opens a sheet of the
+eight countries, named in the app's language, and the number takes the chosen
+country's grouping as it is typed.
+
+**Continue waits for a whole number.** It went out on any six digits, so a
+seven-digit Armenian number reached `POST /auth/send-code` and came back as the
+API's refusal in the error line. The button is now enabled only when the number
+is a valid length for its country, and a number that is already too long — or
+that is left unfinished — says so under the field instead. Same rule, same
+`isValidNational`, as the web field. See COMPONENTS.md → `PhoneField (mobile)`.
 
 ---
 
@@ -190,16 +205,16 @@ would evict a pre-rendered page to change nothing on it.
   - **Where neither is declared** (a hatch with nowhere to sit) `pickupOptions` holds take-away alone, and **that one ending is drawn on its own** — ticked, since there is nothing else it could be. The artifact hides the section here (`subKeys.length > 1`) and the web did too until 2026-08-07; the cost was that the screen went from the mode straight to the clock, leaving *what happens to this food* answered nowhere, which is the one thing this block exists to say. A restaurant that has declared **nothing at all** still draws none, because `pickupOptions` is then empty and there is no ending to name.
   - **Where `reserve` is declared** (tables are booked) `pickupOptions` holds take-away alone, and `eatInRequiresBooking` is true — so **Eat at the Restaurant** is still drawn beside it, dimmed and dashed, reading "Only by booking a table". Pressing it selects nothing: it switches the basket to **Dine-in**, which opens the booking block below. It therefore travels the *mode* path, not the ending one — same interception, same settling (2026-08-08). Hiding it would leave the guest to discover the rule by not finding it. **Unless bookings are paused** — `eatInRequiresBooking` is the declaration and stays true through a pause, so this door is gated on `reservationsEnabled` as well; both entrances to the calendar close together, or this one reopens the dead end the mode tile was hidden to avoid.
   - All three fields come from the quote rather than from `services`, so the screen and the API cannot disagree — and `reservationsEnabled` could not be derived from `services` at all, since the pause switch is not in there.
-- **For Dine-in** (block appears): month calendar (Monday-first, prev/next month, days past or beyond the horizon drawn but `disabled`), "Reservation time" slot grid, "Guests" **stepper** (`−` / count / `+`, on both clients since 2026-08-07 — the web drew a chip per seat until then), "Table deposit" card (`depositAmd` from the server, the party it covers, "credited to bill" note, info note), and a "table booked" line once one is held. **The web draws this calendar and this grid too, since 2026-08-08** — it drew one "Date & time" field instead until then, and the trade that cost is recorded (now reversed) in the table at the foot of this file. Both clients share `monthGrid` from `@amragrir/shared`; the web reads a day's slots through its own `GET /[lang]/availability` route handler, and keeps the native field as the no-JavaScript path.
+- **For Dine-in** (block appears): month calendar (Monday-first, prev/next month, days past or beyond the horizon drawn but `disabled`), "Reservation time" — the chosen time beside the heading, morning/afternoon/evening tabs and a four-column slot grid — "Guests" **stepper** (`−` / count / `+`, on both clients since 2026-08-07 — the web drew a chip per seat until then), "Table deposit" card (`depositAmd` from the server, the party it covers, "credited to bill" note, info note), and a "table booked" line once one is held. **The web draws this calendar and this grid too, since 2026-08-08** — it drew one "Date & time" field instead until then, and the trade that cost is recorded (now reversed) in the table at the foot of this file. Both clients share `monthGrid` from `@amragrir/shared`; the web reads a day's slots through its own `GET /[lang]/availability` route handler, and keeps the native field as the no-JavaScript path.
 - **Pickup only:** "Food ready at" time slot grid. A dine-in basket does not get one — see below. **The web draws it on both**, because the web artifact does; the rule below says it should not, and the two have not been reconciled — see the note under it.
 - "⚡ ready summary" panel + kitchen note.
-- sticky CTA: "Book the table" while dine-in has none, otherwise "Continue to checkout · **`dueNowAmd`**".
-**Actions:** pick Pre-Order/Table booking; pick the pre-order ending (Takeaway / Eat at the Restaurant) where there is a dining room, or press the dead "Eat at the Restaurant" to switch to Table booking where tables are booked; page months; pick booking date/time; change guest count; pick ready time (pre-order); continue.
+- sticky CTA, in the order the basket needs it: while dine-in has no table, "Choose time" (dead) until one is picked and then "Book the table · **`depositAmd`**", which is the press that books; afterwards "Continue to checkout · **`dueNowAmd`**".
+**Actions:** pick Pre-Order/Table booking; pick the pre-order ending (Takeaway / Eat at the Restaurant) where there is a dining room, or press the dead "Eat at the Restaurant" to switch to Table booking where tables are booked; page months; pick a booking date, a stretch of the day and a time; press the CTA to book it; change guest count; pick ready time (pre-order); continue.
 **Transitions:** back → Basket; Continue → Checkout.
 **API:** `GET /restaurants/{id}/availability?date=&guests=` — slots, `maxSeats`
-and `depositAmd` in one call — then `POST /reservations` when a time is tapped,
-and `POST /cart/quote` again afterwards, because a held deposit changes what is
-left to pay.
+and `depositAmd` in one call — then `POST /reservations` when the CTA is
+pressed, and `POST /cart/quote` again afterwards, because a held deposit changes
+what is left to pay.
 
 **Two corrections to what this section used to claim.** `GET
 /restaurants/{id}/tables` exists but the screen does not call it: availability
@@ -219,10 +234,31 @@ does not exist.
 
 **Booking is where dine-in can fail.** A slot can be taken between drawing the
 grid and tapping it; the screen shows the server's refusal and redraws the day
-rather than leaving a dead time on offer. Until a table is held, the CTA reads
-"Book the table" and is disabled — dine-in without a reservation is the one
+rather than leaving a dead time on offer — and the refreshed answer takes the
+chosen time with it if it is one of the ones that went. Until a table is held,
+the CTA is the *booking* button — dine-in without a reservation is the one
 combination `POST /orders` refuses outright, so it is blocked here rather than
 at the payment.
+
+**Choosing a time and booking it are two presses (2026-08-10, mobile).** They
+were one press on the phone: tapping a chip posted the reservation, so a mis-tap
+held a table and authorised a deposit, and "Book the table" sat on a *disabled*
+CTA naming the thing it would not do. The web has always split them — its picker
+sets a value and the checkout form submits it — and the design does too. The
+grid selects now; the CTA commits.
+
+**Which times the grid offers.** The API answers with every start the branch
+could seat, ~70 for a twelve-hour day at `RESERVATION_SLOT_MINUTES` grain. Two
+rules in `@amragrir/shared` make that readable, and both clients apply them:
+`upcomingSlots` drops the times that have **gone** (a struck-through 20:00 says
+somebody has that table, which informs a choice of 20:30; a struck-through 10:00
+at teatime says nothing), and `slotsByPartOfDay` splits the rest into
+morning / afternoon / evening. The phone draws those as tabs above the grid —
+absent when the day has only one stretch, in the order the day meets them so a
+branch open past midnight does not file its 00:30 under "morning" — while the
+browser keeps its single scrolling column, where a heading every few rows would
+be noise. On today's date this is the difference between four rows of chips and
+twenty, seventeen of them already dead.
 
 **Dine-in has no "Food ready at" grid, because the table already answered it.**
 Booking a slot sets the order's `readyAt` to the booked instant; `POST /orders`

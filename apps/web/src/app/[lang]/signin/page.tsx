@@ -1,9 +1,8 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { DEFAULT_PHONE_COUNTRY } from '@amragrir/shared';
+import { DEFAULT_PHONE_COUNTRY, countryOptions } from '@amragrir/shared';
 import { parseLanguage, t } from '@/lib/language';
 import { ORDER_ROBOTS, checkoutPath, signinPath } from '@/lib/site';
-import { countryOptions } from '@/lib/phone';
 import { AuthPanel } from '@/components/AuthPanel';
 import { confirmCode, requestCode } from '../actions';
 

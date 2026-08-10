@@ -125,12 +125,21 @@ Restaurant (nothing in the basket)
    ↓  "🪑 Book a table" — only where the restaurant declares `reserve`
       and has not paused bookings
 /book/{branchId} — its own screen, the full RESERVATION_MAX_LEAD_DAYS horizon
-   ↓  date & time, guests, deposit
+   ↓  date, then a time (morning / afternoon / evening), guests, deposit
+   ↓  "Book the table · {deposit}" — the choice above commits nothing
    ↓  (sign-in if the phone is unverified — asked before the money, not after)
 POST /reservations — deposit authorised, table assigned
    ↓  replace, so back does not offer to book a second table
 /booking/{id} — the table, and the button that gives it back
 ```
+
+**Picking a time and booking are two presses (2026-08-10).** They were one: a
+tap on a slot chip posted the reservation there and then, so a mis-tap in a grid
+of seventy chips held a table and authorised a deposit, and there was no way to
+change your mind short of cancelling a booking. The web has always worked the
+other way round — pick, then submit — and so does the design. The same split now
+runs the pre-order screen's footer, where "Book the table" used to be a *dead*
+label on a disabled button naming the very thing it would not do.
 
 **Its own screen rather than the checkout's, unlike the web.** The web reuses
 the checkout because that is already where a booking's terms are settled; on the

@@ -49,7 +49,13 @@ export default function PreorderScreen() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [guests, setGuests] = useState(2);
-  const [booking, setBooking] = useState<string | null>(null);
+  /** Chosen but not yet booked. The footer button is what turns it into a
+   *  table — see `BookingCalendar` for why picking no longer books. */
+  const [selected, setSelected] = useState<string | null>(null);
+  const [booking, setBooking] = useState(false);
+  /** A day or a party size is in flight, so the times on screen are the last
+   *  answer's and must not be tapped. Same bargain the browser's picker makes. */
+  const [loadingSlots, setLoadingSlots] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Yerevan's today, not the phone's: a traveller booking at 01:00 their time
@@ -101,6 +107,16 @@ export default function PreorderScreen() {
     };
   }, [basketKey]);
 
+  /** Drops a chosen time the fresh answer no longer offers — a bigger party or
+   *  a table taken while the screen sat open both invalidate it. */
+  const keepSelection = (fresh: Availability): void => {
+    setSelected((current) =>
+      current !== null && fresh.slots.some((slot) => slot.at === current && slot.available)
+        ? current
+        : null,
+    );
+  };
+
   // Only fetched for dine-in: a pickup basket has no use for table times, and
   // the call would be a round trip spent on a section nobody sees.
   useEffect(() => {
@@ -109,17 +125,24 @@ export default function PreorderScreen() {
       return;
     }
     let cancelled = false;
+    setLoadingSlots(true);
 
     reservations
       .availability(payload.branchId, date, guests)
       .then((result) => {
         if (!cancelled) {
           setAvailability(result);
+          keepSelection(result);
         }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
           setError(err instanceof ApiError ? err.message : t('somethingWentWrong'));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingSlots(false);
         }
       });
 
@@ -144,7 +167,7 @@ export default function PreorderScreen() {
     if (bookingKey.current?.at !== at) {
       bookingKey.current = { at, key: newIdempotencyKey() };
     }
-    setBooking(at);
+    setBooking(true);
     setError(null);
 
     try {
@@ -161,13 +184,17 @@ export default function PreorderScreen() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('somethingWentWrong'));
       // The slot may simply have gone while the screen was open, so redraw the
-      // day rather than leaving a time on offer that nobody can take.
+      // day rather than leaving a time on offer that nobody can take — and let
+      // the fresh answer take the choice with it if it is one of them.
       reservations
         .availability(payload.branchId, date, guests)
-        .then(setAvailability)
+        .then((fresh) => {
+          setAvailability(fresh);
+          keepSelection(fresh);
+        })
         .catch(() => undefined);
     } finally {
-      setBooking(null);
+      setBooking(false);
     }
   };
 
@@ -175,6 +202,12 @@ export default function PreorderScreen() {
   // Dine-in without a table is the one combination `POST /orders` refuses
   // outright, so the step is blocked here rather than at the payment.
   const needsTable = dineIn && reservationId === null;
+  // While a table is still owed, the button books it and needs a chosen time —
+  // one the *current* day's answer has vetted, hence `loadingSlots`. Afterwards
+  // it is the ordinary "on to checkout" and needs a priceable basket.
+  const ctaBlocked = needsTable
+    ? selected === null || loadingSlots
+    : quote === null || !quote.canOrder;
 
   if (lines.length === 0) {
     return (
@@ -330,11 +363,20 @@ export default function PreorderScreen() {
               guests={guests}
               today={today}
               horizonDays={BOOKING_HORIZON_DAYS}
-              busySlot={booking}
-              onDate={setDate}
+              selected={selected}
+              busy={booking || loadingSlots}
+              // A time chosen on one day and one party size means nothing on
+              // another, so the highlight goes with the question it answered.
+              onDate={(next) => {
+                setDate(next);
+                setSelected(null);
+              }}
               onMonth={setMonth}
-              onGuests={setGuests}
-              onSlot={(at) => void book(at)}
+              onGuests={(count) => {
+                setGuests(count);
+                setSelected(null);
+              }}
+              onSelect={setSelected}
             />
 
             {reservationId !== null ? (
@@ -425,31 +467,42 @@ export default function PreorderScreen() {
         ) : null}
       </ScrollView>
 
+      {/* One button, two jobs, in the order the basket needs them: book the
+          table first, then pay for the food. It used to say "Book the table"
+          while disabled — a dead button naming the very thing it would not do,
+          because booking happened up in the grid. Now it is the thing that
+          books, which is also what stops a mis-tap costing a deposit. */}
       <View style={styles.footer}>
         {quote === null ? (
           <ActivityIndicator color={colors.accent} />
         ) : (
           <Pressable
-            disabled={needsTable || !quote.canOrder}
-            onPress={() => router.push('/checkout')}
+            disabled={ctaBlocked || booking}
+            onPress={() => {
+              if (!needsTable) {
+                router.push('/checkout');
+              } else if (selected !== null) {
+                void book(selected);
+              }
+            }}
             accessibilityRole="button"
-            style={[
-              styles.cta,
-              { backgroundColor: needsTable || !quote.canOrder ? colors.chip : colors.accent },
-            ]}
+            style={[styles.cta, { backgroundColor: ctaBlocked ? colors.chip : colors.accent }]}
           >
-            <Text
-              style={[
-                styles.ctaText,
-                { color: needsTable || !quote.canOrder ? colors.ink3 : '#fff' },
-              ]}
-            >
-              {!quote.branchIsOpen
-                ? t('branchClosed')
-                : needsTable
-                  ? t('bookTable')
-                  : `${t('continueToCheckout')} · ${formatAmd(quote.dueNowAmd)}`}
-            </Text>
+            {booking ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={[styles.ctaText, { color: ctaBlocked ? colors.ink3 : '#fff' }]}>
+                {!quote.branchIsOpen
+                  ? t('branchClosed')
+                  : needsTable
+                    ? selected === null
+                      ? t('chooseTime')
+                      : `${t('bookTable')}${
+                          availability === null ? '' : ` · ${formatAmd(availability.depositAmd)}`
+                        }`
+                    : `${t('continueToCheckout')} · ${formatAmd(quote.dueNowAmd)}`}
+              </Text>
+            )}
           </Pressable>
         )}
       </View>

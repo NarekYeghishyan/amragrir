@@ -7,7 +7,7 @@ import { ApiError, newIdempotencyKey } from '../../src/api/client';
 import { reservations } from '../../src/api/endpoints';
 import type { Availability } from '../../src/api/types';
 import { BookingCalendar, type BookingMonth } from '../../src/components/BookingCalendar';
-import { yerevanDate } from '../../src/format';
+import { formatAmd, yerevanDate } from '../../src/format';
 import { useLanguage } from '../../src/language';
 import { useSession } from '../../src/session';
 import { useTheme } from '../../src/theme/useTheme';
@@ -37,7 +37,12 @@ export default function BookTableScreen() {
 
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [guests, setGuests] = useState(2);
-  const [busySlot, setBusySlot] = useState<string | null>(null);
+  /** The time chosen but not yet booked — the button below is what books it. */
+  const [selected, setSelected] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  /** A day or a party size is in flight. Distinct from having no answer at all:
+   *  only the very first load has nothing to draw. */
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Yerevan's today, not the phone's — see `formatTime` for why every clock in
@@ -49,19 +54,51 @@ export default function BookTableScreen() {
     month: Number(today.slice(5, 7)) - 1,
   }));
 
+  /**
+   * Drops a chosen time the fresh answer no longer offers.
+   *
+   * A party of two grown to six, or a table taken while the screen sat open,
+   * both leave a highlighted chip the button below would send to a `422`. The
+   * choice is only ever as good as the last answer it was made against.
+   */
+  const keepSelection = (fresh: Availability): void => {
+    setSelected((current) =>
+      current !== null && fresh.slots.some((slot) => slot.at === current && slot.available)
+        ? current
+        : null,
+    );
+  };
+
+  /**
+   * The day the calendar is showing.
+   *
+   * **The previous day's answer stays up while the next one is fetched**, the
+   * way the browser's picker does it. Blanking it to a spinner threw the whole
+   * calendar away and rebuilt it on every tap — the screen jumped, and the
+   * stretch of day being browsed reset to morning each time, because the
+   * component it belonged to had been unmounted. The times on screen during
+   * that gap belong to the day before, so `BookingCalendar` is told it is busy
+   * and stops taking taps on them.
+   */
   useEffect(() => {
     let cancelled = false;
-    setAvailability(null);
+    setLoading(true);
     reservations
       .availability(branchId, date, guests)
       .then((result) => {
         if (!cancelled) {
           setAvailability(result);
+          keepSelection(result);
         }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
           setError(err instanceof ApiError ? err.message : t('somethingWentWrong'));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
         }
       });
     return () => {
@@ -90,7 +127,7 @@ export default function BookTableScreen() {
     if (bookingKey.current?.at !== at) {
       bookingKey.current = { at, key: newIdempotencyKey() };
     }
-    setBusySlot(at);
+    setBusy(true);
     setError(null);
 
     try {
@@ -101,13 +138,17 @@ export default function BookTableScreen() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('somethingWentWrong'));
       // The slot may simply have gone while the screen was open, so redraw the
-      // day rather than leaving a time on offer nobody can take.
+      // day rather than leaving a time on offer nobody can take — and let the
+      // fresh answer take the choice away with it if it is one of them.
       reservations
         .availability(branchId, date, guests)
-        .then(setAvailability)
+        .then((fresh) => {
+          setAvailability(fresh);
+          keepSelection(fresh);
+        })
         .catch(() => undefined);
     } finally {
-      setBusySlot(null);
+      setBusy(false);
     }
   };
 
@@ -153,11 +194,22 @@ export default function BookTableScreen() {
             guests={guests}
             today={today}
             horizonDays={RESERVATION_MAX_LEAD_DAYS}
-            busySlot={busySlot}
-            onDate={setDate}
+            selected={selected}
+            busy={busy || loading}
+            // A time chosen on Tuesday means nothing on Wednesday, and a table
+            // for two is not a table for six. Cleared on the tap rather than
+            // waiting for the new answer, so the highlight never outlives the
+            // day it was made on.
+            onDate={(next) => {
+              setDate(next);
+              setSelected(null);
+            }}
             onMonth={setMonth}
-            onGuests={setGuests}
-            onSlot={(at) => void book(at)}
+            onGuests={(count) => {
+              setGuests(count);
+              setSelected(null);
+            }}
+            onSelect={setSelected}
           />
         )}
 
@@ -172,13 +224,45 @@ export default function BookTableScreen() {
           <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>
         ) : null}
       </ScrollView>
+
+      {/* The one thing that takes the deposit, and the only one — the grid above
+          chooses, this commits. Held out of the scroll so a guest who has picked
+          a time never has to find the button that acts on it. */}
+      {availability?.reservationsEnabled ? (
+        <View style={styles.footer}>
+          <Pressable
+            // Dead while a day is in flight as well: `selected` still points at
+            // the *previous* answer's time until the new one has vetted it.
+            disabled={selected === null || busy || loading}
+            onPress={() => selected !== null && void book(selected)}
+            accessibilityRole="button"
+            style={[
+              styles.cta,
+              { backgroundColor: selected === null ? colors.chip : colors.accent },
+            ]}
+          >
+            {busy ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text
+                style={[styles.ctaText, { color: selected === null ? colors.ink3 : '#fff' }]}
+              >
+                {selected === null
+                  ? t('chooseTime')
+                  : `${t('bookTable')} · ${formatAmd(availability.depositAmd)}`}
+              </Text>
+            )}
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  body: { paddingHorizontal: 20, paddingTop: 58, paddingBottom: 60 },
+  // Deep enough to clear the footer below, which floats over this.
+  body: { paddingHorizontal: 20, paddingTop: 58, paddingBottom: 130 },
   back: {
     width: 42,
     height: 42,
@@ -200,4 +284,7 @@ const styles = StyleSheet.create({
   },
   hint: { fontSize: 12.5, lineHeight: 18, marginTop: 16 },
   error: { fontSize: 13, marginTop: 16 },
+  footer: { position: 'absolute', left: 20, right: 20, bottom: 30 },
+  cta: { height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  ctaText: { fontSize: 16, fontWeight: '700' },
 });

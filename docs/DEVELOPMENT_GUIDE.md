@@ -111,6 +111,22 @@ apps/mobile/
 - **Seeded data has to look like the thing it stands for.** Demo dishes carry a photograph of that dish (`prisma/menu-photos.ts`, hotlinked; `MENU_PHOTOS=local` for the committed placeholders) and demo restaurants a cover of what they sell (`prisma/restaurant-covers.ts`, same terms), because a menu and a home feed are lists somebody reads with their eyes and a screen full of grey boxes cannot be judged. Every URL in both tables was fetched and looked at before it was written down — a search for "cola" returned a bottle among sugar skulls, and one for "burger restaurant interior" the lavatory of a Burger King. **A seed may never overwrite what a user chose:** `db:photos` rewrites a missing or seeded picture and never an uploaded one.
 - **Hotlinked test data must be checked against the client that will fetch it, not against your browser.** Both tables draw from TheMealDB and TheCocktailDB only. Wikimedia Commons was dropped after a day: it answers 403 to a `User-Agent` that is a bare library name, which is what React Native sends, so half the pictures were blank in `apps/mobile` and perfect on the site — and blank is also how the app draws "there is no picture", so the failure was invisible from both ends. Check a new image URL with `curl -A okhttp/4.9.2` before adding it; the specs enforce the host list.
 - Logging, rate-limit on `auth/*`, OTP TTL in Redis (120s).
+- **`dev` frees its own port before starting** (`apps/api/scripts/free-port.mjs`,
+  chained ahead of `nest start --watch`). The watcher runs the app as a child
+  process, so a closed terminal or a reloaded editor leaves an orphan holding
+  the socket and the next `dev` dies on `EADDRINUSE` — with a stack trace
+  through `node:net` that names nothing actionable. The script stops **only**
+  what it can prove is ours (the command line names this checkout, or the port
+  answers `/v1/health` as this API does) plus the Nest watcher above it, which
+  would otherwise put a new child on the port at the next file save. Anything
+  else it leaves alone, prints, and exits non-zero: a stranger on 3000 is the
+  developer's call. `pnpm start` is not wrapped — killing processes is a
+  development convenience, not a production start-up step.
+  - **"Ours" is the checkout, not the person.** A colleague's — or a second
+    agent's — running `dev` started from this same clone is indistinguishable
+    from your own orphan, and gets stopped like one. Where two of you share a
+    machine, the second takes a port of its own: `PORT=3007 pnpm --filter
+    @amragrir/api dev` frees and binds 3007 and never touches 3000.
 
 ### API conventions
 

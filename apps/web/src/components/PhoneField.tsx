@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { formatNational, isValidNational, phoneCountry } from '@amragrir/shared';
-import type { CountryOption } from '@/lib/phone';
+import {
+  formatNational,
+  isValidNational,
+  phoneCountry,
+  type CountryOption,
+} from '@amragrir/shared';
 
 /** How many digits sit in the first `end` characters — the caret's real place. */
 function digitsBefore(value: string, end: number): number {

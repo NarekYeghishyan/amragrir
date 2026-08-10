@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, type MouseEvent } from 'react';
-import type { Language } from '@amragrir/shared';
-import type { CountryOption } from '@/lib/phone';
+import type { CountryOption, Language } from '@amragrir/shared';
 import { PhoneField } from './PhoneField';
 
 /** Every string the panel draws, in the language the page was rendered in. */

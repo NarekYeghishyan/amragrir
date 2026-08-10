@@ -439,7 +439,10 @@ Surface wrapper.
 >   because a chosen country removes the ambiguity a leading `0` carries. The
 >   countries come from `PHONE_COUNTRIES` in `packages/shared`, which the API's
 >   `normalizePhone` reads too, and the names from `Intl.DisplayNames` rather
->   than the dictionaries. A client component only for live feedback: it checks
+>   than the dictionaries — `countryOptions`, which **moved into
+>   `packages/shared` on 2026-08-10** when the phone grew the same picker
+>   (`lib/phone.ts` is gone; its spec stayed where the runner is). A client
+>   component only for live feedback: it checks
 >   with the same `isValidNational` the server uses, and with JavaScript off the
 >   plain select and input still post and get a translated answer. **Each option
 >   leads with the dial code** (`🇦🇲 +374 Armenia`): the closed select stands
@@ -490,6 +493,35 @@ Surface wrapper.
 >   to one that no longer carries it.
 
 ## Domain components
+
+### PhoneField (mobile)
+The sign-in screen's country-and-number field (`apps/mobile/src/components/PhoneField.tsx`, 2026-08-10).
+- **Props:** `country: PhoneCountry`, `national`, `onChangeCountry`, `onChangeNational`, `autoFocus?`.
+- **States:** picker closed / open (a bottom sheet of the eight countries), and
+  a hint under the field once the number is wrong rather than unfinished.
+- **The country is chosen, not inferred.** `+374` was a constant here, which
+  meant a number from anywhere else was sent as Armenian and refused; the dial
+  code is a button now, and what the screen sends is `toE164(country, national)`
+  — the E.164 spelling `users.phone` is unique on.
+- **One source for the shape and the check.** `formatNational` groups the digits
+  and caps their length, `isValidNational` decides whether Continue is enabled,
+  `countryOptions` names the countries — all from `@amragrir/shared`, the same
+  module the web field and the API's `normalizePhone` read. A country this
+  picker offers cannot be one the server rejects.
+- **The hint waits.** A number is not "wrong" until it is at least as long as a
+  right one would be, or until the field is left — the web field's rule, so both
+  clients scold at the same moment.
+- **Backspace is the one thing it does that the web's does not have to.**
+  Deleting onto a separator leaves the digits unchanged, so reformatting would
+  put the space straight back and the key would look dead; `retypeNational`
+  (`src/phone.ts`, tested) takes the digit in front of it instead. It does *not*
+  restore a caret as the web field does: a controlled `TextInput` has no
+  reliable way to place one, and the phone's editing gesture is backspace from
+  the end, which is exactly the case handled.
+- **The country name may degrade to its ISO code.** `Intl.DisplayNames` is the
+  corner of `Intl` Hermes builds on the platform's own libraries and may lack;
+  the row therefore leads with the flag and the dial code, which are derived
+  from the code itself and always render.
 
 ### RestaurantCard
 Large Home / See all feed card.
@@ -982,7 +1014,10 @@ The browser's half of the bell, kept out of the component that runs it.
 
 ### BookingCalendar (`apps/mobile/src/components/BookingCalendar.tsx`)
 Choosing a day, a time and a party size — one calendar, two screens.
-- **Props:** `availability`, `date`, `month`, `guests`, `today`, `horizonDays`, `busySlot`, and four callbacks. Fully controlled: it owns no state, fetches nothing and decides nothing.
+- **Props:** `availability`, `date`, `month`, `guests`, `today`, `horizonDays`, `selected`, `busy`, and four callbacks (`onDate`, `onMonth`, `onGuests`, `onSelect`). Controlled apart from which stretch of the day is open, which is where the eye is rather than anything about the booking.
+- **It reports a chosen time; it does not book one.** `onSelect` used to be `onSlot` and the screens posted a reservation from it, which made every mis-tap in a grid of seventy chips a held table and an authorised deposit — and left no such thing as a *chosen* time, only a booked one. The screen's own footer button commits now, as the browser and the design have always done.
+- **The grid draws what is left of the day, one stretch at a time.** At `RESERVATION_SLOT_MINUTES` a branch answers with ~70 starts; drawn whole that was twenty rows, seventeen of them greyed because they had already happened. `upcomingSlots` drops what has gone and `slotsByPartOfDay` splits the rest — both in `@amragrir/shared`, so the phone and the browser keep exactly the same times. The tabs appear only when the day has more than one stretch, and the one opened is the first with a free table unless a stretch has been picked or holds the chosen time.
+- **`busy` covers booking *and* refetching.** The screens leave the previous day's times on screen while the next answer is in flight rather than blanking to a spinner, so the chips must stop taking taps — see `apps/mobile/app/book/[branchId].tsx` for why blanking cost the open stretch its state and made the screen jump on every tap.
 - **It exists because there are now two ways to book.** A table comes with food from the pre-order flow, and on its own from a restaurant's page. Drawn twice, those would be two readings of one availability answer, and the way that fails is silent — a screen offering a slot the API then refuses.
 - **The horizon is a prop, not a constant.** Pre-order shortens it to the *order* horizon because there the table always carries food, and offering a day the kitchen will not cook on takes a deposit for a meal that is then refused at the payment. A table booked alone is bound only by `RESERVATION_MAX_LEAD_DAYS`.
 - **Every bound comes off `availability`** — the party cap is `min(maxGuests, maxSeats)`, the branch talking about itself, so a branch running a hall counts past twelve.

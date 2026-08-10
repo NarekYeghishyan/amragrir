@@ -5,7 +5,7 @@
   "description": "NestJS backend — auth, restaurants, branches, menu, categories, cart, orders, reservations, payments, favorites, referrals, reviews, notifications, owner, admin modules. See docs/DEVELOPMENT_GUIDE.md and docs/API_DOCUMENTATION.md.",
   "scripts": {
     "build": "nest build",
-    "dev": "nest start --watch",
+    "dev": "node scripts/free-port.mjs && nest start --watch",
     "start": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit",

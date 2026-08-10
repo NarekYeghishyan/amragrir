@@ -7,6 +7,146 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — `dev` clears its own port before Nest binds it
+
+`pnpm --filter @amragrir/api dev` failed on **`EADDRINUSE` on 3000** often
+enough to be part of the routine: find the process, read its PID out of
+`netstat`, `taskkill` it, start again. The stack trace it printed went through
+`node:net` and named nothing a developer can act on.
+
+**The cause is the watcher's shape, not a defect.** `nest start --watch` runs
+the app as a *child* process, so when the parent goes away without taking the
+child with it — a closed terminal, a reloaded editor, Ctrl-C caught at the wrong
+moment — the orphan keeps the socket and no watcher is left to notice. The port
+was held by `node --enable-source-maps …/apps/api/dist/main` with nothing above
+it — which is also why an orphan answers with whatever `dist/` held the moment
+it started, and goes on answering long after the source has moved on.
+
+**`dev` now runs `apps/api/scripts/free-port.mjs` first.** If the port binds, it
+exits in milliseconds and says nothing. If it does not, it finds who holds it,
+stops it, and waits for the port to actually come free before Nest is started.
+It kills a **nest-CLI parent** along with the holder, because freeing the child
+alone leaves a watcher that puts a new one there on the next file save.
+
+**It only ever stops what it can prove is ours** — the command line names this
+checkout, or the port answers `/v1/health` the way this API does. Anything else
+it refuses to touch, prints whose it is, and exits non-zero with the `PORT=…`
+line to run instead. A stranger on 3000 (another project, a container) is the
+developer's call, and that refusal is the safety boundary of the whole script.
+
+The port is resolved the way the app resolves it — `process.env.PORT`, then
+`apps/api/.env`, then 3000 — so `PORT=3007 pnpm --filter @amragrir/api dev`
+clears 3007 and leaves 3000 alone. Listeners are matched on the address columns
+rather than on `netstat`'s state word, which is translated on a localised
+Windows. `pnpm start` is deliberately **not** wrapped: killing processes is a
+development convenience, not something a production start should do — `main.ts`
+now catches `EADDRINUSE` there and logs one actionable line instead of a trace.
+
+Docs: DEVELOPMENT_GUIDE.md §3 (Backend), `apps/api/README.md`.
+
+### 2026-08-10 — Signing in from a number that is not Armenian
+
+The phone's sign-in screen printed **`+374` as a constant** and sent whatever
+was typed beside it once it reached **six digits**. Both halves of that were
+wrong, and they were wrong in opposite directions: a customer holding a Russian,
+Georgian or French number could not sign in from the app at all, and an Armenian
+one could press Continue on seven digits and get the API's refusal back as a red
+line under the button.
+
+**`PHONE_COUNTRIES` already existed and the phone was not reading it.** The
+eight countries, their groupings, their trunk prefixes and their lengths have
+been in `packages/shared` since the web sign-in page was built — the API's
+`normalizePhone` reads the same list. `apps/mobile/src/components/PhoneField.tsx`
+now does too: the dial code is a button, pressing it opens a sheet of the eight,
+the number takes the chosen country's grouping as it is typed, and what goes to
+`POST /auth/send-code` is `toE164(country, national)`. Nothing about which
+numbers are valid is decided on the phone.
+
+**Continue is disabled until the number is whole**, by `isValidNational` — the
+web field's check, so the two clients agree on the same digit. A number that is
+already as long as a right one would be, or a field somebody has left, says
+*why* under the field (`phoneInvalid`, which was translated for the web and is
+now used twice). The old placeholder key `authPhonePlaceholder` is gone: the
+placeholder is the chosen country's own specimen number, so it can never
+disagree with the length the field accepts — the removed string said
+`99 123 456`, which is not how an Armenian number is grouped.
+
+**`countryOptions` and `flagOf` moved to `@amragrir/shared`**, by the route
+`upcomingSlots` took a few hours earlier and for the same reason: two clients
+drawing one country list must not name its countries differently.
+`apps/web/src/lib/phone.ts` is gone, its 29 tests stayed where the runner is,
+and the web imports the helpers from shared. Country names still come from
+`Intl.DisplayNames` rather than from three JSON files — with one caveat now
+written down: Hermes builds `Intl` on the platform's own libraries and
+`DisplayNames` is the piece it may lack, so the sheet leads with the flag and
+the dial code, and a name that falls back to `AM` costs nothing.
+
+**What the phone still does not do that the browser does:** restore the caret
+after reformatting. A controlled `TextInput` has no reliable way to place one,
+so an edit in the *middle* of a number jumps to the end. Backspace from the end
+— the gesture people actually use on a phone — is handled: `retypeNational`
+(`apps/mobile/src/phone.ts`, 7 tests) deletes the digit in front of a separator
+rather than letting reformatting put the separator straight back, which is how
+the field would otherwise refuse to shorten.
+
+Docs: SCREENS.md §0, COMPONENTS.md (`PhoneField (mobile)`, and the web entry's
+new home for `countryOptions`).
+
+### 2026-08-10 — Picking a time on the phone
+
+The booking screen offered **seventy times at once**, in twenty rows of chips,
+and on today's date seventeen of those rows were greyed out because they had
+already happened: the first time anybody could actually book sat below eight
+hundred pixels of dead controls. Reported as "the booking screen is awkward —
+make choosing a time as easy as it is on the web", and the web is where the
+answer already was.
+
+**What the browser does that the phone did not.** `upcomingSlots` — dropping the
+times that have *gone*, which is not the same refusal as a table being taken —
+has been in `apps/web/src/lib/slots.ts` since the picker was rebuilt in August.
+It moved to **`@amragrir/shared` (`booking-slots.ts`)** with `hasFreeSlot`, by
+the same route and for the same reason `monthGrid` and `readyTimeOptions` took:
+two clients drawing one availability answer must not disagree about which of its
+times are worth showing. The web imports it from there now and `lib/slots.ts` is
+gone; its spec stayed where the runner is, as `monthGrid`'s did on the mobile
+side, and grew to **18 tests**.
+
+**`slotsByPartOfDay` is new**, and is the phone's half of the answer. Ten-minute
+grain was product's decision and is not up for reversal here — a guest who wants
+19:20 can ask for it — so what was left was to stop drawing a whole day at once:
+morning / afternoon / evening tabs over the design's four-column grid, twelve
+rows down to three. The groups come back **in the order the day meets them**
+rather than alphabetically or by clock, so a branch open past midnight keeps
+00:30 at the tail of its evening instead of filing it under morning nine hours
+before it opens. Everything under 05:00 is evening for the same reason. Tabs are
+drawn only when a day has more than one stretch.
+
+**Tapping a time no longer books it.** It posted `POST /reservations` on the
+spot — deposit authorised, table assigned — so a mis-tap in a grid of seventy
+chips cost a booking, and there was no such thing as a *chosen* time to change
+your mind about. The grid selects now and the screen's footer commits: "Book the
+table · 4 000 ֏" on `/book/{branchId}`, which had no button at all, and on the
+pre-order screen the CTA that already said "Book the table" while sitting
+disabled — a dead button naming the very thing it would not do. The web and the
+design have both always worked this way. `keepSelection` drops a chosen time the
+next availability answer no longer offers, so a party grown from two to six
+cannot carry a table for two along with it.
+
+**The screen stopped blinking on every day.** Tapping a date blanked the whole
+calendar to a spinner while the next answer loaded, which threw away the picker
+and rebuilt it — the layout jumped, and the stretch of day being browsed reset
+to morning each time, because the component holding it had been unmounted. The
+previous day's times stay on screen and stop taking taps until the answer lands,
+which is what the web picker does and why it does it.
+
+Also fixed while in there: the chips were `minWidth: 22%` with `flexGrow`, which
+adds the gaps *after* deciding four will fit and pushes the fourth over the edge.
+A fixed `width: 22%` fits four and their gaps at any phone width.
+
+Three i18n keys (`partMorning`, `partAfternoon`, `partEvening`) and one more —
+`noSlotsLeft`, because "no free times on this day" and "no times left today" are
+different news, and only the second is worth trying tomorrow for.
+
 ### 2026-08-10 — The phone asks where it is
 
 Every distance on the home feed was measured from Republic Square, and

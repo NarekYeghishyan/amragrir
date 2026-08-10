@@ -4,13 +4,16 @@
  * A phone number *is* the customer's identity here — `users.phone` is unique
  * and OTP keys derive from it — so there is exactly one canonical spelling of
  * any number (E.164, `+<dial><national>`), and it is agreed here rather than in
- * each app. The API normalises what it is sent, the web builds the field that
- * collects it, and both read this list; a country added here becomes valid in
- * both at once, which is the only way the two can't drift apart.
+ * each app. The API normalises what it is sent, the web and the phone build the
+ * fields that collect it, and all three read this list; a country added here
+ * becomes valid everywhere at once, which is the only way they can't drift
+ * apart.
  *
  * Armenia is the default because that is the market (AI_CONTEXT.md). The rest
  * are here for the diaspora and for visitors, who order from a home number.
  */
+
+import type { Language } from './enums';
 
 export interface PhoneCountry {
   /** ISO 3166-1 alpha-2. Doubles as the i18n key suffix and the flag emoji. */
@@ -210,4 +213,67 @@ export function countryOfE164(digits: string): PhoneCountry | null {
         country.nationalLengths.includes(bare.length - country.dial.length),
     ) ?? null
   );
+}
+
+/**
+ * The list as a country picker needs it: named in the customer's language, and
+ * carrying its own placeholder.
+ *
+ * Here rather than in an app because both clients draw this picker — the web's
+ * `<select>` and the phone's sheet — and offering a country the API would
+ * reject is the one bug either field can have. Sharing the list is what
+ * prevents it; sharing the *rendering* of the list is what stops the two
+ * pickers showing different countries under the same name.
+ */
+export interface CountryOption {
+  code: string;
+  dial: string;
+  /** Localised country name — see `countryOptions` for why this is not i18n. */
+  name: string;
+  flag: string;
+  example: string;
+}
+
+/**
+ * The flag emoji for an ISO 3166-1 alpha-2 code.
+ *
+ * Regional indicator symbols: 'AM' → 🇦🇲. Derived rather than stored, because a
+ * table of eight emoji is a table that can disagree with the eight codes.
+ */
+export function flagOf(code: string): string {
+  const BASE = 0x1f1e6; // REGIONAL INDICATOR SYMBOL LETTER A
+  return String.fromCodePoint(
+    ...[...code.toUpperCase()].map((letter) => BASE + letter.charCodeAt(0) - 'A'.charCodeAt(0)),
+  );
+}
+
+/**
+ * Country names come from `Intl.DisplayNames`, not from the dictionaries.
+ *
+ * Every country name in every language is already in ICU, correctly declined
+ * and kept current; copying eight of them into three JSON files would add
+ * twenty-four strings that only exist to drift. The dictionaries hold what is
+ * *ours* to write — labels, errors — and this is not that.
+ *
+ * The fallback is the ISO code, so a runtime without the locale data shows
+ * "AM +374" rather than an empty option. That fallback is not hypothetical on
+ * the phone: Hermes builds `Intl` on the platform's own libraries, and
+ * `DisplayNames` is the corner of it that may be missing. The flag and the dial
+ * code carry the row either way, which is why the picker leads with them.
+ */
+export function countryOptions(language: Language): CountryOption[] {
+  let names: Intl.DisplayNames | null = null;
+  try {
+    names = new Intl.DisplayNames([language], { type: 'region' });
+  } catch {
+    names = null;
+  }
+
+  return PHONE_COUNTRIES.map((country) => ({
+    code: country.code,
+    dial: country.dial,
+    name: names?.of(country.code) ?? country.code,
+    flag: flagOf(country.code),
+    example: country.example,
+  }));
 }

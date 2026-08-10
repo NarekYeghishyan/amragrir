@@ -12,17 +12,15 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Circle, G, Path, Svg } from 'react-native-svg';
+import { DEFAULT_PHONE_COUNTRY, toE164, type PhoneCountry } from '@amragrir/shared';
 import { auth } from '../src/api/endpoints';
 import { ApiError } from '../src/api/client';
+import { PhoneField } from '../src/components/PhoneField';
 import { useTranslate, type Translate } from '../src/language';
 import { useSession } from '../src/session';
 import { useTheme } from '../src/theme/useTheme';
 
 type Step = 'phone' | 'code';
-
-/** Armenia. The artifact draws it as a fixed prefix beside the field, so the
- *  customer types only the local part and cannot get the country wrong. */
-const DIAL_CODE = '+374';
 
 /**
  * Sign-in — the artifact's AUTH GATE, with two departures it forces.
@@ -35,6 +33,11 @@ const DIAL_CODE = '+374';
  *
  * The artifact also has no OTP step at all (SCREENS.md §0 records that it should
  * grow one). This screen keeps its two steps, because that is what the API does.
+ *
+ * The artifact's third departure, and the newest: **the `+374` it prints beside
+ * the field is a country picker.** It was a constant here, so a diaspora or a
+ * visiting customer — the people this product's own country list was built for —
+ * could not sign in from the phone at all. See `src/components/PhoneField.tsx`.
  */
 export default function AuthScreen() {
   const { colors } = useTheme();
@@ -43,16 +46,28 @@ export default function AuthScreen() {
   const { signIn } = useSession();
 
   const [step, setStep] = useState<Step>('phone');
-  const [local, setLocal] = useState('');
+  const [country, setCountry] = useState<PhoneCountry>(DEFAULT_PHONE_COUNTRY);
+  const [national, setNational] = useState('');
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const phone = `${DIAL_CODE}${local.replace(/\D/g, '')}`;
-  const ready = step === 'phone' ? local.replace(/\D/g, '').length >= 6 : code.length >= 4;
+  /**
+   * The number as the API takes it, or null while it is unfinished.
+   *
+   * Null is what disables Continue: a number that is short for its country is
+   * refused by `normalizePhone` anyway, and hearing that as a banner after a
+   * round trip is worse than not being able to press the button. `PhoneField`
+   * says *why* in the field itself.
+   */
+  const phone = toE164(country, national);
+  const ready = step === 'phone' ? phone !== null : code.length >= 4;
 
   async function submitPhone() {
+    if (phone === null) {
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -66,6 +81,14 @@ export default function AuthScreen() {
   }
 
   async function submitCode() {
+    if (phone === null) {
+      // Unreachable: the code step is only entered once a whole number sent
+      // one. Here so the number goes to `verify-code` exactly as it went to
+      // `send-code` — the two must agree, or the OTP is looked up under a key
+      // that was never written.
+      setStep('phone');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -111,30 +134,22 @@ export default function AuthScreen() {
               {step === 'phone' ? t('signIn') : t('codeLabel')}
             </Text>
             <Text style={[styles.hint, { color: colors.ink2 }]}>
-              {step === 'phone' ? t('authOtpNote') : `${t('codeHint')} ${phone}`}
+              {step === 'phone' ? t('authOtpNote') : `${t('codeHint')} ${phone ?? ''}`}
             </Text>
 
             {step === 'phone' ? (
-              <View
-                style={[styles.phoneRow, { backgroundColor: colors.card, borderColor: colors.line }]}
-              >
-                <Text style={[styles.dial, { color: colors.ink }]}>{DIAL_CODE}</Text>
-                <View style={[styles.divider, { backgroundColor: colors.line }]} />
-                <TextInput
-                  value={local}
-                  onChangeText={(next) => setLocal(next.replace(/[^0-9 ]/g, ''))}
-                  placeholder={t('authPhonePlaceholder')}
-                  placeholderTextColor={colors.ink3}
-                  keyboardType="phone-pad"
-                  autoFocus
-                  style={[styles.phoneInput, { color: colors.ink }]}
-                />
-              </View>
+              <PhoneField
+                country={country}
+                national={national}
+                onChangeCountry={setCountry}
+                onChangeNational={setNational}
+                autoFocus
+              />
             ) : (
               <>
                 <TextInput
                   value={code}
-                  onChangeText={setCode}
+                  onChangeText={(next) => setCode(next.replace(/\D/g, ''))}
                   placeholder="1234"
                   placeholderTextColor={colors.ink3}
                   keyboardType="number-pad"
@@ -250,18 +265,6 @@ const styles = StyleSheet.create({
   title: { fontSize: 27, fontWeight: '800', letterSpacing: -0.6 },
   hint: { fontSize: 13.5, lineHeight: 19, marginBottom: 6 },
   label: { fontSize: 12.5, fontWeight: '700', marginTop: 6 },
-  phoneRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 52,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingLeft: 14,
-    paddingRight: 8,
-  },
-  dial: { fontSize: 15.5, fontWeight: '700' },
-  divider: { width: 1, height: 24, marginHorizontal: 12 },
-  phoneInput: { flex: 1, height: '100%', fontSize: 15.5, letterSpacing: 0.5 },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 14,

@@ -3,6 +3,8 @@ import {
   DEFAULT_PHONE_COUNTRY,
   PHONE_COUNTRIES,
   countryOfE164,
+  countryOptions,
+  flagOf,
   formatNational,
   isValidNational,
   maxNationalDigits,
@@ -10,7 +12,6 @@ import {
   toE164,
 } from '@amragrir/shared';
 import { Language } from '@amragrir/shared';
-import { countryOptions, flagOf } from './phone';
 
 describe('the country list', () => {
   it('defaults to Armenia, which is the market', () => {

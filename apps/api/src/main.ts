@@ -79,4 +79,19 @@ async function bootstrap(): Promise<void> {
   Logger.log(`API listening on http://localhost:${port}/v1`, 'Bootstrap');
 }
 
-void bootstrap();
+void bootstrap().catch((error: unknown) => {
+  // A port that is already taken is a local accident, not a defect, and a stack
+  // trace through `node:net` says nothing a developer can act on. `dev` clears
+  // an orphaned copy of this API away before Nest starts
+  // (`scripts/free-port.mjs`), so what reaches here is a port held by something
+  // this repository has no claim on — say which port, and stop.
+  if ((error as NodeJS.ErrnoException | null)?.code === 'EADDRINUSE') {
+    const port = process.env.PORT ?? 3000;
+    Logger.error(
+      `Port ${port} is already in use — something else is listening on it. Stop it, or set PORT to a free one.`,
+      'Bootstrap',
+    );
+    process.exit(1);
+  }
+  throw error;
+});

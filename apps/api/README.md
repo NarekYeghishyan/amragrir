@@ -38,6 +38,18 @@ corepack pnpm --filter @amragrir/api dev
 API is served at `http://localhost:3000/v1`. Smoke test: `GET /v1/health`
 returns `{ "status": "ok", "db": "up", "time": ... }`.
 
+**`dev` clears the port before it starts.** `nest start --watch` runs the app as
+a child process, so when the watcher goes away without it — a closed terminal, a
+reloaded editor, Ctrl-C at the wrong moment — the orphan keeps the socket and
+the next `dev` used to die on `EADDRINUSE`. `scripts/free-port.mjs` runs first,
+stops that copy along with any watcher still above it, and waits for the port to
+actually come free. It touches **only** what it can prove belongs to this
+checkout (the command line names this repository, or the port answers
+`/v1/health` the way this API does); anything else it names and refuses to kill,
+exiting non-zero — a stranger on 3000 is your call, not the script's. It reads
+`PORT` exactly as the app does, so `PORT=3007 pnpm --filter @amragrir/api dev`
+clears 3007 and leaves 3000 alone. `pnpm start` is deliberately not wrapped.
+
 **`dev` recompiles this app, not the packages it imports.** `@amragrir/shared`
 is resolved as a built package (`dist/`), so a change to an enum or a status
 table there does not reach a running API until that package is rebuilt —
