@@ -30,6 +30,9 @@ export default function ProfileScreen() {
     { icon: '💳', label: t('profilePaymentMethods'), onPress: () => router.push('/settings') },
     { icon: '❤️', label: t('profileFavorites'), onPress: () => router.push('/favorites') },
     { icon: '🧾', label: t('profileOrderHistory'), onPress: () => router.push('/orders') },
+    // Beside the order history, because they are the same question asked of the
+    // other half of the product — what have I got coming.
+    { icon: '🪑', label: t('myReservations'), onPress: () => router.push('/bookings') },
     { icon: '🎁', label: t('profileRewards'), onPress: () => router.push('/referral') },
     { icon: '⚙️', label: t('profileSettings'), onPress: () => router.push('/settings') },
   ];

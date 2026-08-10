@@ -2,11 +2,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Circle, Path, Svg } from 'react-native-svg';
+import { RestaurantSort } from '@amragrir/shared';
 import { catalog, favorites as favoritesApi } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import type { Category, RestaurantListItem } from '../../src/api/types';
 import { RestaurantCard } from '../../src/components/RestaurantCard';
 import { NotificationBell } from '../../src/components/NotificationBell';
+import { FilterSheet } from '../../src/components/FilterSheet';
+import { NO_FILTERS, activeFilterCount, filterQuery, type Filters } from '../../src/filters';
 import { useTranslate } from '../../src/language';
 import { useTheme } from '../../src/theme/useTheme';
 import { useSession } from '../../src/session';
@@ -30,6 +33,11 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   /** Restaurant ids this account has saved — what fills the hearts. */
   const [saved, setSaved] = useState<ReadonlySet<string>>(new Set());
+  // What the sheet has narrowed the feed to, and whether it is open. Held here
+  // rather than in the sheet because it is the *feed's* state — the sheet edits
+  // a copy and hands one back on Apply.
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   useEffect(() => {
     if (categoryParam) {
@@ -37,7 +45,8 @@ export default function HomeScreen() {
     }
   }, [categoryParam]);
 
-  const load = useCallback(async (category: string | null, query: string | undefined) => {
+  const load = useCallback(
+    async (category: string | null, query: string | undefined, applied: Filters) => {
     setLoading(true);
     setError(null);
     try {
@@ -45,7 +54,12 @@ export default function HomeScreen() {
         catalog.categories(),
         catalog.restaurants({
           ...DEFAULT_ORIGIN,
-          sort: 'nearest',
+          // The sheet's sort, with the feed's own default underneath it: this
+          // is a list of what is *near*, and `NO_FILTERS` carries the API's
+          // `recommended` so that "reset" means the API's order rather than
+          // this screen's.
+          ...filterQuery(applied, true),
+          ...(applied.sort === NO_FILTERS.sort ? { sort: RestaurantSort.Nearest } : {}),
           ...(category ? { category } : {}),
           ...(query ? { q: query } : {}),
         }),
@@ -57,16 +71,19 @@ export default function HomeScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  },
+    [],
+  );
 
   useEffect(() => {
-    void load(activeCategory, q);
-  }, [load, activeCategory, q]);
+    void load(activeCategory, q, filters);
+  }, [load, activeCategory, q, filters]);
 
   // Favourites belong to an account, so a guest has none and the endpoint says
   // so with a 403 (ROLES_AND_PERMISSIONS.md §1). Their hearts stay hollow and a
   // press sends them to sign in.
   const canFavorite = user?.phoneVerified === true;
+  const filterCount = activeFilterCount(filters);
 
   // Refetched on focus rather than once: the Favorites tab can remove a
   // restaurant, and coming back to a filled heart for something no longer saved
@@ -193,9 +210,36 @@ export default function HomeScreen() {
 
             <View style={styles.sectionRow}>
               <Text style={[styles.section, { color: colors.ink }]}>{t('nearbyRestaurants')}</Text>
+              {/* The count answers "why am I seeing so few restaurants" without
+                  making somebody open the sheet to find out. The sort is not in
+                  it — every list is sorted somehow, so counting it would put a
+                  badge on a feed nobody has narrowed. */}
+              <View style={styles.sectionActions}>
               <Pressable onPress={() => router.push('/search')}>
                 <Text style={[styles.seeAll, { color: colors.accent }]}>{t('seeAll')}</Text>
               </Pressable>
+              <Pressable
+                onPress={() => setSheetOpen(true)}
+                accessibilityLabel={t('fltTitle')}
+                style={[
+                  styles.filterButton,
+                  {
+                    borderColor: filterCount > 0 ? colors.accent : colors.line,
+                    backgroundColor: filterCount > 0 ? colors.accentSoft : colors.card,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.filterText,
+                    { color: filterCount > 0 ? colors.accent : colors.ink },
+                  ]}
+                >
+                  {t('fltTitle')}
+                  {filterCount > 0 ? ` · ${filterCount}` : ''}
+                </Text>
+              </Pressable>
+              </View>
             </View>
 
             {loading ? <SkeletonList /> : null}
@@ -214,6 +258,19 @@ export default function HomeScreen() {
             <Text style={[styles.empty, { color: colors.ink2 }]}>{error ?? t('noResults')}</Text>
           )
         }
+      />
+
+      <FilterSheet
+        open={sheetOpen}
+        filters={filters}
+        // The feed always sends coordinates (`DEFAULT_ORIGIN`), so a distance
+        // is always a filter the API will honour.
+        hasOrigin
+        onClose={() => setSheetOpen(false)}
+        onApply={(next) => {
+          setFilters(next);
+          setSheetOpen(false);
+        }}
       />
     </View>
   );
@@ -344,6 +401,14 @@ const styles = StyleSheet.create({
   },
   section: { fontSize: 19, fontWeight: '700', letterSpacing: -0.4 },
   seeAll: { fontSize: 13.5, fontWeight: '600' },
+  sectionActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  filterButton: {
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  filterText: { fontSize: 13, fontWeight: '700' },
   empty: { fontSize: 15, textAlign: 'center', marginTop: 28 },
   skeletonList: { gap: 18 },
   card: { borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },

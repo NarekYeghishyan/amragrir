@@ -189,6 +189,22 @@ export const MenuTab = {
 } as const;
 export type MenuTab = (typeof MenuTab)[keyof typeof MenuTab];
 
+/**
+ * How a list of restaurants is ordered.
+ *
+ * Here rather than in the API's DTO, where it started, because two clients now
+ * name these values: the phone's filter sheet offers them as chips and its API
+ * client had them retyped as a bare string union — the duplication
+ * `packages/shared` exists to stop (docs/AI_CONTEXT.md, working rule 3).
+ */
+export const RestaurantSort = {
+  Recommended: 'recommended',
+  Nearest: 'nearest',
+  Fastest: 'fastest',
+  TopRated: 'top_rated',
+} as const;
+export type RestaurantSort = (typeof RestaurantSort)[keyof typeof RestaurantSort];
+
 export const DietaryTag = {
   Vegetarian: 'vegetarian',
   Vegan: 'vegan',

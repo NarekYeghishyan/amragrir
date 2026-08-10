@@ -2,11 +2,11 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { ReservationStatus, isReservationCancellable } from '@amragrir/shared';
+import { RESERVATION_STATUS_LABEL, depositLabelFor } from '@amragrir/i18n';
 import { api, ApiError, type Reservation } from '@/lib/api';
 import { parseLanguage, t } from '@/lib/language';
 import { formatAmd, formatTime } from '@/lib/format';
 import { readSession } from '@/lib/session';
-import { RESERVATION_STATUS_LABEL, depositLabelFor } from '@/lib/reservation-status';
 import {
   ORDER_ROBOTS,
   orderPath,
@@ -98,7 +98,7 @@ export default async function ReservationPage({ params, searchParams }: Props) {
           </div>
         )}
         <div className="row">
-          <span>{label(depositLabelFor(reservation.status, reservation.depositCredited)!)}</span>
+          <span>{label(depositLabelFor(reservation.status, reservation.depositCredited))}</span>
           <strong>{formatAmd(reservation.depositAmd)}</strong>
         </div>
         <div className="row">

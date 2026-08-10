@@ -3,7 +3,7 @@ import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View }
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import { Path, Svg } from 'react-native-svg';
-import { MenuTab } from '@amragrir/shared';
+import { MenuTab, RestaurantService } from '@amragrir/shared';
 import { catalog, favorites as favoritesApi } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import type { MenuItem, RestaurantDetail } from '../../src/api/types';
@@ -288,6 +288,35 @@ export default function RestaurantScreen() {
                 </Text>
               ) : null}
 
+              {/* A table, with nothing in the basket.
+
+                  Booking used to live only inside the pre-order funnel, so
+                  somebody who wanted a table on Saturday and had not decided
+                  what to eat had to put food in a basket to ask for one.
+                  `POST /reservations` has never wanted an order.
+
+                  Both halves are checked because they mean different things: a
+                  restaurant that does not declare `reserve` takes no bookings at
+                  all, and one that does but has `reservationsEnabled` off has
+                  paused them. Neither has a calendar to open, so neither gets a
+                  door that leads to an empty one. */}
+              {restaurant?.services.includes(RestaurantService.Reserve) &&
+              restaurant.reservationsEnabled ? (
+                <Pressable
+                  onPress={() =>
+                    router.push({
+                      pathname: '/book/[branchId]',
+                      params: { branchId: restaurant.branch.id, name: restaurant.name },
+                    })
+                  }
+                  style={[styles.book, { borderColor: colors.accent, backgroundColor: colors.accentSoft }]}
+                >
+                  <Text style={[styles.bookText, { color: colors.accent }]}>
+                    🪑 {t('bookTableAlone')}
+                  </Text>
+                </Pressable>
+              ) : null}
+
               <View style={styles.tabs}>
                 {TABS.map((value) => {
                   const selected = value === tab;
@@ -425,6 +454,15 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 12 },
   badgeText: { fontSize: 12.5, fontWeight: '700' },
   address: { fontSize: 12.5, marginTop: 10 },
+  book: {
+    marginTop: 14,
+    height: 48,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bookText: { fontSize: 15, fontWeight: '800' },
   tabs: { flexDirection: 'row', gap: 9, marginTop: 20, marginBottom: 6, flexWrap: 'wrap' },
   tab: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20 },
   tabText: { fontSize: 14, fontWeight: '700' },

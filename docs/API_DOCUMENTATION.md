@@ -177,10 +177,14 @@ Nearby list with filters (Home feed).
 - `category` and `dietary` select restaurants having **at least one matching
   menu item**, not attributes of the restaurant row.
 - `limit` is capped at **50**; exceeding it is a 400.
-- **`priceMin` / `priceMax`** filter on typical spend per person, derived as the
-  average price of a branch's *available* dishes. There is no stored
-  per-person column; this is an approximation, and a range that matches nothing
-  returns an empty list rather than silently dropping the filter.
+- **`priceMin` / `priceMax`** filter on typical spend **per person**, derived as
+  the average price of a branch's *available* dishes times
+  `SPEND_ITEMS_PER_PERSON` (2). There is no stored per-person column; this is an
+  approximation, and a range that matches nothing returns an empty list rather
+  than silently dropping the filter. The multiplier was added 2026-08-10 — until
+  then this compared a per-person budget against one dish's average, which is a
+  different quantity and put every branch below the range any client would draw
+  (BUSINESS_LOGIC.md §"Catalog").
 - **Response 200:**
 ```json
 { "items": [ {

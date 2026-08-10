@@ -3,6 +3,7 @@ import type {
   PaymentMethod,
   PickupOption,
   RestaurantService,
+  RestaurantSort,
   ServiceMode,
 } from '@amragrir/shared';
 import { request } from './client';
@@ -56,7 +57,7 @@ export const auth = {
 export interface RestaurantQuery {
   lat?: number;
   lng?: number;
-  sort?: 'recommended' | 'nearest' | 'fastest' | 'top_rated';
+  sort?: RestaurantSort;
   distMax?: number;
   minRating?: number;
   /** Only branches serving right now. */

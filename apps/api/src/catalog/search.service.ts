@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { Language } from '@amragrir/shared';
+import { Language, SPEND_ITEMS_PER_PERSON } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { localize, type I18nField } from '../common/i18n';
 import { distanceKm, roundKm } from './geo';
@@ -200,13 +200,26 @@ export class SearchService {
   }
 
   /**
-   * Branch ids whose typical spend falls in a price range.
+   * Branch ids whose typical spend **per person** falls in a range.
    *
-   * The design's "price per person" filter had no backing column, which is why
-   * it went unimplemented in Phase 2. Rather than add a denormalised column
-   * that every menu edit would have to keep in step, it is derived: the
-   * average price of a branch's **available** dishes. That is an
-   * approximation of a per-person spend, and it is documented as one.
+   * The design's "price per person" filter has no backing column, and adding
+   * one would mean a denormalised figure that every menu edit has to keep in
+   * step. So it is derived: the average price of a branch's available dishes,
+   * times `SPEND_ITEMS_PER_PERSON` — a person orders a main and something with
+   * it. An approximation, and documented as one.
+   *
+   * **The multiplier is the fix, not a decoration.** Without it this compared a
+   * per-person budget against one dish's average, which is a different quantity
+   * — dragged down by the drinks and the sides. Every branch on the platform sat
+   * between 1 480 and 3 900֏ by that measure while the design drew the slider
+   * from 4 000, so the filter matched everything or nothing wherever it was put,
+   * and it was left unbuilt for that reason.
+   *
+   * **A branch with nothing available is excluded, deliberately.** It has no
+   * typical spend to compare against, and "places where a meal costs up to X"
+   * is not a question an empty menu answers. Clients say "no limit" by sending
+   * no bound rather than by sending a large one — see `spendFromSlider` on the
+   * phone — so this never costs a guest a restaurant they could have eaten at.
    */
   async branchIdsInPriceRange(min?: number, max?: number): Promise<string[]> {
     const rows = await this.prisma.$queryRaw<{ branch_id: string }[]>`
@@ -214,8 +227,8 @@ export class SearchService {
         FROM menu_items
        WHERE is_available = true
        GROUP BY branch_id
-      HAVING AVG(price_amd) >= ${min ?? 0}
-         AND AVG(price_amd) <= ${max ?? Number.MAX_SAFE_INTEGER}
+      HAVING AVG(price_amd) * ${SPEND_ITEMS_PER_PERSON} >= ${min ?? 0}
+         AND AVG(price_amd) * ${SPEND_ITEMS_PER_PERSON} <= ${max ?? Number.MAX_SAFE_INTEGER}
     `;
     return rows.map((row) => row.branch_id);
   }

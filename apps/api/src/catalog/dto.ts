@@ -13,16 +13,12 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { DietaryTag, MenuTab, RestaurantService } from '@amragrir/shared';
+import { DietaryTag, MenuTab, RestaurantService, RestaurantSort } from '@amragrir/shared';
 import { toBool } from '../common/query';
 
-export const RestaurantSort = {
-  Recommended: 'recommended',
-  Nearest: 'nearest',
-  Fastest: 'fastest',
-  TopRated: 'top_rated',
-} as const;
-export type RestaurantSort = (typeof RestaurantSort)[keyof typeof RestaurantSort];
+/** Re-exported so the callers that import it from here keep working; it is
+ *  defined in `@amragrir/shared`, which both clients read. */
+export { RestaurantSort };
 
 /** Query strings arrive as `a,b` or repeated `?k=a&k=b`; normalise both. */
 const toArray = ({ value }: { value: unknown }): string[] | undefined => {

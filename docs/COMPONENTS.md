@@ -980,6 +980,37 @@ The browser's half of the bell, kept out of the component that runs it.
 - **`ORDER_STATUS_COPY`** is re-exported from `@amragrir/i18n`; it lives there
   because the app needs the same map, and a copy per client is a copy to forget.
 
+### BookingCalendar (`apps/mobile/src/components/BookingCalendar.tsx`)
+Choosing a day, a time and a party size — one calendar, two screens.
+- **Props:** `availability`, `date`, `month`, `guests`, `today`, `horizonDays`, `busySlot`, and four callbacks. Fully controlled: it owns no state, fetches nothing and decides nothing.
+- **It exists because there are now two ways to book.** A table comes with food from the pre-order flow, and on its own from a restaurant's page. Drawn twice, those would be two readings of one availability answer, and the way that fails is silent — a screen offering a slot the API then refuses.
+- **The horizon is a prop, not a constant.** Pre-order shortens it to the *order* horizon because there the table always carries food, and offering a day the kitchen will not cook on takes a deposit for a meal that is then refused at the payment. A table booked alone is bound only by `RESERVATION_MAX_LEAD_DAYS`.
+- **Every bound comes off `availability`** — the party cap is `min(maxGuests, maxSeats)`, the branch talking about itself, so a branch running a hall counts past twelve.
+
+### Book a table (`apps/mobile/app/book/[branchId].tsx`)
+A table with nothing in the basket — the one thing the phone could not do that the browser could.
+- **Booking used to exist only inside the pre-order funnel**, so a guest who wanted Saturday and had not decided what to eat had to put food in a basket to ask for one. `POST /reservations` has never wanted an order; the web dropped that requirement in August and this is the same door on the phone.
+- **Sign-in is asked before the deposit, not after.** A table belongs to a verified account, so a guest is sent to Auth on the slot press rather than by a 403 after the money.
+- **`replace`, not `push`, on success.** Swiping back to a calendar that has already taken a deposit would offer to take a second one.
+- **One idempotency key per slot**, held across retries and rotated when the slot changes — the same bargain the pre-order flow makes, for the same reason.
+
+### My bookings (`apps/mobile/app/bookings.tsx`, `apps/mobile/app/booking/[id].tsx`)
+The list of this account's tables, and one of them with the button that gives it back.
+- **`GET /reservations` and `POST /reservations/{id}/cancel` were in the phone's client and nothing called either.** A table booked here could not be checked afterwards and could only be given back by ringing the restaurant.
+- **Two lists, and the API decides which is which** — `upcoming` is every active status, `past` every terminal one. Splitting them from a status here would be the app and the back office disagreeing about whether a booking is over.
+- **What the deposit did is reported, not computed.** `depositCredited` and the status arrive settled; `depositLabelFor` only picks the sentence. Working the outcome out on the client would be a second copy of a rule about somebody's money.
+- **Cancelling asks twice.** The button becomes "Confirm" before it fires — a table is money, and a stray tap should not spend it. The screen is then redrawn from the booking the API answers with, not from an assumption about what cancelling did.
+- **A guest sees the empty state and a way in**, rather than a failed request: the endpoint refuses an unverified account, and asking anyway spends two round trips to be told what the session already knows.
+
+### FilterSheet (`apps/mobile/src/components/FilterSheet.tsx`, `apps/mobile/src/filters.ts`)
+The last screen of the mobile design artifact, built 2026-08-10 — see BUSINESS_LOGIC.md §"Catalog" for the units problem that held it up for a year.
+- **Edits are local until Apply.** A sheet that filtered on every chip would refetch the feed four times behind an overlay covering it, and "Reset" would mean nothing distinct from clearing them one at a time.
+- **It reopens on what the feed is showing**, never on an abandoned draft — which would tell somebody the feed is narrowed in ways it is not.
+- **Stepped price chips rather than a slider.** React Native ships no `Slider`; a row of taps is the same choice on a phone and says the numbers out loud.
+- **The distance section is hidden without coordinates**, because the API ignores `distMax` without a `lat`/`lng` pair and offering it would be the sheet claiming to narrow something it does not.
+- **`openNow` is deliberately not offered** although the DTO has it: the artifact does not draw it, and "serving right now" on a screen whose purpose is ordering *ahead* answers a question nobody arrived with.
+- The arithmetic — what counts as set, what gets sent — is in `filters.ts` with a spec, for the reason the cart's is: those decisions are wrong in ways a type check never catches, and testing them through a bottom sheet would mean mounting one.
+
 ### monthGrid / monthHasBookableDay (`apps/mobile/src/booking-calendar.ts`)
 The month behind the pre-order calendar, pulled out of the screen and given a spec of its own.
 - **No `Date.now()` anywhere in it.** `today` is passed in, so every rule — what is past, where the horizon falls — is testable without freezing a clock.

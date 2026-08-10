@@ -1,4 +1,4 @@
-import { Language } from '@amragrir/shared';
+import { Language, SPEND_ITEMS_PER_PERSON } from '@amragrir/shared';
 import { SearchService } from './search.service';
 import { SearchQueryDto } from './dto';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -87,5 +87,49 @@ describe('SearchService.search', () => {
     expect(restaurants).toEqual([]);
     expect(dishes).toEqual([]);
     expect(findMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The per-person spend filter.
+ *
+ * The design draws a "price per person" slider and there is no column behind
+ * it, so it is derived from the menu. What matters here is that the derivation
+ * measures the right *quantity*: it used to compare a per-person budget against
+ * one dish's average, which put every branch on the platform between 1 480 and
+ * 3 900֏ against a slider drawn from 4 000 — so the control matched everything
+ * or nothing, and the screen was never built.
+ */
+describe('SearchService.branchIdsInPriceRange', () => {
+  const askedWith = async (min?: number, max?: number) => {
+    const queryRaw = jest.fn().mockResolvedValue([]);
+    const service = new SearchService({ $queryRaw: queryRaw } as unknown as PrismaService);
+    await service.branchIdsInPriceRange(min, max);
+    // A tagged template: the strings are one array, the interpolated values the
+    // rest of the arguments, in order.
+    return queryRaw.mock.calls[0].slice(1) as number[];
+  };
+
+  it('scales a dish average up to a person’s meal before comparing', () => {
+    // A main and something with it. The multiplier appears on both sides of the
+    // range, so neither end is measured against the wrong quantity.
+    return askedWith(4000, 12000).then((values) => {
+      expect(values).toEqual([SPEND_ITEMS_PER_PERSON, 4000, SPEND_ITEMS_PER_PERSON, 12000]);
+    });
+  });
+
+  it('is open-ended at either end when only one bound is given', () => {
+    return askedWith(undefined, 8000).then((values) => {
+      expect(values[1]).toBe(0);
+      expect(values[3]).toBe(8000);
+    });
+  });
+
+  it('lets a branch through that the old measure would have excluded', () => {
+    // The regression in one line: a branch averaging 3 000֏ a dish is a 6 000֏
+    // meal, and a guest who said "up to 6 000 a head" means to see it.
+    const average = 3000;
+    expect(average * SPEND_ITEMS_PER_PERSON).toBeGreaterThanOrEqual(6000);
+    expect(average).toBeLessThan(6000);
   });
 });

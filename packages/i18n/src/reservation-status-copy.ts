@@ -1,5 +1,14 @@
 import { ReservationStatus } from '@amragrir/shared';
-import type { TranslationKey } from '@amragrir/i18n';
+import type { TranslationKey } from './index';
+
+/**
+ * How a booking is described to the person who made it.
+ *
+ * Beside the dictionaries rather than in one app, for the reason
+ * `order-status-copy.ts` is: the web and the phone both show somebody their own
+ * table, and a status word or a deposit line that differed between them would
+ * be the two apps disagreeing about what happened to that person's money.
+ */
 
 /**
  * What each reservation status is called on screen.
@@ -26,10 +35,7 @@ export const RESERVATION_STATUS_LABEL: Record<ReservationStatus, TranslationKey>
  * Working the outcome out here from the status would be a second copy of a rule
  * about money, and the two would eventually disagree about a no-show.
  */
-export function depositLabelFor(
-  status: string,
-  depositCredited: boolean,
-): TranslationKey | null {
+export function depositLabelFor(status: string, depositCredited: boolean): TranslationKey {
   if (depositCredited) {
     return 'depositOnBill';
   }

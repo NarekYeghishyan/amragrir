@@ -113,6 +113,36 @@ and offers the booking alone. The branch travels with the press because an empty
 basket names no restaurant, and without it the checkout would not know whose
 table was being asked for.
 
+### 3b. The same, on the phone (2026-08-10)
+
+Booking on mobile existed **only** inside the pre-order funnel — basket, then
+dine-in, then a slot — so the phone had the limit the web dropped in August, and
+a second one on top of it: nothing on the phone ever listed a booking again.
+`GET /reservations` and its cancel were in the client with nothing calling them.
+
+```
+Restaurant (nothing in the basket)
+   ↓  "🪑 Book a table" — only where the restaurant declares `reserve`
+      and has not paused bookings
+/book/{branchId} — its own screen, the full RESERVATION_MAX_LEAD_DAYS horizon
+   ↓  date & time, guests, deposit
+   ↓  (sign-in if the phone is unverified — asked before the money, not after)
+POST /reservations — deposit authorised, table assigned
+   ↓  replace, so back does not offer to book a second table
+/booking/{id} — the table, and the button that gives it back
+```
+
+**Its own screen rather than the checkout's, unlike the web.** The web reuses
+the checkout because that is already where a booking's terms are settled; on the
+phone the pre-order screen is a *basket* screen — quote, service mode, ready
+time — and teaching it to render with no basket would have been more surface
+than a second screen. What the two phone screens share is the calendar itself
+(`BookingCalendar`), which is the part that must not diverge: it is one reading
+of one availability answer.
+
+**And the list.** `/bookings` from the profile, beside the order history —
+upcoming and past, with the API deciding which is which.
+
 **Adding food afterwards is a link, not a second flow** — "Order food ahead" in
 the empty summary goes to the menu, and once a dish is in the basket the same
 checkout prices the two together, with the deposit coming off that bill.

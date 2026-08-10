@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import { RESERVATION_STATUS_LABEL } from '@amragrir/i18n';
 import { api, ApiError, type Reservation } from '@/lib/api';
 import { parseLanguage, t } from '@/lib/language';
 import { readSession } from '@/lib/session';
-import { RESERVATION_STATUS_LABEL } from '@/lib/reservation-status';
 import {
   ORDER_ROBOTS,
   homePath,

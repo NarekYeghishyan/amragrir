@@ -36,3 +36,9 @@ export const dictionaries = {
  * than in a client. See the module for what it maps and why it is shared.
  */
 export { ORDER_STATUS_COPY } from './order-status-copy';
+
+/**
+ * The booking equivalents. Same argument as `ORDER_STATUS_COPY`: these are
+ * keys rather than strings, and both clients read them.
+ */
+export { RESERVATION_STATUS_LABEL, depositLabelFor } from './reservation-status-copy';

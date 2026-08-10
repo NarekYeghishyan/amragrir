@@ -234,3 +234,39 @@ export const PICKUP_CODE_PATTERN = new RegExp(`^\\d{${PICKUP_CODE_LENGTH}}$`);
  * sent it.
  */
 export const HANDOVER_CODE_MISMATCH = 'pickup_code_mismatch';
+
+/**
+ * How many dishes one person's meal is, for the "spend per person" filter.
+ *
+ * There is no stored per-person figure and adding one would mean a
+ * denormalised column that every menu edit has to keep in step, so the filter
+ * derives it: a branch's typical spend is the average price of its available
+ * dishes, times this.
+ *
+ * **It used to be times nothing**, which is what broke the filter. One dish's
+ * average is not what a person spends — it is dragged down by the drinks and
+ * the sides, and it put every branch on this platform between 1 480 and 3 900֏
+ * while the design drew a slider from 4 000 to 24 000. The two ranges did not
+ * overlap, so the control matched everything or nothing wherever it was put,
+ * and it was left unbuilt for that reason.
+ *
+ * Two, because a person orders a main and something with it. It is an
+ * approximation and is documented as one — but it is an approximation of the
+ * right quantity, which the previous number was not.
+ */
+export const SPEND_ITEMS_PER_PERSON = 2;
+
+/**
+ * The ends of the spend slider, in AMD.
+ *
+ * Here rather than in the client that draws it, because the API is what decides
+ * whether a branch falls inside them: a slider whose ends the server has never
+ * heard of is how the first version of this filter came to match nothing. The
+ * span covers what the model actually produces on real menus and leaves room
+ * above it — the top is a no-op today and is meant to be, since a filter that
+ * caps out below the most expensive restaurant on the platform cannot express
+ * "anywhere".
+ */
+export const SPEND_FILTER_MIN_AMD = 2000;
+export const SPEND_FILTER_MAX_AMD = 20000;
+export const SPEND_FILTER_STEP_AMD = 1000;

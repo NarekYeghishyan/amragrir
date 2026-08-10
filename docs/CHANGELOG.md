@@ -7,6 +7,65 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — The phone can see the table it booked
+
+Table booking on the phone was one-way. A guest could take a table — but only
+from inside the pre-order funnel, with food already in a basket — and then never
+mention it again: `GET /reservations`, `GET /reservations/{id}` and
+`POST /reservations/{id}/cancel` had all been in the mobile client for months
+with nothing calling any of them. A booking made on the phone could not be
+checked afterwards and could only be given back by ringing the restaurant. The
+browser has had every one of these screens since August.
+
+Three doors, all of which the web already had:
+
+- **Book a table on its own** (`/book/{branchId}`), from a button on the
+  restaurant's page. `POST /reservations` has never wanted an order; requiring
+  a basket was the funnel's assumption, not the API's.
+- **My bookings** (`/bookings`), reached from the profile beside the order
+  history — two lists, upcoming and past, with the API deciding which is which.
+- **One booking** (`/booking/{id}`), with the deposit's fate reported rather
+  than recomputed, and a cancel button that asks twice.
+
+**One calendar, not two.** The month grid, the slot chips, the party stepper and
+the deposit card came out of `preorder.tsx` into `BookingCalendar`, because two
+booking paths drawing their own would be two readings of one availability answer
+— and that failure is silent: a screen offering a slot the API then refuses.
+
+`RESERVATION_STATUS_LABEL` and `depositLabelFor` moved from `apps/web/src/lib`
+into `@amragrir/i18n`, where `ORDER_STATUS_COPY` already lives. Both clients now
+show somebody their own table; a status word or a deposit line that differed
+between them would be the two apps disagreeing about what happened to that
+person's money.
+
+### 2026-08-10 — The filter sheet, and the number that held it up for a year
+
+The last screen of the mobile design artifact. It went unbuilt over a units
+mismatch: the sheet draws a **price per person** slider from 4 000 to 24 000֏,
+and the API measured a branch's *average dish price* — which puts every
+restaurant on this platform between 1 480 and 3 900. The two ranges do not
+overlap, so the control as drawn matched everything or nothing wherever it was
+put, and shipping it would have meant shipping a slider that does nothing.
+
+The API was measuring the wrong quantity. One dish's average is not what a
+person spends — it is dragged down by the drinks and the sides. `spend =
+AVG(price) × SPEND_ITEMS_PER_PERSON`, which is **2**: a person orders a main and
+something with it. Still an approximation, still documented as one, but now an
+approximation of the right thing. Both ends of the slider live beside the model
+in `packages/shared`, so a client cannot draw a range the server has never heard
+of — which is exactly how this went wrong the first time.
+
+The sheet itself is the artifact's: sort, price, distance, rating, dietary and
+service, with a count on the Home button. The sort is **not** counted — every
+list is sorted somehow, and a badge over a feed nobody had narrowed would be the
+control lying about itself. `openNow` exists in the DTO and is deliberately not
+offered: the artifact does not draw it, and "serving right now" on a screen
+whose purpose is ordering *ahead* answers a question nobody arrived with.
+
+`RestaurantSort` moved from the API's DTO into `packages/shared`. The phone's
+client had it retyped as a bare string union, which is the duplication that
+package exists to stop.
+
 ### 2026-08-10 — The book is the order board at a different hour
 
 The Bookings tab shipped as a dense striped list: a second visual language for

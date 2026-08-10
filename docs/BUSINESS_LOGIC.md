@@ -606,11 +606,27 @@ not.
 - **Dish menu tabs [from design]:** Popular, Mains, Sides, Drinks.
 - **Restaurant status:** `open` / `closed` (affects ability to order). **[from design]**
 - **Sort [from design]:** Recommended, Nearest, Fastest (by prep), Top rated.
-- **Filters [from design]:** price/person (4000–24000֏), max distance (0.5–5 km), min rating, dietary (Vegetarian/Vegan/Halal/Gluten-free), service (Pickup/Dine-in/Reserve). Active filters are counted in a badge; results recompute the `results count`.
+- **Filters [from design, built 2026-08-10]:** price/person, max distance, min
+  rating, dietary (Vegetarian/Vegan/Halal/Gluten-free), service
+  (Pickup/Dine-in/Reserve). Active filters are counted in a badge — the **sort
+  is not counted**, because every list is sorted somehow and a badge over a feed
+  nobody had narrowed would be the control lying about itself.
 - **Price per person is derived, not stored:** the average price of a branch's
-  *available* dishes. There is no per-person column, and adding one would mean
-  keeping a denormalised figure in step with every menu edit. This is an
-  approximation and is documented as one.
+  *available* dishes, times `SPEND_ITEMS_PER_PERSON` (**2** — a person orders a
+  main and something with it). There is no per-person column, and adding one
+  would mean keeping a denormalised figure in step with every menu edit. This is
+  an approximation and is documented as one.
+- **The multiplier is why the filter exists at all.** Without it the comparison
+  was a per-person budget against *one dish's* average — a different quantity,
+  dragged down by the drinks and the sides. Every branch on the platform sat
+  between 1 480 and 3 900֏ by that measure while the design drew a slider from
+  4 000 to 24 000, so the two ranges never overlapped: the control matched
+  everything or nothing wherever it was put, and the sheet went unbuilt for a
+  year because of it. The slider's ends now come from `SPEND_FILTER_MIN_AMD` /
+  `SPEND_FILTER_MAX_AMD` in `packages/shared`, which the server reads too.
+- **The top of the slider means "no limit", not its number.** A guest who moves
+  it all the way is saying "anywhere", and sending the cap would quietly exclude
+  anything above it — the same failure in a smaller form.
 - **Search returns restaurants and dishes as two lists**, not one blended one:
   "Sushi" is both a cuisine and a dish, and someone looking for a place to eat
   wants different rows from someone looking for a specific plate. Dish search
