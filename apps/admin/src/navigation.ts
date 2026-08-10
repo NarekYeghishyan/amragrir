@@ -225,17 +225,24 @@ export interface OrderScope {
 /**
  * Which day's book a link is about, and whose.
  *
- * `/bookings?branch=:branchId&date=YYYY-MM-DD`. Both are addresses rather than
- * state, for the reason the order board's pickers are: they answer "whose, and
- * when", which is exactly what a link to the book is *for* — a message saying
- * "look at Saturday at Northern Ave" is otherwise a sentence somebody has to
- * re-enter by hand.
+ * `/bookings?restaurant=:id&branch=:branchId&date=YYYY-MM-DD`. All three are
+ * addresses rather than state, for the reason the order board's pickers are:
+ * they answer "whose, and when", which is exactly what a link to the book is
+ * *for* — a message saying "look at Saturday at Northern Ave" is otherwise a
+ * sentence somebody has to re-enter by hand.
  *
- * Both are separately optional. No branch is every branch the account can
- * reach; no date is today, which is what the screen opens on and what a bare
+ * The restaurant is here for the same reason it is on `OrderScope` and not
+ * because anything queries by it: narrowing to a chain is a place the two
+ * pickers can be left in, and a scope that remembered the branch but not the
+ * restaurant would reopen with the branch picker showing every branch on the
+ * platform again.
+ *
+ * Each is separately optional. No branch is every branch the account can reach;
+ * no date is today, which is what the screen opens on and what a bare
  * `/bookings` should keep meaning tomorrow.
  */
 export interface BookingScope {
+  restaurantId: string | null;
   branchId: string | null;
   /** A local Yerevan date, `YYYY-MM-DD`, or null for today. Stored as the
    *  string rather than a `Date` because that is what the API takes and what
@@ -429,6 +436,9 @@ function bookQuery(scope: BookingScope | null): string {
     return '';
   }
   const params = new URLSearchParams();
+  if (scope.restaurantId !== null) {
+    params.set(RESTAURANT, scope.restaurantId);
+  }
   if (scope.branchId !== null) {
     params.set(BRANCH, scope.branchId);
   }
@@ -468,9 +478,12 @@ function menuTarget(search: string): MenuTarget | null {
  *  half-deleted, not a booking day whose name is the empty string. */
 function bookScope(search: string): BookingScope | null {
   const params = new URLSearchParams(search);
+  const restaurantId = params.get(RESTAURANT) || null;
   const branchId = params.get(BRANCH) || null;
   const date = params.get(DATE) || null;
-  return branchId === null && date === null ? null : { branchId, date };
+  return restaurantId === null && branchId === null && date === null
+    ? null
+    : { restaurantId, branchId, date };
 }
 
 /** What a board's query says it is showing, or null when it says nothing.

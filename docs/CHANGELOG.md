@@ -7,6 +7,34 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — The book is the order board at a different hour
+
+The Bookings tab shipped as a dense striped list: a second visual language for
+the same job, on a screen a shift moves to and from all evening. It is now built
+the way the board is — the same header, the same toolbar, the same stage strip,
+and the same cards on the same grid. The card is literally `.order`'s, shared by
+naming both in the stylesheet rather than by giving the book a copy of the
+padding and the radius, which is how the two would have come to differ by two
+pixels.
+
+**Two things were broken rather than merely different.** Both pickers carried
+`''` as their "All" option, and Radix reserves the empty string for the
+placeholder state — so on arrival, in their default state, they read "Choose…"
+rather than "All restaurants". And the day lived in component state, so the
+screen read the date out of the address on arrival and never wrote one back:
+stepping to Saturday left the URL saying today, and the link the whole feature
+was built to be sendable could not be sent. Restaurant, branch and day are now
+all in the address, and the pickers narrow by navigating.
+
+**A stage strip, counted here rather than by the API.** The board pages through
+hundreds and has to ask the server what each stage holds; a book is one day and
+arrives whole, so All / To confirm / Confirmed / Seated is arithmetic over what
+is already on screen. `bookingsPartial` keeps that honest — a day bigger than
+its page says so, rather than letting four tabs quietly undercount.
+
+The header carries **covers, not bookings**: the number a kitchen staffs and
+preps for, and the one thing a book knows that counting its rows does not say.
+
 ### 2026-08-10 — The 00:30 party is on tonight's page, not tomorrow's
 
 Found by running the finished module against a real database rather than by

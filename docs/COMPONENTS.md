@@ -1160,22 +1160,62 @@ The book for one service. The endpoints behind it were written months ago and
 had nothing calling them: `GET /restaurant/reservations` and its status PATCH
 were tested, permissioned and unreachable, and `reservations:read` opened
 nothing.
-- **A day at a time, with the date in the address** beside the branch, so "look
-  at Saturday at Northern Ave" is a link somebody can send rather than a
-  sentence they re-enter at the other end. Arrows either side of the picker,
-  because a date field alone makes "tomorrow" three clicks.
+- **Built as the order board is built** — the same header, the same toolbar, the
+  same stage strip, the same cards on the same `.board` grid. A shift moves
+  between the two all evening, and two screens answering "who is next" with
+  different furniture make the second one something to learn rather than
+  something to read. It first shipped as a dense striped list, which was a
+  second visual language for the same job.
+- **The card is `.order`'s**, shared by naming both in the stylesheet rather
+  than by giving this screen a copy of the padding, the radius and the actions
+  row. A copy is how the two would come to differ by 2px.
+- **The hour is the card's name**, where an order's code is: the one thing that
+  has to be readable at arm's length across a board.
+- **"All" is `*`, not `''`.** Radix reserves the empty string for the
+  placeholder state, so an option carrying it renders a trigger reading
+  "Choose…" instead of "All restaurants" — which on this screen was both
+  pickers, in their default state, on arrival. The board's `ANY` sentinel, for
+  the board's reason.
+- **The pickers appear only when there is a choice**, via the same
+  `restaurantsOf` / `showsBranchFilter` / `soleBranchOf` the board uses. Most
+  kitchens are one branch of one restaurant, and two selects reading "All" is
+  furniture.
+- **Restaurant, branch and day are all in the address**, and the pickers narrow
+  by navigating (`replace`) rather than by setting state — so "look at Saturday
+  at Northern Ave" is a link somebody can send rather than a sentence they
+  re-enter at the other end. The day used to live in state, which meant the
+  screen only ever *read* it from the URL and never wrote it back.
+- **Clearing keeps the day.** Widening from one branch to all of them is still a
+  question about Saturday; a "clear" that dropped the date would land on
+  nothing, which is why the date is not counted as a filter.
+- **The stage strip is counted here, not by the API** — the one place this
+  differs from the board, and for a reason: the board pages through hundreds and
+  must ask the server what each stage holds, where a book is one day and arrives
+  whole. `bookingsPartial` is what keeps that honest, saying so out loud when a
+  day overflows the page rather than letting the counts quietly undercount.
 - **Two views of the same day.** The list answers "who is coming next" and fits
   a phone; the room answers "what is free at nine", which is what somebody at
-  the door with four people is asking and which no list answers well.
+  the door with four people is asking and which no list answers well. The view
+  switch rides in the stage strip's `actions` slot, drawn smaller like the
+  board's Paid sub-filter: a second strip as loud as the first competes with it.
 - **The room needs one branch.** Across every branch in reach there is no single
   set of rows to draw, so the grid says which of the two reasons it fell back to
   a list rather than silently showing one.
 - **Every table gets a row, including the empty ones** — a grid of only the busy
   tables hides exactly the answer being looked for.
+- **A pressed bar opens the same card the list is made of**, so acting on a
+  booking is one thing to learn rather than two. A booking whose table has gone
+  gets its own heading underneath: a card with no bar above it otherwise reads
+  as a rendering fault.
 - **The buttons come from the shared transition table**, so the panel cannot
-  offer a move the API is about to refuse.
-- The customer's phone number is a `tel:` link on every row: a booking nobody
+  offer a move the API is about to refuse. Only the ordinary next step is
+  filled, as on the board — "No-show" should never compete with "Seated".
+- The customer's phone number is a `tel:` link on every card: a booking nobody
   can ring is a table nobody can free.
+- `BookingCard` is exported for `render.spec.tsx` alone. The screen paints a
+  skeleton on its first frame and fills in from an effect, so a test that
+  renders only the screen never sees a card — which left everything a shift
+  actually reads with nothing asserting it renders.
 
 ### bookings.ts (`apps/admin/src/bookings.ts`)
 The book's arithmetic, tested on its own (`bookings.spec.ts`).
@@ -1191,6 +1231,13 @@ The book's arithmetic, tested on its own (`bookings.spec.ts`).
 - **A booking whose table has gone is set aside, not dropped.** It is still a
   guest arriving, and a grid that silently omitted them would be worse than one
   with an awkward row underneath.
+- **The stages are the board's `STAGE_TABS` idea, counted locally.** `all` is
+  offered and is where the screen opens, which the board deliberately does not
+  do: there, "everything" mixed work nobody had accepted with work sitting on
+  the pass. A book has no such problem — everyone in it is coming today, and
+  seeing that list is why it was opened.
+- **Covers, not bookings.** `coversOf` is the number a kitchen staffs and preps
+  for, and the one thing a book knows that counting its rows does not say.
 
 ---
 

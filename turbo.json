@@ -3,7 +3,14 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      // The web build reads both: `next build` prerenders every restaurant
+      // page, which means calling the API, and it bakes `SITE_URL` into
+      // canonical links and JSON-LD. Turbo's default env allowlist filtered
+      // them out, so a build pointed at a non-default API could not reach it —
+      // and, worse, a build made against one API was a cache hit for another,
+      // because neither variable was part of the key.
+      "env": ["API_URL", "SITE_URL"]
     },
     "dev": {
       "dependsOn": ["^build"],

@@ -56,6 +56,85 @@ export const ACTION_LABEL: Record<ReservationStatusValue, AdminTranslationKey> =
   no_show: 'bookingActionNoShow',
 };
 
+/**
+ * The stage strip above the book, in the order an evening moves through it.
+ *
+ * The same shape as the order board's `STAGE_TABS` and for the same reason:
+ * "which bookings am I looking at" and "how far along are they" are different
+ * questions, and answering the second with a strip of tabs is what stops a host
+ * scanning forty rows for the three nobody has confirmed.
+ *
+ * Counted and filtered **here** rather than by the API, which is the one place
+ * this differs from the board. The board pages through hundreds and so must ask
+ * the server what each stage holds; a book is one day and arrives whole, so the
+ * counts are simply arithmetic over what is already on screen. `bookingsPartial`
+ * below is what keeps that honest when a day overflows the page.
+ *
+ * `all` is offered and is where the screen opens, which the board deliberately
+ * does *not* do — there, "everything" mixed work nobody had accepted with work
+ * sitting on the pass. A book has no such problem: everyone in it is coming
+ * today, and the whole point of opening it is to see that list.
+ */
+export const BOOKING_STAGES = [
+  { value: 'all', label: 'bookingStageAll' },
+  { value: 'pending', label: 'bookingStagePending' },
+  { value: 'confirmed', label: 'bookingStageConfirmed' },
+  { value: 'seated', label: 'bookingStageSeated' },
+] as const satisfies readonly { value: string; label: AdminTranslationKey }[];
+
+export type BookingStage = (typeof BOOKING_STAGES)[number]['value'];
+
+/** Whether a booking belongs under a stage. `all` holds everything the book
+ *  came back with, which is already only the live statuses — the API drops the
+ *  finished ones, because a book is who is coming rather than who came. */
+export function inStage(status: ReservationStatusValue, stage: BookingStage): boolean {
+  return stage === 'all' || status === stage;
+}
+
+/** How many of a day's bookings sit under each stage. */
+export function stageCounts(
+  bookings: readonly StaffReservation[],
+): Record<BookingStage, number> {
+  const counts = { all: 0, pending: 0, confirmed: 0, seated: 0 } as Record<BookingStage, number>;
+  for (const booking of bookings) {
+    for (const stage of BOOKING_STAGES) {
+      if (inStage(booking.status, stage.value)) {
+        counts[stage.value] += 1;
+      }
+    }
+  }
+  return counts;
+}
+
+/**
+ * Whether the day is bigger than the page fetched for it.
+ *
+ * The counts on the tabs are computed from what arrived, so a day that
+ * overflowed would have a strip of numbers that quietly undercount. Said out
+ * loud rather than left to be discovered: a tab reading "4" over five bookings
+ * is worse than one that admits it is showing part of the day.
+ */
+export function bookingsPartial(shown: number, total: number): boolean {
+  return total > shown;
+}
+
+/** Covers — people, not bookings. What a kitchen actually staffs and preps
+ *  for, and the one number a book has that the row count does not give. */
+export function coversOf(bookings: readonly StaffReservation[]): number {
+  return bookings.reduce((sum, booking) => sum + booking.guests, 0);
+}
+
+/**
+ * Whether the book is narrowed to something, which is what puts the "clear"
+ * button in the toolbar and changes what an empty day says.
+ *
+ * The **date is not a filter**. Every book is a book of some day, so a screen
+ * that called today a narrowing would offer to clear it and land on nothing.
+ */
+export function hasBookingFilters(restaurantId: string, branchId: string): boolean {
+  return restaurantId !== '' || branchId !== '';
+}
+
 /** The colour a status carries, so the state reads before the word does. */
 export function statusTone(status: ReservationStatusValue): 'neutral' | 'accent' | 'good' | 'warn' | 'danger' {
   switch (status) {

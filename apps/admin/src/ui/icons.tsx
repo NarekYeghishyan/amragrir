@@ -168,6 +168,12 @@ const ICONS = {
       <path d="m3.4 7 8.6 6 8.6-6" />
     </>
   ),
+  // Beside a number on a booking card. A glyph rather than the bare digits
+  // because the number shares its row with a name, and a host scanning for
+  // somebody to ring should find the thing to ring rather than read both.
+  phone: (
+    <path d="M7 3.5h3l1.5 4-2 1.5a12 12 0 0 0 5.5 5.5l1.5-2 4 1.5v3a1.5 1.5 0 0 1-1.6 1.5C11.9 18.4 5.6 12.1 5.5 5.1A1.5 1.5 0 0 1 7 3.5z" />
+  ),
 } as const satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof ICONS;

@@ -1808,7 +1808,12 @@ p {
   gap: var(--space-md);
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
 }
-.order {
+/* The card on a board. `.booking` is the same card — the book is the order
+   board at a different hour, and a shift reads both all evening. Shared by
+   naming both here rather than by giving the booking screen its own copy of
+   these declarations, which is how the two would drift apart. */
+.order,
+.booking {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
@@ -1850,7 +1855,8 @@ p {
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
 }
-.order__meta {
+.order__meta,
+.booking__meta {
   color: var(--ink2);
   font-size: 12.5px;
 }
@@ -1934,7 +1940,8 @@ p {
 /* The slack a stretched card carries belongs above the buttons, not below
    them: `margin-top: auto` takes it, which both keeps the actions on the
    card's bottom edge and lines them up across the row. */
-.order__actions {
+.order__actions,
+.booking__actions {
   display: flex;
   gap: var(--space-sm);
   flex-wrap: wrap;
@@ -2608,41 +2615,89 @@ p {
   align-items: center;
   gap: 6px;
 }
-.book__date .input {
+.book__date-input {
   width: 10.5rem;
 }
-.book__list {
+/* The room and the cards a pressed bar opens, stacked. */
+.book__room {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+/* List/Room, riding in the stage strip's own actions slot. Sized down like the
+   board's Paid sub-filter: a second strip as loud as the first competes with
+   it, and this one answers a smaller question. */
+.book__views .segmented-row {
+  margin-bottom: 0;
+}
+.book__views .segmented {
+  padding: 2px;
+  background: transparent;
+  border: 1px solid var(--line);
+}
+.book__views .segmented__item {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.book__views .segmented__item[data-state='active'] {
+  background: var(--chip);
+  box-shadow: none;
+}
+
+/* ── a booking, as the board draws an order ────────────────────────────────
+   The card itself is `.order`'s, shared by widening those selectors rather
+   than restated here: a shift moves between the two screens all evening, and
+   a second copy of the padding is how the two would come to differ by 2px.
+   What is below is only what a booking has and an order does not. */
+.booking__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+/* The hour is the card's name, the way the code is an order's — the one thing
+   that has to be readable from arm's length across a board. Smaller than
+   `.order__code` and without its letter-spacing: a time is read as a number
+   rather than spelled out digit by digit the way a code is. */
+.booking__time {
+  font-size: 24px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.booking__who {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 6px;
+  padding: var(--space-md);
+  border-radius: var(--radius-inner);
+  background: var(--bg);
+  font-size: 13.5px;
 }
-.book__row {
+/* Underlined only on hover, like a dish on an order: a board of twenty cards
+   with twenty underlined numbers reads as a page of links. */
+.booking__phone {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-}
-.book__row:nth-child(odd) {
-  background: var(--chip);
-}
-.book__time {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  min-width: 3.5em;
-}
-.book__who {
-  display: flex;
-  flex-direction: column;
-  min-width: 10em;
-}
-.book__actions {
-  display: flex;
   gap: 6px;
-  margin-left: auto;
-  flex-wrap: wrap;
+  color: var(--ink2);
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+}
+.booking__phone:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.booking__table .select {
+  width: 100%;
+}
+/* The badge is the link's whole hit area, so nothing is underlined and the
+   chip itself is the thing being pressed. */
+.booking__order {
+  text-decoration: none;
 }
 
 /* The room. Tables down the side, time across the top; the track is a
@@ -2650,6 +2705,9 @@ p {
    pixel-per-minute constant that would need a second copy here. */
 .book__grid {
   padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -2742,11 +2800,8 @@ p {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.book__unplaced,
-.book__chosen {
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
+.book__unplaced {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-sm);
 }

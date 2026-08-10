@@ -3,13 +3,18 @@ import type { StaffReservation, StaffTable } from './api';
 import {
   actionsFor,
   barStyle,
+  bookingsPartial,
   clockLabel,
+  coversOf,
   gridRows,
   gridSpan,
+  hasBookingFilters,
   hourMarks,
+  inStage,
   isLive,
   minutesFromServiceMidnight,
   shiftDate,
+  stageCounts,
   statusTone,
   todayInYerevan,
 } from './bookings';
@@ -189,5 +194,58 @@ describe('moving through the days', () => {
   it('steps a day either way without falling off a month', () => {
     expect(shiftDate('2026-08-31', 1)).toBe('2026-09-01');
     expect(shiftDate('2026-03-01', -1)).toBe('2026-02-28');
+  });
+});
+
+/**
+ * The stage strip, which is the order board's and is counted here rather than
+ * by the API — a book is one day and arrives whole, where the board pages
+ * through hundreds and has to ask.
+ */
+describe('the stage strip', () => {
+  const day = [
+    booking({ id: 'a', status: 'pending', guests: 2 }),
+    booking({ id: 'b', status: 'confirmed', guests: 4 }),
+    booking({ id: 'c', status: 'confirmed', guests: 6 }),
+    booking({ id: 'd', status: 'seated', guests: 3 }),
+  ];
+
+  it('counts every stage, and counts all of them under All', () => {
+    expect(stageCounts(day)).toEqual({ all: 4, pending: 1, confirmed: 2, seated: 1 });
+  });
+
+  it('holds everything under All and only its own under a stage', () => {
+    expect(inStage('pending', 'all')).toBe(true);
+    expect(inStage('pending', 'pending')).toBe(true);
+    expect(inStage('confirmed', 'pending')).toBe(false);
+  });
+
+  it('counts an empty book as zero rather than refusing to answer', () => {
+    expect(stageCounts([])).toEqual({ all: 0, pending: 0, confirmed: 0, seated: 0 });
+  });
+
+  it('admits when the day is bigger than the page it counted', () => {
+    // The one thing that makes client-side counts dishonest, so it is said out
+    // loud: a tab reading "4" over five bookings is worse than a screen that
+    // owns up to showing part of the day.
+    expect(bookingsPartial(4, 4)).toBe(false);
+    expect(bookingsPartial(50, 63)).toBe(true);
+  });
+});
+
+describe('what the header and the toolbar say', () => {
+  it('counts covers, not bookings — that is what a kitchen preps for', () => {
+    expect(
+      coversOf([booking({ guests: 2 }), booking({ guests: 6 }), booking({ guests: 1 })]),
+    ).toBe(9);
+    expect(coversOf([])).toBe(0);
+  });
+
+  it('treats the day as context rather than as a filter to clear', () => {
+    // Every book is a book of some day, so a "clear" that dropped the date
+    // would land on nothing. Only the two pickers narrow.
+    expect(hasBookingFilters('', '')).toBe(false);
+    expect(hasBookingFilters('r1', '')).toBe(true);
+    expect(hasBookingFilters('', 'b1')).toBe(true);
   });
 });

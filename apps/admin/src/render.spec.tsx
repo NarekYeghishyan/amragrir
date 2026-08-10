@@ -14,8 +14,8 @@ import { NotificationBell } from './notifications';
 import { OrderQrDialog, QrPlate } from './order-qr';
 import type { PhotoUpload } from './photo';
 import { Pagination, ToastProvider, TooltipProvider } from './ui';
-import type { StaffBranch, StaffMenuItem, StaffOrder } from './api';
-import { Bookings } from './screens/Bookings';
+import type { StaffBranch, StaffMenuItem, StaffOrder, StaffReservation } from './api';
+import { BookingCard, Bookings } from './screens/Bookings';
 import { Orders } from './screens/Orders';
 import { Menu } from './screens/Menu';
 import { Restaurants } from './screens/Restaurants';
@@ -612,19 +612,40 @@ describe('the book', () => {
   // The screen a shift lives on. Its first paint is the loading state — effects
   // do not run here, so nothing is fetched — and a panel that crashes before
   // its data arrives is broken for everyone.
-  it('renders its own header and both views', () => {
+  it('renders its own header and the day stepper', () => {
     const markup = render(<Bookings branches={[BRANCH]} scope={null} />);
     expect(markup).toContain('Bookings');
     expect(markup).toContain('Who is coming, when, and to which table.');
-    expect(markup).toContain('List');
-    expect(markup).toContain('Room');
+    expect(markup).toContain('Previous day');
+    expect(markup).toContain('Next day');
+  });
+
+  it('waits on a skeleton the size of the board’s, not on an empty book', () => {
+    // The first paint is "not loaded yet" and must not read as "nobody is
+    // coming" — the two are a shift's most consequential difference, and this
+    // screen used to show the same strip for both.
+    const markup = render(<Bookings branches={[BRANCH]} scope={null} />);
+    expect(markup).toContain('skeleton');
+    expect(markup).not.toContain('the book is empty');
   });
 
   it('opens on the day an address names rather than on today', () => {
     const markup = render(
-      <Bookings branches={[BRANCH]} scope={{ branchId: 'b1', date: '2026-09-05' }} />,
+      <Bookings
+        branches={[BRANCH]}
+        scope={{ restaurantId: null, branchId: 'b1', date: '2026-09-05' }}
+      />,
     );
     expect(markup).toContain('2026-09-05');
+  });
+
+  it('offers a restaurant picker only when there is more than one', () => {
+    // The order board's rule, and this screen now follows it: one restaurant is
+    // the common case and a select holding a single option is furniture. The
+    // branch picker stays whenever there are branches to choose between.
+    const comboboxes = (markup: string) => markup.split('role="combobox"').length - 1;
+    expect(comboboxes(render(<Bookings branches={[BRANCH]} scope={null} />))).toBe(0);
+    expect(comboboxes(render(<Bookings branches={[BRANCH, OTHER_BRANCH]} scope={null} />))).toBe(2);
   });
 
   it('speaks the panel’s language', () => {
@@ -632,5 +653,91 @@ describe('the book', () => {
     expect(render(<Bookings branches={[BRANCH]} scope={null} />, Language.Hy)).toContain(
       'Ամրագրումներ',
     );
+  });
+});
+
+/**
+ * The card the board is made of.
+ *
+ * Rendered on its own because the screen above it paints a skeleton first and
+ * fills in from an effect — which never runs here — so everything a shift
+ * actually reads had nothing asserting it renders.
+ */
+describe('one booking on the board', () => {
+  const BOOKING: StaffReservation = {
+    id: 'res-1',
+    status: 'confirmed',
+    branch: { id: 'b1', name: 'Northern Ave', address: null },
+    restaurantName: 'Dolmama',
+    reservedFor: '2026-09-01T15:00:00.000Z',
+    localTime: '19:00',
+    localDate: '2026-09-01',
+    guests: 4,
+    tableNo: '7',
+    depositAmd: 8000,
+    depositStatus: 'authorized',
+    depositCredited: false,
+    freeCancellationUntil: null,
+    orderId: null,
+    createdAt: '2026-08-20T10:00:00.000Z',
+    customerName: 'Ani',
+    customerPhone: '+37411223344',
+  };
+
+  const card = (over: Partial<StaffReservation> = {}) =>
+    render(
+      <BookingCard
+        t={createTranslator(Language.En)}
+        booking={{ ...BOOKING, ...over }}
+        tables={[]}
+        busy={false}
+        onMove={() => {}}
+        onReseat={() => {}}
+      />,
+    );
+
+  it('leads with the hour, which is what a host scans for', () => {
+    const markup = card();
+    expect(markup).toContain('booking__time');
+    expect(markup).toContain('19:00');
+  });
+
+  it('carries the guest, the party and the table', () => {
+    const markup = card();
+    expect(markup).toContain('Ani');
+    expect(markup).toContain('4 guests');
+    expect(markup).toContain('Table 7');
+  });
+
+  it('makes the number dialable', () => {
+    // A booking nobody can ring is a table nobody can free.
+    expect(card()).toContain('href="tel:+37411223344"');
+  });
+
+  it('says so when nobody left a name or took a table', () => {
+    const markup = card({ customerName: null, tableNo: null });
+    expect(markup).toContain('No name');
+    expect(markup).toContain('No table');
+  });
+
+  it('shows the deposit and whether it is still held', () => {
+    expect(card()).toContain('Deposit held');
+    expect(card({ depositCredited: true })).toContain('Credited to the bill');
+  });
+
+  it('offers only the moves the API would accept', () => {
+    // From the shared transition table, so the card cannot show a button that
+    // 422s. A confirmed booking is seated, no-showed or cancelled — and cannot
+    // go back to pending or be confirmed twice.
+    const markup = card();
+    expect(markup).toContain('Seat');
+    expect(markup).toContain('No-show');
+    expect(markup).toContain('Cancel');
+    expect(markup).not.toContain('Confirm<');
+  });
+
+  it('draws no actions on a booking that is over', () => {
+    const markup = card({ status: 'cancelled' });
+    expect(markup).not.toContain('btn--touch');
   });
 });

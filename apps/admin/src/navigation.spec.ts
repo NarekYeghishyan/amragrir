@@ -177,20 +177,35 @@ describe('every screen has an address', () => {
     expect(routePath({ tab: 'Customers', person: 'user-1' })).toBe('/customers?person=user-1');
     // "Look at Saturday at Northern Ave" — a sentence somebody would otherwise
     // have to re-enter by hand at the other end.
-    expect(routePath({ tab: 'Bookings', book: { branchId: 'b2', date: '2026-09-05' } })).toBe(
-      '/bookings?branch=b2&date=2026-09-05',
-    );
-    expect(routePath({ tab: 'Bookings', book: { branchId: 'b2', date: null } })).toBe(
-      '/bookings?branch=b2',
-    );
+    expect(
+      routePath({
+        tab: 'Bookings',
+        book: { restaurantId: null, branchId: 'b2', date: '2026-09-05' },
+      }),
+    ).toBe('/bookings?branch=b2&date=2026-09-05');
+    expect(
+      routePath({ tab: 'Bookings', book: { restaurantId: null, branchId: 'b2', date: null } }),
+    ).toBe('/bookings?branch=b2');
+    // The restaurant travels too, so a book narrowed to a chain reopens with
+    // the branch picker still narrowed rather than showing the whole platform.
+    expect(
+      routePath({
+        tab: 'Bookings',
+        book: { restaurantId: 'r1', branchId: null, date: null },
+      }),
+    ).toBe('/bookings?restaurant=r1');
   });
 
   it('reads the book back out of its own address', () => {
-    const parsed = parseRoute('/bookings', '?branch=b2&date=2026-09-05');
-    expect(parsed?.book).toEqual({ branchId: 'b2', date: '2026-09-05' });
+    const parsed = parseRoute('/bookings', '?restaurant=r1&branch=b2&date=2026-09-05');
+    expect(parsed?.book).toEqual({
+      restaurantId: 'r1',
+      branchId: 'b2',
+      date: '2026-09-05',
+    });
 
-    // Neither half named is the bare screen: every branch in reach, today —
-    // and that has to keep meaning today tomorrow, so it is not written out.
+    // No part named is the bare screen: every branch in reach, today — and that
+    // has to keep meaning today tomorrow, so it is not written out.
     expect(parseRoute('/bookings')?.book).toBeNull();
 
     // A key somebody half-deleted is not a branch whose id is the empty string.
