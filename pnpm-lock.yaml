@@ -218,6 +218,9 @@ importers:
       expo-localization:
         specifier: ~57.0.1
         version: 57.0.1(expo@57.0.7)(react@19.2.3)
+      expo-location:
+        specifier: ~57.0.8
+        version: 57.0.8(expo@57.0.7)(supports-color@8.1.1)(typescript@6.0.3)
       expo-router:
         specifier: ~57.0.7
         version: 57.0.7(a46520c1df68db317d46e21325be672b)
@@ -254,10 +257,10 @@ importers:
         version: 19.2.17
       jest:
         specifier: ~29.7.0
-        version: 29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.9.3))
+        version: 29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3))
       jest-expo:
         specifier: ~57.0.2
-        version: 57.0.2(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(expo@57.0.7)(jest@29.7.0(supports-color@8.1.1))(react-native@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(@react-native/metro-config@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1)
+        version: 57.0.2(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(expo@57.0.7)(jest@29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3)))(react-native@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(@react-native/metro-config@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1)
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -4069,6 +4072,11 @@ packages:
       expo: '*'
       react: '*'
 
+  expo-location@57.0.8:
+    resolution: {integrity: sha512-XtELTtjm1LQ89r7meE63pxRu0IKli1+rYTem6xNr3u2ZIYwXNzyehxsW+65Fc86qgK2P6RUNdt1AkNj+U6+Q2g==}
+    peerDependencies:
+      expo: '*'
+
   expo-modules-autolinking@57.0.8:
     resolution: {integrity: sha512-YBDgbJHlhhhr3JaKErW6znsIL8zQsh206LaDpWrLHV/WluRwhYfZuF/fhkVN7b/DsRxIu0UeCPExaEPMxlC2Hw==}
     hasBin: true
@@ -7865,7 +7873,7 @@ snapshots:
 
   '@expo/image-utils@0.11.3(supports-color@8.1.1)(typescript@6.0.3)':
     dependencies:
-      '@expo/require-utils': 57.0.3(supports-color@8.1.1)(typescript@6.0.3)
+      '@expo/require-utils': 57.0.4(supports-color@8.1.1)(typescript@6.0.3)
       '@expo/spawn-async': 1.8.0
       chalk: 4.1.2
       getenv: 2.0.0
@@ -8116,7 +8124,7 @@ snapshots:
       '@expo/config': 57.0.5(supports-color@8.1.1)(typescript@6.0.3)
       '@expo/config-plugins': 57.0.5(supports-color@8.1.1)(typescript@6.0.3)
       '@expo/config-types': 57.0.2
-      '@expo/image-utils': 0.11.3(supports-color@8.1.1)(typescript@6.0.3)
+      '@expo/image-utils': 0.11.4(supports-color@8.1.1)(typescript@6.0.3)
       '@expo/json-file': 11.0.1
       '@react-native/normalize-colors': 0.86.0
       debug: 4.4.3(supports-color@8.1.1)
@@ -8536,6 +8544,41 @@ snapshots:
       graceful-fs: 4.2.11
       jest-changed-files: 29.7.0
       jest-config: 29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.9.3))
+      jest-haste-map: 29.7.0
+      jest-message-util: 29.7.0
+      jest-regex-util: 29.6.3
+      jest-resolve: 29.7.0
+      jest-resolve-dependencies: 29.7.0(supports-color@8.1.1)
+      jest-runner: 29.7.0(supports-color@8.1.1)
+      jest-runtime: 29.7.0(supports-color@8.1.1)
+      jest-snapshot: 29.7.0(supports-color@8.1.1)
+      jest-util: 29.7.0
+      jest-validate: 29.7.0
+      jest-watcher: 29.7.0
+      micromatch: 4.0.8
+      pretty-format: 29.7.0
+      slash: 3.0.0
+      strip-ansi: 6.0.1
+    transitivePeerDependencies:
+      - babel-plugin-macros
+      - supports-color
+      - ts-node
+
+  '@jest/core@29.7.0(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3))':
+    dependencies:
+      '@jest/console': 29.7.0
+      '@jest/reporters': 29.7.0(supports-color@8.1.1)
+      '@jest/test-result': 29.7.0
+      '@jest/transform': 29.7.0(supports-color@8.1.1)
+      '@jest/types': 29.6.3
+      '@types/node': 22.20.1
+      ansi-escapes: 4.3.2
+      chalk: 4.1.2
+      ci-info: 3.9.0
+      exit: 0.1.2
+      graceful-fs: 4.2.11
+      jest-changed-files: 29.7.0
+      jest-config: 29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3))
       jest-haste-map: 29.7.0
       jest-message-util: 29.7.0
       jest-regex-util: 29.6.3
@@ -10827,6 +10870,21 @@ snapshots:
       - supports-color
       - ts-node
 
+  create-jest@29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3)):
+    dependencies:
+      '@jest/types': 29.6.3
+      chalk: 4.1.2
+      exit: 0.1.2
+      graceful-fs: 4.2.11
+      jest-config: 29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3))
+      jest-util: 29.7.0
+      prompts: 2.4.2
+    transitivePeerDependencies:
+      - '@types/node'
+      - babel-plugin-macros
+      - supports-color
+      - ts-node
+
   create-require@1.1.1: {}
 
   cron@4.4.0:
@@ -11329,6 +11387,14 @@ snapshots:
       expo: 57.0.7(1ed791e66037779c4f068ffbcd8784cf)
       react: 19.2.3
       rtl-detect: 1.1.2
+
+  expo-location@57.0.8(expo@57.0.7)(supports-color@8.1.1)(typescript@6.0.3):
+    dependencies:
+      '@expo/image-utils': 0.11.4(supports-color@8.1.1)(typescript@6.0.3)
+      expo: 57.0.7(1ed791e66037779c4f068ffbcd8784cf)
+    transitivePeerDependencies:
+      - supports-color
+      - typescript
 
   expo-modules-autolinking@57.0.8(supports-color@8.1.1)(typescript@6.0.3):
     dependencies:
@@ -12126,6 +12192,25 @@ snapshots:
       - supports-color
       - ts-node
 
+  jest-cli@29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3)):
+    dependencies:
+      '@jest/core': 29.7.0(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3))
+      '@jest/test-result': 29.7.0
+      '@jest/types': 29.6.3
+      chalk: 4.1.2
+      create-jest: 29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3))
+      exit: 0.1.2
+      import-local: 3.2.0
+      jest-config: 29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3))
+      jest-util: 29.7.0
+      jest-validate: 29.7.0
+      yargs: 17.7.3
+    transitivePeerDependencies:
+      - '@types/node'
+      - babel-plugin-macros
+      - supports-color
+      - ts-node
+
   jest-config@29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.9.3)):
     dependencies:
       '@babel/core': 7.29.7(supports-color@8.1.1)
@@ -12153,6 +12238,37 @@ snapshots:
     optionalDependencies:
       '@types/node': 22.20.1
       ts-node: 10.9.2(@types/node@22.20.1)(typescript@5.9.3)
+    transitivePeerDependencies:
+      - babel-plugin-macros
+      - supports-color
+
+  jest-config@29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3)):
+    dependencies:
+      '@babel/core': 7.29.7(supports-color@8.1.1)
+      '@jest/test-sequencer': 29.7.0
+      '@jest/types': 29.6.3
+      babel-jest: 29.7.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1)
+      chalk: 4.1.2
+      ci-info: 3.9.0
+      deepmerge: 4.3.1
+      glob: 7.2.3
+      graceful-fs: 4.2.11
+      jest-circus: 29.7.0(supports-color@8.1.1)
+      jest-environment-node: 29.7.0
+      jest-get-type: 29.6.3
+      jest-regex-util: 29.6.3
+      jest-resolve: 29.7.0
+      jest-runner: 29.7.0(supports-color@8.1.1)
+      jest-util: 29.7.0
+      jest-validate: 29.7.0
+      micromatch: 4.0.8
+      parse-json: 5.2.0
+      pretty-format: 29.7.0
+      slash: 3.0.0
+      strip-json-comments: 3.1.1
+    optionalDependencies:
+      '@types/node': 22.20.1
+      ts-node: 10.9.2(@types/node@22.20.1)(typescript@6.0.3)
     transitivePeerDependencies:
       - babel-plugin-macros
       - supports-color
@@ -12200,7 +12316,7 @@ snapshots:
       jest-mock: 29.7.0
       jest-util: 29.7.0
 
-  jest-expo@57.0.2(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(expo@57.0.7)(jest@29.7.0(supports-color@8.1.1))(react-native@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(@react-native/metro-config@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1):
+  jest-expo@57.0.2(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(expo@57.0.7)(jest@29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3)))(react-native@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(@react-native/metro-config@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1):
     dependencies:
       '@jest/create-cache-key-function': 29.7.0
       '@jest/globals': 29.7.0(supports-color@8.1.1)
@@ -12209,7 +12325,7 @@ snapshots:
       jest-environment-jsdom: 29.7.0(supports-color@8.1.1)
       jest-snapshot: 29.7.0(supports-color@8.1.1)
       jest-watch-select-projects: 2.0.0
-      jest-watch-typeahead: 2.2.1(jest@29.7.0(supports-color@8.1.1))
+      jest-watch-typeahead: 2.2.1(jest@29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3)))
       json5: 2.2.3
       lodash: 4.18.1
       react-native: 0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(@react-native/metro-config@0.86.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1)
@@ -12402,11 +12518,11 @@ snapshots:
       chalk: 3.0.0
       prompts: 2.4.2
 
-  jest-watch-typeahead@2.2.1(jest@29.7.0(supports-color@8.1.1)):
+  jest-watch-typeahead@2.2.1(jest@29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3))):
     dependencies:
       ansi-escapes: 6.2.1
       chalk: 4.1.2
-      jest: 29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.9.3))
+      jest: 29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3))
       jest-regex-util: 29.6.3
       jest-watcher: 29.7.0
       slash: 5.1.0
@@ -12443,6 +12559,18 @@ snapshots:
       '@jest/types': 29.6.3
       import-local: 3.2.0
       jest-cli: 29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.9.3))
+    transitivePeerDependencies:
+      - '@types/node'
+      - babel-plugin-macros
+      - supports-color
+      - ts-node
+
+  jest@29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3)):
+    dependencies:
+      '@jest/core': 29.7.0(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3))
+      '@jest/types': 29.6.3
+      import-local: 3.2.0
+      jest-cli: 29.7.0(@types/node@22.20.1)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3))
     transitivePeerDependencies:
       - '@types/node'
       - babel-plugin-macros
@@ -14095,6 +14223,25 @@ snapshots:
       typescript: 5.9.3
       v8-compile-cache-lib: 3.0.1
       yn: 3.1.1
+
+  ts-node@10.9.2(@types/node@22.20.1)(typescript@6.0.3):
+    dependencies:
+      '@cspotcode/source-map-support': 0.8.1
+      '@tsconfig/node10': 1.0.12
+      '@tsconfig/node12': 1.0.11
+      '@tsconfig/node14': 1.0.3
+      '@tsconfig/node16': 1.0.4
+      '@types/node': 22.20.1
+      acorn: 8.17.0
+      acorn-walk: 8.3.5
+      arg: 4.1.3
+      create-require: 1.1.1
+      diff: 4.0.4
+      make-error: 1.3.6
+      typescript: 6.0.3
+      v8-compile-cache-lib: 3.0.1
+      yn: 3.1.1
+    optional: true
 
   tsconfig-paths-webpack-plugin@4.2.0:
     dependencies:

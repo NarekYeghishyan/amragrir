@@ -48,6 +48,12 @@ supported; see below):
   name field shows rather than which endpoint runs.
 - **`GET /search/popular`** (§2) does not exist. The six popular tags are
   editorial content in `packages/i18n` (`popular1`…`popular6`) until it does.
+
+**The feed measures from the device** (2026-08-10, `src/origin.ts`). It sent
+Republic Square for everybody until then, so every distance and the whole
+"Nearest" order were about the centre of Yerevan rather than about the reader.
+The permission is asked on first use of the feed and refused gracefully — the
+old constant is the fallback, and nothing waits on the dialog.
 - ~~**Reward points, order count and coupon count** (§10) have no endpoint.~~
   **Wrong, and corrected 2026-08-10.** `GET /me` has returned `rewardPoints`,
   `ordersCount` and `couponsCount` all along — the web profile has been drawing

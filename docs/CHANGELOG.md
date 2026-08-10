@@ -7,6 +7,27 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — The phone asks where it is
+
+Every distance on the home feed was measured from Republic Square, and
+"Nearest" sorted by it. One hardcoded pair of coordinates, correct for anybody
+standing in the centre of Yerevan and quietly wrong for everybody else — wrong
+in the way that does not look broken. The **browser** has asked for the
+visitor's position since the location picker was built; the device with the
+actual GPS did not.
+
+`expo-location` (SDK-pinned `~57.0.8`), a foreground permission asked on first
+use of the feed rather than at launch, and `Accuracy.Low` — about a kilometre,
+which is all a sorted list and a distance rounded to 100m can read. Asking for
+a ten-metre fix would spend the radio on precision nothing here displays.
+
+**Republic Square stays as the fallback** and the feed never waits on the
+dialog. A screen that shows nothing until somebody answers a permission prompt
+shows nothing to everyone who says no; a refusal, a sensor that is off, or the
+seconds before a fix simply leave the distances as wrong as they were for
+everybody yesterday, which is a floor rather than a regression. The feed
+refetches when the fix lands.
+
 ### 2026-08-10 — "Reorder" reorders
 
 The button on every finished order on the phone said *Reorder* and opened the

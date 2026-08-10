@@ -13,15 +13,16 @@ import { NO_FILTERS, activeFilterCount, filterQuery, type Filters } from '../../
 import { useTranslate } from '../../src/language';
 import { useTheme } from '../../src/theme/useTheme';
 import { useSession } from '../../src/session';
-
-/** Republic Square — stands in for device geolocation until permissions land. */
-const DEFAULT_ORIGIN = { lat: 40.1776, lng: 44.5126 };
+import { useOrigin } from '../../src/origin';
 
 export default function HomeScreen() {
   const { colors } = useTheme();
   const t = useTranslate();
   const router = useRouter();
   const { user } = useSession();
+  // The device's own position once it is granted, Republic Square until then —
+  // see `useOrigin` for why the feed does not wait on the dialog.
+  const origin = useOrigin();
   // Set by the Search tab's shortcuts, which navigate here rather than keeping
   // a second list of restaurants of their own.
   const { category: categoryParam, q } = useLocalSearchParams<{ category?: string; q?: string }>();
@@ -46,14 +47,20 @@ export default function HomeScreen() {
   }, [categoryParam]);
 
   const load = useCallback(
-    async (category: string | null, query: string | undefined, applied: Filters) => {
+    async (
+      category: string | null,
+      query: string | undefined,
+      applied: Filters,
+      from: { lat: number; lng: number },
+    ) => {
     setLoading(true);
     setError(null);
     try {
       const [categoryResult, restaurantResult] = await Promise.all([
         catalog.categories(),
         catalog.restaurants({
-          ...DEFAULT_ORIGIN,
+          lat: from.lat,
+          lng: from.lng,
           // The sheet's sort, with the feed's own default underneath it: this
           // is a list of what is *near*, and `NO_FILTERS` carries the API's
           // `recommended` so that "reset" means the API's order rather than
@@ -75,9 +82,11 @@ export default function HomeScreen() {
     [],
   );
 
+  // Refetched when the fix lands: every distance on screen and the whole
+  // "Nearest" order were measured from somewhere else until it did.
   useEffect(() => {
-    void load(activeCategory, q, filters);
-  }, [load, activeCategory, q, filters]);
+    void load(activeCategory, q, filters, origin);
+  }, [load, activeCategory, q, filters, origin]);
 
   // Favourites belong to an account, so a guest has none and the endpoint says
   // so with a 403 (ROLES_AND_PERMISSIONS.md §1). Their hearts stay hollow and a
@@ -263,8 +272,9 @@ export default function HomeScreen() {
       <FilterSheet
         open={sheetOpen}
         filters={filters}
-        // The feed always sends coordinates (`DEFAULT_ORIGIN`), so a distance
-        // is always a filter the API will honour.
+        // The feed always sends coordinates — the device's own once granted,
+        // Republic Square until then — so a distance is always a filter the
+        // API will honour.
         hasOrigin
         onClose={() => setSheetOpen(false)}
         onApply={(next) => {
