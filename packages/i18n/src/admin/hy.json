@@ -721,5 +721,6 @@
   "bookingActionSeat": "Նստեցնել",
   "bookingActionComplete": "Ավարտել",
   "bookingActionCancel": "Չեղարկել",
-  "bookingActionNoShow": "Չի եկել"
+  "bookingActionNoShow": "Չի եկել",
+  "orderAtTable": "Սեղան {table} · {time} · {guests} հյուր"
 }

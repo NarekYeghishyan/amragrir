@@ -459,6 +459,7 @@ describe('an order’s code as a QR code', () => {
     status: OrderStatus.Preparing,
     serviceMode: 'pickup',
     pickupOption: 'take_away',
+    booking: null,
     branch: { id: 'b1', name: 'Northern Ave' },
     customerName: 'Aram',
     itemsCount: 2,

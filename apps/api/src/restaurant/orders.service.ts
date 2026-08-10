@@ -20,6 +20,7 @@ import type { OrderHistoryEntry } from '../orders/order-history';
 import { reminderFor } from '../orders/scheduling';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
 import { orderScope } from '../staff/scope';
+import { localTimeLabel } from '../reservations/slots';
 import { ListQueueDto, QueueFilter, SetOrderReminderDto, SetOrderStatusDto } from './dto';
 
 /**
@@ -36,6 +37,23 @@ export interface QueueItem {
   code: string;
   status: OrderStatus;
   serviceMode: string;
+  /**
+   * The booking a dine-in order belongs to — its table, its hour and the party
+   * it was laid for. Null on every pickup order, which has none.
+   *
+   * A dine-in order used to arrive on the board as `serviceMode: 'dine_in'` and
+   * nothing else, which told the kitchen the least useful half of what it knows:
+   * that these people are eating here, but not where they are sitting, when they
+   * are due, or how many covers to lay. All three are on the reservation the
+   * order already carries — `orders.reservation_id` — so the board was throwing
+   * away an answer it was holding.
+   */
+  booking: {
+    tableNo: string | null;
+    /** Yerevan local `HH:MM`, which is what a pass reads. */
+    time: string;
+    guests: number;
+  } | null;
   /**
    * Where a pickup order ends up — `take_away` or `eat_in`, null on a dine-in
    * order.
@@ -265,6 +283,9 @@ export class RestaurantOrdersService {
           branch: true,
           payment: { select: { status: true } },
           user: { select: { name: true } },
+          reservation: {
+            select: { reservedFor: true, guests: true, table: { select: { tableNo: true } } },
+          },
           items: {
             select: { menuItemId: true, nameSnapshot: true, qty: true, lineTotalAmd: true },
           },
@@ -307,6 +328,17 @@ export class RestaurantOrdersService {
         code: row.code,
         status: row.status as OrderStatus,
         serviceMode: row.serviceMode,
+        booking:
+          // Truthiness rather than `=== null`: Prisma's `include` always yields
+          // the key, but nothing else that builds a row of this shape is obliged
+          // to, and a missing booking and an absent one mean the same thing here.
+          !row.reservation
+            ? null
+            : {
+                tableNo: row.reservation.table?.tableNo ?? null,
+                time: localTimeLabel(row.reservation.reservedFor),
+                guests: row.reservation.guests,
+              },
         pickupOption: row.pickupOption,
         branch: { id: row.branch.id, name: row.branch.name },
         customerName: row.user.name,

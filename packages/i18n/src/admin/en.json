@@ -721,5 +721,6 @@
   "bookingActionSeat": "Seat",
   "bookingActionComplete": "Complete",
   "bookingActionCancel": "Cancel",
-  "bookingActionNoShow": "No-show"
+  "bookingActionNoShow": "No-show",
+  "orderAtTable": "Table {table} · {time} · {guests} guests"
 }

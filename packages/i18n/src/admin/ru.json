@@ -733,5 +733,6 @@
   "bookingActionSeat": "Посадить",
   "bookingActionComplete": "Завершить",
   "bookingActionCancel": "Отменить",
-  "bookingActionNoShow": "Не пришёл"
+  "bookingActionNoShow": "Не пришёл",
+  "orderAtTable": "Стол {table} · {time} · {guests} гостей"
 }

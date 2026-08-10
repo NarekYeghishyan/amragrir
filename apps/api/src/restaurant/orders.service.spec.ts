@@ -760,3 +760,40 @@ describe('history', () => {
     ]);
   });
 });
+
+describe('a dine-in order on the board', () => {
+  it('carries the table, the hour and the party', async () => {
+    // The card used to say `dine_in` and nothing else, which is the least
+    // useful half of what the order knows: where these people are sitting, when
+    // they are due and how many covers to lay are all on the reservation it
+    // already carries.
+    const { service, prisma } = build();
+    (prisma.order.findMany as jest.Mock).mockResolvedValue([
+      orderRow({
+        serviceMode: 'dine_in',
+        pickupOption: null,
+        reservation: {
+          reservedFor: new Date('2026-09-01T15:00:00.000Z'),
+          guests: 4,
+          table: { tableNo: '11' },
+        },
+      }),
+    ]);
+
+    const page = await service.listOrders(staff, query());
+
+    expect(page.items[0]?.booking).toEqual({ tableNo: '11', time: '19:00', guests: 4 });
+    // And the query asked for it, rather than the mapping inventing it.
+    expect(prisma.order.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({ reservation: expect.anything() }),
+      }),
+    );
+  });
+
+  it('leaves a pickup order without one', async () => {
+    const { service } = build();
+    const page = await service.listOrders(staff, query());
+    expect(page.items[0]?.booking).toBeNull();
+  });
+});

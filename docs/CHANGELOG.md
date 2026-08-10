@@ -7,6 +7,24 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — The pass finds out where the dine-in order is sitting
+
+Stage five, and the smallest of them. A dine-in order arrived on the board as
+`serviceMode: 'dine_in'` and nothing else — which is the least useful half of
+what the order knows. Where these people are sitting, when they are due and how
+many covers to lay are all on the reservation the order already carries through
+`orders.reservation_id`, so the queue was throwing away an answer it was
+holding, and the kitchen was reading a ticket that could not be laid.
+
+`GET /restaurant/orders` now sends `booking: { tableNo, time, guests }` on a
+dine-in row and `null` on every pickup one, and the card draws it as a single
+badge rather than three — they are one fact: these people, there, then.
+
+This closes the five-stage table-booking module. What began as a schema that
+could not be configured, an API nothing wrote to and a journal nothing read is
+now: settings a restaurant can set, a book a shift can work, and an order the
+kitchen can lay.
+
 ### 2026-08-10 — The book gets a screen, five months late
 
 Stage four. `GET /restaurant/reservations` and `PATCH .../status` were written,

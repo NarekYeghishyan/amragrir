@@ -45,6 +45,8 @@ const order = (over: Partial<StaffOrder> = {}): StaffOrder => ({
   status: OrderStatus.Confirmed,
   serviceMode: 'pickup',
   pickupOption: 'take_away',
+  // A pickup order has no booking, which is what the API sends for one.
+  booking: null,
   branch: { id: 'b1', name: 'Northern Ave' },
   customerName: 'Aram',
   itemsCount: 2,

@@ -1290,6 +1290,19 @@ function OrderCard({
           {order.pickupOption === PickupOption.EatIn && (
             <Badge tone="accent">{t('orderEatsIn')}</Badge>
           )}
+          {/* A table, an hour and a party — the three things a pass needs about
+              a dine-in order and the three it was never told. Drawn as one badge
+              rather than three, because they are one fact: these people, there,
+              then. */}
+          {order.booking !== null && (
+            <Badge tone="accent">
+              {t('orderAtTable', {
+                table: order.booking.tableNo ?? '—',
+                time: order.booking.time,
+                guests: order.booking.guests,
+              })}
+            </Badge>
+          )}
           <Badge tone={statusTone(order.status)}>{t(`orderStatus_${order.status}`)}</Badge>
         </span>
       </div>

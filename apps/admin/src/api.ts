@@ -447,6 +447,15 @@ export interface StaffOrder {
    * bag and a plate are not the same order to pack.
    */
   pickupOption: string | null;
+  /**
+   * The booking a dine-in order belongs to — where these people are sitting,
+   * when they are due and how many covers to lay. Null on every pickup order.
+   *
+   * A dine-in card used to say `dine_in` and nothing else, which is the least
+   * useful half of what the order knows: the reservation it already carries has
+   * all three, and the board was throwing away an answer it was holding.
+   */
+  booking: { tableNo: string | null; time: string; guests: number } | null;
   branch: { id: string; name: string | null };
   customerName: string | null;
   itemsCount: number;

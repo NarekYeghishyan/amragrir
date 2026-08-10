@@ -937,6 +937,13 @@ The kitchen queue.
   to `total`: `active` overlaps every working stage, so one paid order is
   counted under both `active` and `paid`.
 
+- **A dine-in row carries its booking**: `booking: { tableNo, time, guests }`,
+  null on every pickup order. The card used to say `serviceMode: "dine_in"` and
+  nothing else, which is the least useful half of what the order knows — where
+  these people are sitting, when they are due and how many covers to lay are all
+  on the reservation the order already carries (`orders.reservation_id`), so the
+  board was throwing away an answer it was holding.
+
 ### GET /restaurant/orders/{id}/history · *implemented* — `orders:read`
 Everything that has happened to one order — what the card's **History** button opens.
 - **Response 200:** `{ "items":[ { "id","type","fromStatus","toStatus","actor":{"type","name","email","impersonatedBy","id","impersonatedById"},"detail","at" } ] }`
