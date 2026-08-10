@@ -7,6 +7,33 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — Two mobile screens were written around endpoints that existed
+
+Both carried a comment saying the API did not support them. Both were wrong,
+and had been since before the screens were written.
+
+**The profile's three tiles.** Reward points, orders and coupons were left out
+because "no endpoint reports any of them" — `GET /me` has returned
+`rewardPoints`, `ordersCount` and `couponsCount` the whole time, and the web
+profile has been drawing them from it. The phone simply never called `/me`. The
+artifact's 340/28/3 were mock values, not a claim that the numbers were
+unavailable. A guest still gets no row: "0 orders" is a statement about
+somebody, and there is nobody yet.
+
+**The settings switches.** Notifications and promotional email were held in
+`useState` and marked local-only because "no endpoint stores either" —
+`PATCH /me/settings` takes `notifPush`, `notifPromo` and `darkMode`, and has
+since the screen was built. A switch that forgets what it was set to on every
+app launch is worse than no switch. They now move first and tell the server
+after, the bargain the favourites heart already makes, and a refusal springs
+them back. The theme is stored in both places on purpose: the local copy paints
+the first frame before any request lands, and the account's copy is what a
+second phone starts from.
+
+`SCREENS.md` and `docs/design/README.md` are corrected — both recorded the
+counters as unsupported, and both recorded the filter sheet's pricing question
+as open after it was settled earlier today.
+
 ### 2026-08-10 — The phone can see the table it booked
 
 Table booking on the phone was one-way. A guest could take a table — but only

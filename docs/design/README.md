@@ -593,12 +593,14 @@ type, not the backend.
 Customer identity is phone + OTP only, and `verify-code` takes an optional name
 and upgrades the guest in place — there is no second flow to tab to.
 
-*The price filter is drawn as "price per person", 4000–24000֏.* The API filters
+*The price filter is drawn as "price per person", 4000–24000֏.* The API filtered
 on a branch's **average menu-item price**, which across seeded data is
-1167–3900֏ — the two ranges do not overlap at all, so the slider as drawn
-matches everything or nothing. Either the API's notion of "per person" should
-become a meal rather than one dish, or the slider's bounds should come from the
-data. **Open; the filter sheet is not built until it is settled.**
+1 480–3 900֏ — the two ranges did not overlap at all, so the slider as drawn
+matched everything or nothing. **Settled 2026-08-10 the first way:** the API's
+notion of "per person" is now a meal rather than one dish
+(`AVG(price_amd) × SPEND_ITEMS_PER_PERSON`, which is 2). The slider's bounds
+come from `packages/shared` rather than from the artifact, so a client cannot
+draw a range the server has never heard of. The sheet is built.
 
 **Absent from the artifact, and so still designed in code rather than
 transcribed:** branches (it treats a restaurant as a single place), sold-out

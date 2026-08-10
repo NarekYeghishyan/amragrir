@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Path, Svg } from 'react-native-svg';
 import { Language } from '@amragrir/shared';
+import { me as meApi } from '../src/api/endpoints';
 import { LANGUAGE_LABELS, LANGUAGES, useLanguage } from '../src/language';
+import { useSession } from '../src/session';
 import { useTheme } from '../src/theme/useTheme';
 
 /**
@@ -14,17 +16,69 @@ import { useTheme } from '../src/theme/useTheme';
  * - **No "delivery addresses" row.** This product has no couriers; an order is
  *   collected or eaten in (docs/AI_CONTEXT.md, "What NOT to do"). A row asking
  *   for a delivery address would promise a service that does not exist.
- * - **Notifications and promotional email are local only.** The artifact toggles
- *   them and no endpoint stores either, so they are held in component state and
- *   marked here rather than pretending to persist a preference.
+ * - **Notifications and promotional email now persist.** They were held in
+ *   component state and marked here as local-only, on the grounds that no
+ *   endpoint stored them — `PATCH /me/settings` has taken `notifPush`,
+ *   `notifPromo` and `darkMode` all along. A switch that forgets what it was
+ *   set to every time the app restarts is worse than no switch.
+ *
+ * **The switch moves first and the server is told afterwards**, the same
+ * bargain the favourites heart makes: a toggle that waits a round trip does not
+ * read as a toggle. A refusal puts it back where it was.
+ *
+ * A guest has no account to store any of this against, so the two account
+ * switches are absent for them — the theme stays, because that one is the
+ * device's as well.
  */
 export default function SettingsScreen() {
   const { colors, isDark, setPreference } = useTheme();
   const { t, language, setLanguage } = useLanguage();
   const router = useRouter();
 
+  const { user } = useSession();
+  const signedIn = user?.phoneVerified === true;
+
   const [notifications, setNotifications] = useState(true);
   const [promos, setPromos] = useState(false);
+
+  useEffect(() => {
+    if (!signedIn) {
+      return;
+    }
+    let cancelled = false;
+    meApi
+      .get()
+      .then((profile) => {
+        if (!cancelled) {
+          setNotifications(profile.notifPush);
+          setPromos(profile.notifPromo);
+        }
+      })
+      .catch(() => {
+        // The defaults above stand. They are the API's own defaults for a new
+        // account, so an unreachable server shows what a fresh one would.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn]);
+
+  /**
+   * Flips a switch and tells the server.
+   *
+   * Optimistic, and a refusal puts it back — there is nothing else useful to do
+   * with one. Announcing "could not save your notification preference" over a
+   * settings screen is noise about a thing the switch itself will show by
+   * springing back.
+   */
+  const save = (
+    key: 'notifPush' | 'notifPromo' | 'darkMode',
+    value: boolean,
+    apply: (on: boolean) => void,
+  ): void => {
+    apply(value);
+    void meApi.settings({ [key]: value }).catch(() => apply(!value));
+  };
 
   const accountRows = [{ icon: '👤', label: t('setEditProfile') }, { icon: '💳', label: t('profilePaymentMethods') }];
   const aboutRows = [
@@ -55,21 +109,39 @@ export default function SettingsScreen() {
 
       <Text style={[styles.section, { color: colors.ink2 }]}>{t('setPrefs')}</Text>
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.line }]}>
+        {/* The theme is stored on the device *and* on the account: the local
+            copy is what paints the first frame before any request lands, and
+            the account's is what a second phone starts from. Only the local one
+            is waited on. */}
         <ToggleRow
           icon={isDark ? '☀️' : '🌙'}
           label={t('setDarkMode')}
           value={isDark}
-          onChange={(next) => setPreference(next ? 'dark' : 'light')}
-          divider
+          onChange={(next) => {
+            setPreference(next ? 'dark' : 'light');
+            if (signedIn) {
+              void meApi.settings({ darkMode: next }).catch(() => undefined);
+            }
+          }}
+          divider={signedIn}
         />
-        <ToggleRow
-          icon="🔔"
-          label={t('setNotifications')}
-          value={notifications}
-          onChange={setNotifications}
-          divider
-        />
-        <ToggleRow icon="✉️" label={t('setPromos')} value={promos} onChange={setPromos} />
+        {signedIn ? (
+          <>
+            <ToggleRow
+              icon="🔔"
+              label={t('setNotifications')}
+              value={notifications}
+              onChange={(next) => save('notifPush', next, setNotifications)}
+              divider
+            />
+            <ToggleRow
+              icon="✉️"
+              label={t('setPromos')}
+              value={promos}
+              onChange={(next) => save('notifPromo', next, setPromos)}
+            />
+          </>
+        ) : null}
       </View>
 
       <View

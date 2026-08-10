@@ -4,7 +4,7 @@
 
 Field legend: **Purpose** · **User** · **Elements** · **Actions** · **Transitions** · **API data**.
 
-## What is built on mobile (2026-08-04)
+## What is built on mobile (2026-08-10)
 
 This file is the **specification**, transcribed from
 `docs/design/Amragrir (mob).dc.html`. It describes screens whether or not they
@@ -16,13 +16,29 @@ from it.
 | Home, Restaurant, Auth, Basket, Checkout, Tracking | built and restyled to the artifact |
 | Search, Orders, Favorites, Profile, Referral, Settings | built to the artifact |
 | Pre-order | built (`apps/mobile/app/preorder.tsx`) — the reservations API is wired in |
-| Filter sheet | **not built** — see the open price question below |
+| Filter sheet | built 2026-08-10 (`src/components/FilterSheet.tsx`) — the price question below is resolved |
+
+**The artifact is fully ported.** Three screens beyond it were added on
+2026-08-10, because the phone could take a booking and then never mention it
+again — `GET /reservations` and its cancel had been in the client with nothing
+calling either:
+
+| Screen | State |
+|---|---|
+| Book a table alone (`app/book/[branchId].tsx`) | built — from a button on the restaurant page, with no basket |
+| My bookings (`app/bookings.tsx`) | built — upcoming and past, from the profile |
+| One booking (`app/booking/[id].tsx`) | built — the deposit's fate, and the button that gives the table back |
+
+They are the phone's answer to the web's `/reservations` pair (§ web table
+below) and are not in the artifact, which drew booking only as a step inside
+pre-order. See USER_FLOW.md §3b.
 
 The five-tab bar is built (`apps/mobile/app/(tabs)/`) and carries exactly the
 five screens named above: home, search, orders, favorites, profile.
 
-**Three things this file specifies that the backend does not support**, and
-which are therefore not built:
+**Two things this file specifies that the backend does not support**, and which
+are therefore not built (a third — the profile's counters — turned out to be
+supported; see below):
 
 - **`POST /auth/social`** (§0) does not exist. Customer identity is phone + OTP
   only, so the Apple and Google buttons the mobile artifact draws have nothing
@@ -32,14 +48,26 @@ which are therefore not built:
   name field shows rather than which endpoint runs.
 - **`GET /search/popular`** (§2) does not exist. The six popular tags are
   editorial content in `packages/i18n` (`popular1`…`popular6`) until it does.
-- **Reward points, order count and coupon count** (§10) have no endpoint. The
-  artifact hardcodes 340/28/3; the profile screen omits the row rather than
-  inventing a customer's own record.
+- ~~**Reward points, order count and coupon count** (§10) have no endpoint.~~
+  **Wrong, and corrected 2026-08-10.** `GET /me` has returned `rewardPoints`,
+  `ordersCount` and `couponsCount` all along — the web profile has been drawing
+  them from it — and the phone simply never called the endpoint. The three
+  tiles are now real on both clients. The artifact's 340/28/3 were only ever
+  mock values.
 
-One question is **open and blocks the filter sheet**: the sheet specifies price
-per person at 4000–24000֏, while the API filters on a branch's average
-menu-item price, which is 1167–3900֏ across seeded data. The ranges do not
-overlap. See `docs/design/README.md`.
+The question that **blocked the filter sheet is resolved** (2026-08-10). The
+sheet specifies price per person while the API filtered on a branch's average
+menu-item price — a different quantity, 1 480–3 900֏ across seeded data, which
+never met the artifact's 4 000–24 000 slider. The API was measuring the wrong
+thing: spend is now `AVG(price_amd) × SPEND_ITEMS_PER_PERSON` (2 — a main and
+something with it), and both ends of the slider come from `packages/shared`
+rather than from the artifact's hardcoded pair, so a client cannot draw a range
+the server has never heard of. See BUSINESS_LOGIC.md §"Catalog".
+
+The sheet offers the artifact's six sections — sort, price, distance, rating,
+dietary, service. `openNow` exists in the DTO and is deliberately left out: the
+artifact does not draw it, and "serving right now" on a screen for ordering
+*ahead* answers a question nobody arrived with.
 
 ---
 
@@ -390,7 +418,7 @@ unpaid, online payment only, `hy` by default.
 | Menu tabs | filter the dish list | **the same** since 2026-08-06 — one category on screen, the chosen pill dark. They filter in CSS (a radio per pill, `:has(:checked)` choosing the section), so every section stays in the pre-rendered HTML for a crawler and the tabs work without JavaScript. They were anchors that scrolled a page showing all sections at once until then. Section headings stay in the markup and are hidden from view, since the pill above already names the group |
 | Location | device geolocation, an address | the artifact's **dialog**, built, over a **real Yandex map** (their public widget in an iframe, no key): tap to put the pin anywhere, drag to look around, the search box searches addresses, and the browser's own position is offered. What is stored is a **point** — `lat`, `lng` and the name to show for it — which is what `GET /restaurants` has always taken; a ✕ on the badge that names it puts the visitor back to the whole city. Recently chosen points sit at the top of the dialog, in `localStorage`. The map is built only when the dialog opens. The row of six district chips was **removed** (2026-08-06), and with it the only control that worked without JavaScript — see the note below the table. With no geocoder key a tapped point is named after the nearest district instead of its address, and the search box is not rendered at all: filtering those chips was its whole job without a key |
 | Favourites | a heart on every card | **the same, since 2026-08-09.** A heart on the top-right of every restaurant card — home, search and `/[lang]/favorites` — posting `toggleFavorite`, so it works with JavaScript off like every other write here. It was **read-only** until then, on the reasoning that the artifact drew the heart only in the app; what that produced was a list nobody could add to from the site that showed it, and empty-state copy telling people to go and use the app instead. The rating badge moved left to make room. `toggleFavorite` **does not redirect** — alone among the writes here, because both directions are idempotent server-side, so a re-posted heart asks for the state it already asked for, and skipping the redirect keeps a press from scrolling a long listing back to the top. A refusal is not reported but corrected: the revalidation re-reads `GET /favorites` and the heart snaps back to what the server has. A visitor who is not signed in still sees hearts, and pressing one signs them in and returns them to the card. **The restaurant page has one too**, on its banner — but that page is pre-rendered, so its heart reads its own state from `GET /[lang]/saved` in the browser and posts `revalidate=0`; see §3. **So does the basket's `BranchCard`**, as a flex item in the row rather than a disc on glass — but *not* the checkout's copy of that same card, which is the one screen where a write to the account has no business sitting beside the button that charges the card. The two clients share the list |
-| Profile | 5 account rows + points | orders, favourites and sign-out. Addresses and stored cards are not built (no couriers; the API lists accepted methods, not saved ones), and help has no page |
+| Profile | 5 account rows + points | orders, favourites and sign-out. **The three counters are built on both clients** from `GET /me` (2026-08-10 on mobile, earlier on web). Addresses and stored cards are not built (no couriers; the API lists accepted methods, not saved ones), and help has no page |
 | Sign-in phone | one field, placeholder only | a country select plus a field that **shapes the number as it is typed** — `99 12 34 56` — and **stops at the chosen country's length** instead of refusing a too-long number on submit. See `PhoneField` in COMPONENTS.md |
 
 **Every step works with JavaScript disabled.** Each action is a `<form>` posting

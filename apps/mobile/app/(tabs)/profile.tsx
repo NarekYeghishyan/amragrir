@@ -1,7 +1,10 @@
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Path, Svg } from 'react-native-svg';
 import { Language } from '@amragrir/shared';
+import { me as meApi } from '../../src/api/endpoints';
+import type { MeProfile } from '../../src/api/types';
 import { LANGUAGE_LABELS, LANGUAGES, useLanguage } from '../../src/language';
 import { useSession } from '../../src/session';
 import { useTheme } from '../../src/theme/useTheme';
@@ -9,16 +12,51 @@ import { useTheme } from '../../src/theme/useTheme';
 /**
  * Profile — the artifact's PROFILE screen.
  *
- * The three stat tiles the artifact draws (reward points, orders, coupons) are
- * **not** rendered: it hardcodes 340/28/3 and no endpoint reports any of them
- * yet. Inventing plausible numbers on the one screen a customer would read as
- * their own record is worse than leaving the row out until it can be true.
+ * **The three stat tiles are real.** They were left out for a year on the
+ * grounds that "no endpoint reports any of them", which was simply wrong:
+ * `GET /me` has returned `rewardPoints`, `ordersCount` and `couponsCount` since
+ * before this screen was written, and the web profile has been drawing them the
+ * whole time. The artifact's 340/28/3 were mock values, not a claim that the
+ * numbers were unavailable.
+ *
+ * Read on focus rather than once, because the way back here is usually from
+ * placing an order — which is one of the three numbers.
+ *
+ * A guest has no record to show, so the row is absent rather than three zeros:
+ * "0 orders" is a statement about somebody, and there is nobody yet.
  */
 export default function ProfileScreen() {
   const { colors } = useTheme();
   const { t, language, setLanguage } = useLanguage();
   const { user } = useSession();
   const router = useRouter();
+
+  const [profile, setProfile] = useState<MeProfile | null>(null);
+  const signedIn = user?.phoneVerified === true;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!signedIn) {
+        setProfile(null);
+        return;
+      }
+      let cancelled = false;
+      meApi
+        .get()
+        .then((result) => {
+          if (!cancelled) {
+            setProfile(result);
+          }
+        })
+        .catch(() => {
+          // The tiles simply stay away. A row of dashes where somebody's record
+          // should be says less than no row at all.
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [signedIn]),
+  );
 
   const displayName = user?.name?.trim() || t('authGuest');
   const initial = displayName.charAt(0).toUpperCase();
@@ -52,6 +90,26 @@ export default function ProfileScreen() {
           ) : null}
         </View>
       </View>
+
+      {profile !== null ? (
+        <View style={styles.stats}>
+          {[
+            { value: profile.rewardPoints, label: t('rewardPoints') },
+            { value: profile.ordersCount, label: t('ordersCount') },
+            { value: profile.couponsCount, label: t('couponsCount') },
+          ].map((stat) => (
+            <View
+              key={stat.label}
+              style={[styles.stat, { backgroundColor: colors.card, borderColor: colors.line }]}
+            >
+              <Text style={[styles.statValue, { color: colors.accent }]}>{stat.value}</Text>
+              <Text style={[styles.statLabel, { color: colors.ink2 }]} numberOfLines={1}>
+                {stat.label}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       {/* The artifact reaches sign-in through a full-screen auth gate, which is
           not built yet. Until it is, this is the only way in — and dropping it
@@ -140,6 +198,18 @@ function Chevron({ color }: { color: string }) {
 const styles = StyleSheet.create({
   content: { padding: 20, paddingTop: 58, paddingBottom: 110 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 15 },
+  // Three equal tiles, as the artifact draws them.
+  stats: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  stat: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+    paddingVertical: 14,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  statValue: { fontSize: 21, fontWeight: '800', letterSpacing: -0.4 },
+  statLabel: { fontSize: 11, fontWeight: '600' },
   avatar: { width: 66, height: 66, borderRadius: 33, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: '#fff', fontSize: 26, fontWeight: '800' },
   headerText: { flex: 1, minWidth: 0 },

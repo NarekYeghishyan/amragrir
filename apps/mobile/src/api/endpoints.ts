@@ -9,6 +9,7 @@ import type {
 import { request } from './client';
 import type {
   AuthResult,
+  MeProfile,
   Availability,
   Category,
   FavoriteItem,
@@ -45,6 +46,26 @@ export const auth = {
     }),
 
   guest: () => request<GuestResult>('/auth/guest', { method: 'POST', authenticated: false }),
+};
+
+/**
+ * The signed-in account, as the server holds it.
+ *
+ * Read rather than taken from the session: `AuthUser` is what a token resolves
+ * to and is fixed for that token's life, while the counters below move with
+ * every order somebody places. The profile screen showed none of them for a
+ * year on the grounds that "no endpoint reports them" — this endpoint has
+ * reported all three since the profile screen was written, and the web has been
+ * drawing them the whole time.
+ */
+export const me = {
+  get: () => request<MeProfile>('/me'),
+
+  /** Settings that belong to the account rather than to the device. The dark
+   *  theme is both — see `useTheme`, which keeps a local copy so the first
+   *  frame is not the wrong colour while this is in flight. */
+  settings: (settings: { notifPush?: boolean; notifPromo?: boolean; darkMode?: boolean }) =>
+    request<MeProfile>('/me/settings', { method: 'PATCH', body: settings }),
 };
 
 /**

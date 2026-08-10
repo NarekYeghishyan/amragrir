@@ -26,6 +26,24 @@ export interface AuthUser {
   phoneVerified: boolean;
 }
 
+/**
+ * `GET /me` — the account, plus the three counters the profile screen shows and
+ * the three settings it toggles.
+ *
+ * Separate from `AuthUser`, which is what a token resolves to: those fields
+ * arrive with a sign-in and are held in the session, while these are read from
+ * the server when a screen wants them. A counter cached in a token would be
+ * wrong by the next order.
+ */
+export interface MeProfile extends AuthUser {
+  rewardPoints: number;
+  ordersCount: number;
+  couponsCount: number;
+  darkMode: boolean;
+  notifPush: boolean;
+  notifPromo: boolean;
+}
+
 export interface AuthResult {
   accessToken: string;
   refreshToken: string;
