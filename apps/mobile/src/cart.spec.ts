@@ -241,3 +241,78 @@ describe('the chosen ready time', () => {
     expect(elsewhere.readyAt).toBeNull();
   });
 });
+
+/**
+ * Putting a past order back in the basket.
+ *
+ * The button that does this said "Reorder" and opened the tracking screen for
+ * as long as the screen existed. What it needs from the basket is a single
+ * replacement rather than a run of `add`s, which would each have to notice they
+ * were starting a new basket.
+ */
+describe('reordering', () => {
+  const previous: CartLine[] = [
+    { ...burger, qty: 2 },
+    { ...fries, qty: 1 },
+  ];
+
+  it('fills an empty basket with the whole order at once', () => {
+    const state = cartReducer(EMPTY, {
+      type: 'refill',
+      branchId: 'branch-1',
+      restaurantName: 'Sunny',
+      lines: previous,
+    });
+
+    expect(state.branchId).toBe('branch-1');
+    expect(state.restaurantName).toBe('Sunny');
+    expect(state.lines).toEqual(previous);
+  });
+
+  it('keeps the quantities, which is what makes it the same order', () => {
+    const state = cartReducer(EMPTY, {
+      type: 'refill',
+      branchId: 'branch-1',
+      restaurantName: 'Sunny',
+      lines: previous,
+    });
+
+    expect(state.lines.map((line) => line.qty)).toEqual([2, 1]);
+  });
+
+  it('replaces whatever was there rather than mixing two restaurants', () => {
+    // One basket, one kitchen (BUSINESS_LOGIC.md §4). The screen asks first;
+    // this carries the answer out.
+    const busy = add(EMPTY, fries, 'branch-9', 'Elsewhere');
+    const state = cartReducer(busy, {
+      type: 'refill',
+      branchId: 'branch-1',
+      restaurantName: 'Sunny',
+      lines: [{ ...burger, qty: 1 }],
+    });
+
+    expect(state.branchId).toBe('branch-1');
+    expect(state.lines).toEqual([{ ...burger, qty: 1 }]);
+  });
+
+  it('forgets the mode, the ending, the table and the time', () => {
+    // Every one of those was an answer about a different order. A dine-in
+    // basket carrying the old booking would send an order pointing at a table
+    // somebody else's evening was built around.
+    const dining = cartReducer(
+      cartReducer(add(EMPTY), { type: 'setServiceMode', serviceMode: ServiceMode.DineIn }),
+      { type: 'setReservation', reservationId: 'res-1' },
+    );
+    const state = cartReducer(dining, {
+      type: 'refill',
+      branchId: 'branch-1',
+      restaurantName: 'Sunny',
+      lines: previous,
+    });
+
+    expect(state.serviceMode).toBe(ServiceMode.Pickup);
+    expect(state.reservationId).toBeNull();
+    expect(state.pickupOption).toBeNull();
+    expect(state.readyAt).toBeNull();
+  });
+});

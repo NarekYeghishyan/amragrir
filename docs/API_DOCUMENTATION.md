@@ -461,8 +461,15 @@ paid for. Paying commits the order (BUSINESS_LOGIC.md §4).
 > machine and will 422. A branch that cannot fulfil a paid order is a support
 > conversation today.
 
-### POST /orders/{id}/reorder — **not implemented**
-Lands with the orders-history screen.
+### POST /orders/{id}/reorder — **not implemented, and not wanted**
+Reordering needs no endpoint. A basket is per-device state that never reaches
+the server (see "Cart" above), so both clients do it by re-reading the order
+with `GET /orders/{id}` and copying **ids and quantities only** into a fresh
+basket — never money, so a dish that has changed price or come off the menu is
+caught by `POST /cart/quote` rather than carried over from history. The web has
+done this since the orders screen was built; the phone since 2026-08-10, where
+the button had until then been labelled "Reorder" and opened the tracking
+screen.
 
 ### Realtime status · *implemented*
 

@@ -7,6 +7,25 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — "Reorder" reorders
+
+The button on every finished order on the phone said *Reorder* and opened the
+**tracking** screen — a control naming one thing and doing another, and the
+only control on that row, so a past order could not be looked at either. It now
+puts the order back in the basket, and the row itself opens the order.
+
+No endpoint was needed or added. `POST /orders/{id}/reorder` is listed as
+unimplemented and stays that way: a basket is per-device state that never
+reaches the server, so reordering is re-reading the order and copying **ids and
+quantities only** into a fresh basket. Never money — a dish that has changed
+price or come off the menu is caught by `POST /cart/quote`, not carried over
+from history. The web has worked this way since its orders screen was built.
+
+The basket grew one action for it, `refill`, rather than a run of `add`s: it
+replaces what was there — one basket, one kitchen — and resets the mode, the
+ending, the table and the chosen time, every one of which was an answer about a
+different order. The screen asks before replacing a basket somebody is filling.
+
 ### 2026-08-10 — Two mobile screens were written around endpoints that existed
 
 Both carried a comment saying the API did not support them. Both were wrong,

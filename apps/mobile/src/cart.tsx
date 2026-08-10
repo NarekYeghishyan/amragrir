@@ -62,6 +62,7 @@ export interface CartState {
 
 type CartAction =
   | { type: 'add'; branchId: string; restaurantName: string; line: Omit<CartLine, 'qty'> }
+  | { type: 'refill'; branchId: string; restaurantName: string; lines: CartLine[] }
   | { type: 'setQty'; menuItemId: string; qty: number }
   | { type: 'setPickupOption'; pickupOption: PickupOption }
   | { type: 'setServiceMode'; serviceMode: ServiceMode }
@@ -109,6 +110,19 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
       };
     }
 
+    case 'refill':
+      // A past order, put back in the basket. It **replaces** whatever was
+      // there, exactly as adding a dish from another restaurant does — one
+      // basket, one kitchen — and it starts from `EMPTY` rather than from the
+      // current state so the mode, the ending, the table and the chosen time
+      // all reset. Every one of those was an answer about a different order.
+      return {
+        ...EMPTY,
+        branchId: action.branchId,
+        restaurantName: action.restaurantName,
+        lines: action.lines,
+      };
+
     case 'setQty': {
       // Quantity zero removes the line, so the caller has one operation for
       // "fewer" instead of a decrement that has to check for the last one.
@@ -154,6 +168,8 @@ interface CartValue extends CartState {
   /** True when this dish comes from a different restaurant than the basket. */
   conflictsWith: (branchId: string) => boolean;
   add: (branchId: string, restaurantName: string, line: Omit<CartLine, 'qty'>) => void;
+  /** Replaces the basket with a past order's lines — what "Reorder" does. */
+  refill: (branchId: string, restaurantName: string, lines: CartLine[]) => void;
   setQty: (menuItemId: string, qty: number) => void;
   /** Take it away, or eat it here — chosen on the pre-order screen, and offered
    *  only where the restaurant does both, which the quote reports. */
@@ -181,6 +197,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
       conflictsWith: (branchId) => state.branchId !== null && state.branchId !== branchId,
       add: (branchId, restaurantName, line) =>
         dispatch({ type: 'add', branchId, restaurantName, line }),
+      refill: (branchId, restaurantName, lines) =>
+        dispatch({ type: 'refill', branchId, restaurantName, lines }),
       setQty: (menuItemId, qty) => dispatch({ type: 'setQty', menuItemId, qty }),
       setPickupOption: (pickupOption) => dispatch({ type: 'setPickupOption', pickupOption }),
       setServiceMode: (serviceMode) => dispatch({ type: 'setServiceMode', serviceMode }),

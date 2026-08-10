@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { ORDER_MAX_ITEM_QTY, ORDER_MAX_LINES } from '@amragrir/shared';
 import { orders as ordersApi } from '../../src/api/endpoints';
 import type { OrderListItem } from '../../src/api/types';
+import { useCart } from '../../src/cart';
 import { Photo } from '../../src/components/Photo';
 import { formatAmd, formatCountdown, formatTime } from '../../src/format';
 import { useTranslate } from '../../src/language';
@@ -20,9 +22,71 @@ export default function OrdersScreen() {
   const t = useTranslate();
   const router = useRouter();
 
+  const cart = useCart();
+
   const [active, setActive] = useState<OrderListItem[]>([]);
   const [past, setPast] = useState<OrderListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reordering, setReordering] = useState<string | null>(null);
+
+  /**
+   * Puts a past order back in the basket.
+   *
+   * The button has said "Reorder" since this screen was written and it opened
+   * the *tracking* screen — a control naming one thing and doing another. The
+   * web has done this properly for months and needs no endpoint for it:
+   * `POST /orders/{id}/reorder` is listed as unimplemented and is not wanted,
+   * because a basket is per-device state (API_DOCUMENTATION.md, "Cart").
+   *
+   * **Ids and quantities only, never money.** The new basket is priced by
+   * `POST /cart/quote` like any other, so a dish that has changed price or come
+   * off the menu is caught there rather than carried over from history. The
+   * order is re-read rather than taken from the list row, which carries a
+   * summary and not its lines.
+   *
+   * It **replaces** the basket, as adding a dish from another restaurant does —
+   * one basket, one kitchen — so it asks first when there is something in it.
+   */
+  const reorder = useCallback(
+    async (order: OrderListItem) => {
+      setReordering(order.id);
+      try {
+        const full = await ordersApi.get(order.id);
+        if (full.items.length === 0) {
+          return;
+        }
+        const lines = full.items.slice(0, ORDER_MAX_LINES).map((item) => ({
+          menuItemId: item.menuItemId,
+          name: item.name,
+          priceAmd: item.unitPriceAmd,
+          // The order's lines do not carry the dish's photograph and there is
+          // nowhere honest to get one from here; the basket draws its
+          // placeholder surface, which is what `Photo` is for.
+          photoUrl: null,
+          qty: Math.min(item.qty, ORDER_MAX_ITEM_QTY),
+        }));
+
+        const fill = () => {
+          cart.refill(full.branch.id, full.restaurantName, lines);
+          router.push('/basket');
+        };
+
+        if (cart.lines.length > 0) {
+          Alert.alert(t('basketOtherRestaurant'), full.restaurantName, [
+            { text: t('keepBasket'), style: 'cancel' },
+            { text: t('basketReplace'), style: 'destructive', onPress: fill },
+          ]);
+          return;
+        }
+        fill();
+      } catch {
+        // Nothing to say that the basket not filling does not already say.
+      } finally {
+        setReordering(null);
+      }
+    },
+    [cart, router, t],
+  );
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -84,8 +148,13 @@ export default function OrdersScreen() {
           <Text style={[styles.section, { color: colors.ink2 }]}>{t('pastOrders')}</Text>
           <View style={styles.pastList}>
             {past.map((order) => (
-              <View
+              // The row opens the order; the button on it reorders. Until the
+              // button did its own job there was no way to look at a finished
+              // order at all — it was the only control on the row, and it
+              // opened the tracking screen under a label saying "Reorder".
+              <Pressable
                 key={order.id}
+                onPress={() => router.push(`/tracking/${order.id}`)}
                 style={[styles.pastRow, { backgroundColor: colors.card, borderColor: colors.line }]}
               >
                 <Photo uri={order.coverUrl} style={styles.pastThumb} />
@@ -102,15 +171,26 @@ export default function OrdersScreen() {
                   </Text>
                 </View>
                 <Pressable
-                  onPress={() => router.push(`/tracking/${order.id}`)}
+                  disabled={reordering !== null}
+                  onPress={() => void reorder(order)}
                   style={[
                     styles.reorder,
-                    { backgroundColor: colors.accentSoft, borderColor: colors.accent },
+                    {
+                      backgroundColor: colors.accentSoft,
+                      borderColor: colors.accent,
+                      opacity: reordering === order.id ? 0.5 : 1,
+                    },
                   ]}
                 >
-                  <Text style={[styles.reorderText, { color: colors.accent }]}>{t('reorder')}</Text>
+                  {reordering === order.id ? (
+                    <ActivityIndicator color={colors.accent} />
+                  ) : (
+                    <Text style={[styles.reorderText, { color: colors.accent }]}>
+                      {t('reorder')}
+                    </Text>
+                  )}
                 </Pressable>
-              </View>
+              </Pressable>
             ))}
           </View>
         </>

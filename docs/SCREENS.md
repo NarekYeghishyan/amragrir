@@ -323,9 +323,16 @@ the tracker is complete from the moment the payment goes through.
 **Purpose:** active and past orders.
 **User:** on the Orders tab.
 **Elements:** title; "Active" section — card with progress bar, "Preparing" status, name, "arrives HH:MM", timer (if there is an active order); otherwise empty "No active orders" block. "Past orders" section — rows (photo, name, date, items, amount, "Reorder" button).
-**Actions:** open active order (→ Tracking); reorder a past order.
-**Transitions:** active card → Tracking; Reorder → Restaurant/Basket prefilled.
-**API:** `GET /orders?status=active`, `GET /orders?status=past`, `POST /orders/{id}/reorder`.
+**Actions:** open active order (→ Tracking); open a past order (→ Tracking);
+reorder a past order.
+**Transitions:** active card → Tracking; past row → Tracking; Reorder → Basket,
+prefilled.
+**API:** `GET /orders?status=active`, `GET /orders?status=past`, and
+`GET /orders/{id}` for the reorder — **not** `POST /orders/{id}/reorder`, which
+is unimplemented and unwanted: a basket is per-device state, so reordering
+copies ids and quantities into a fresh one and lets `POST /cart/quote` price it
+(API_DOCUMENTATION.md). Built on the phone 2026-08-10; until then the button
+said "Reorder" and opened Tracking.
 
 ---
 
