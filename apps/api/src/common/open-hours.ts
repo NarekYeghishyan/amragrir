@@ -54,6 +54,18 @@ export function localDateOf(instant: Date): string {
     .slice(0, 10);
 }
 
+/**
+ * A `YYYY-MM-DD` as a Postgres `DATE` column holds it — midnight UTC, no zone.
+ *
+ * A date column is a calendar square rather than an instant, so the *only*
+ * correct way to address it is midnight UTC; building the same value with
+ * `new Date('2026-08-12')` in a local-time context lands four hours off in
+ * Yerevan and reads back as the 11th.
+ */
+export function dateOnly(date: string): Date {
+  return new Date(`${date}T00:00:00.000Z`);
+}
+
 /** A local calendar date moved by whole days, still `YYYY-MM-DD`. */
 export function addLocalDays(date: string, days: number): string {
   return new Date(new Date(`${date}T00:00:00.000Z`).getTime() + days * 86_400_000)

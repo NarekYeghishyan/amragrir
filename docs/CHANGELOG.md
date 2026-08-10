@@ -7,6 +7,31 @@
 
 ## [Unreleased]
 
+### 2026-08-10 — The 00:30 party is on tonight's page, not tomorrow's
+
+Found by running the finished module against a real database rather than by
+reading it. A branch open 12:00–02:00 offers 00:30 as the last start of
+*tonight's* evening; `assertBookable` gates it against tonight's hours and
+accepts it. The staff book then asked for `reserved_for` between local midnight
+and local midnight — the **calendar** day — and 00:30 has tomorrow's date. Those
+guests landed on tomorrow's page: invisible to the shift that was still working
+when they walked in, and sitting above a service that had not opened. The whole
+past-midnight apparatus built in stage one — the wrapped window, `serviceDateOf`,
+the grid that keeps counting past 1440 — was working, and the one query that
+mattered was not asking it.
+
+`reservations.service_date` now holds the answer, written at the moment the
+booking is accepted, by the same call that decided it was legal. Stored rather
+than recomputed for the reason `seating_minutes` and `free_cancel_hours` are: it
+belongs to the hours in force when the booking was taken, and a branch that
+shortens its night next month must not move guests already in the book to
+another day. A computed filter also could not answer for a list spanning
+branches whose nights end at different times.
+
+Backfilled to the local calendar date, which is exact rather than a guess: until
+stage one, a window closing earlier than it opened produced a slot loop whose
+body never ran, so nobody has ever been booked past midnight on this platform.
+
 ### 2026-08-10 — The pass finds out where the dine-in order is sitting
 
 Stage five, and the smallest of them. A dine-in order arrived on the board as

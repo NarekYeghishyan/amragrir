@@ -27,6 +27,7 @@ import { branchScope, restaurantScope } from '../staff/scope';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
 import {
   bookingWindowFor,
+  dateOnly,
   depositFor,
   instantOf,
   localDateOf,
@@ -824,11 +825,6 @@ function minutesLabel(minutes: number): string {
 function minutesOf(hhmm: string): number {
   const [hours, minutes] = hhmm.split(':').map(Number) as [number, number];
   return hours * 60 + minutes;
-}
-
-/** A `YYYY-MM-DD` as the DATE column stores it — midnight UTC, no zone. */
-function dateOnly(date: string): Date {
-  return new Date(`${date}T00:00:00.000Z`);
 }
 
 function addDays(date: Date, days: number): Date {

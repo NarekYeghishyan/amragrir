@@ -205,3 +205,49 @@ describe('moving a booking to another table', () => {
     expect(record).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Which day a booking is filed under.
+ *
+ * The book asked for `reserved_for` between local midnight and local midnight,
+ * which is right for every branch that shuts before midnight and wrong in the
+ * one case the whole past-midnight machinery exists for: a branch open
+ * 12:00–02:00 offers 00:30 as the last start of *Tuesday's* evening, and that
+ * instant's own calendar date is Wednesday. Those guests went onto Wednesday's
+ * page — where the shift still working at 00:30 never looked.
+ */
+describe('the book for a service', () => {
+  const listing = () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const prisma = {
+      reservation: { findMany, count: jest.fn().mockResolvedValue(0) },
+    } as unknown as PrismaService;
+    const service = new RestaurantReservationsService(
+      prisma,
+      new ReservationsService(prisma, {} as unknown as DepositsService),
+      { record: jest.fn() } as unknown as AuditService,
+    );
+    return { service, findMany };
+  };
+
+  it('asks for the service day, not a range of instants', async () => {
+    const { service, findMany } = listing();
+    await service.list(STAFF, { branchId: BRANCH_ID, date: '2026-08-12', page: 1, limit: 50 });
+
+    const { where } = findMany.mock.calls[0][0];
+    // A DATE column is a calendar square, addressed at midnight UTC — building
+    // it any other way lands four hours off in Yerevan and reads back as the
+    // 11th.
+    expect(where.serviceDate).toEqual(new Date('2026-08-12T00:00:00.000Z'));
+    // The old filter, gone: a 00:30 booking taken for Tuesday night has a
+    // Wednesday `reserved_for` and no instant range on Tuesday can hold it.
+    expect(where.reservedFor).toBeUndefined();
+  });
+
+  it('leaves the day open when none was asked for', async () => {
+    const { service, findMany } = listing();
+    await service.list(STAFF, { branchId: BRANCH_ID, page: 1, limit: 50 });
+
+    expect(findMany.mock.calls[0][0].where.serviceDate).toBeUndefined();
+  });
+});

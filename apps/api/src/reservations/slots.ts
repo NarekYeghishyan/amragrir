@@ -33,6 +33,7 @@ export {
   localMinutesOf,
   localTimeLabel,
   addLocalDays,
+  dateOnly,
   openWindowFor,
   bookingWindowFor,
   serviceDateOf,

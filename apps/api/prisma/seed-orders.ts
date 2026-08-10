@@ -52,6 +52,7 @@ import {
   type OrderActor,
   type OrderEventDetail,
 } from '../src/orders/order-history';
+import { dateOnly, localDateOf } from '../src/common/open-hours';
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -834,6 +835,12 @@ async function writeOrder(
               branchId,
               tableId: order.reservation.tableId,
               reservedFor: order.reservation.reservedFor,
+              // Seeded branches all shut before midnight, so the service day of
+              // a seeded booking is simply the Yerevan calendar day its instant
+              // falls on. A branch whose night wraps would need
+              // `serviceDateOf`; none of them does, and pretending otherwise
+              // here would be a second copy of that rule.
+              serviceDate: dateOnly(localDateOf(order.reservation.reservedFor)),
               guests: order.reservation.guests,
               depositAmd: order.reservation.depositAmd,
               depositCredited: order.reservation.depositCredited,

@@ -2692,6 +2692,9 @@ p {
   background: var(--chip);
   border-radius: var(--radius-sm);
 }
+/* The base is the `accent` tone, which is what `confirmed` resolves to and so
+   what most bars on a grid are. There is deliberately no `.book__bar--accent`
+   rule: the modifier lands on an element already wearing that look. */
 .book__bar {
   position: absolute;
   top: 3px;

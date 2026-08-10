@@ -481,6 +481,7 @@ Indexed as `(branch_id, created_at)` — one branch's bell, newest first.
 | branch_id | uuid FK→restaurant_branches.id | |
 | table_id | uuid FK→tables.id NULL | assigned table |
 | reserved_for | timestamptz | booking date+time |
+| service_date | date NOT NULL | **Which day's book this booking belongs on** — the service day, not the calendar day of `reserved_for`. The two differ only where a night runs past midnight, and there they differ in the way that costs a table: a branch open 12:00–02:00 offers 00:30 as the last start of *Tuesday's* evening, and that instant's own calendar date is Wednesday. Filtering the book by calendar date put those guests on Wednesday's page — invisible to the shift still working when they walked in, and sitting above a service that had not opened. Stored rather than recomputed for the reason `seating_minutes` is: it is decided by the hours in force when the booking was taken, and a branch that shortens its night next month must not move guests already in the book to another day. A derived filter also could not answer at all for a list spanning branches whose nights end at different times. Backfilled to the local calendar date, which is exact rather than approximate — until the migration before it, a window closing earlier than it opened produced a slot loop whose body never ran, so no booking has ever been taken past midnight on this platform. |
 | guests | smallint NOT NULL | guest count |
 | seating_minutes | smallint NULL | **How long this booking holds its table, snapshotted when it was made** — the same reason `orders.prep_min` is a snapshot. A branch that lengthens its seating from 90 to 120 has changed what it offers from now on; it has not changed what it already promised four people for Friday. Read live instead, a longer seating would stretch every accepted booking backwards and two that sat comfortably an hour apart would begin to overlap on one table — an overlap nothing would catch, because the unique index below guards the *start instant* and the serializable transaction that checks intervals committed weeks ago. NULL on rows written before the column existed; readers fall back to the resolved policy, exactly as they did when there was nothing else to read. |
 | deposit_amd | integer | deposit |
@@ -497,6 +498,12 @@ unique index as distinct: ending a booking sets `active_slot = NULL`, which
 have blocked that table and time forever. The overlap check (a seating spans
 several slots) runs in a serializable transaction; this index is the guarantee
 that survives if that isolation level is ever relaxed.
+
+Indexes: `(branch_id, reserved_for)` for availability, which asks about an
+interval around a slot, and `(branch_id, service_date)` for the staff book,
+which only ever asks "this branch, this service day". Neither answers the
+other's question — a date column cannot express an interval, and an interval
+cannot express a night that ends after midnight.
 
 ---
 

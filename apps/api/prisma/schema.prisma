@@ -658,6 +658,22 @@ model Reservation {
   branchId        String            @map("branch_id") @db.Uuid
   tableId         String?           @map("table_id") @db.Uuid
   reservedFor     DateTime          @map("reserved_for") @db.Timestamptz(6)
+  /// Which day's book this booking belongs on — the service day, not the
+  /// calendar day of `reserved_for`.
+  ///
+  /// The two differ only where a night runs past midnight, and there they
+  /// differ in the way that matters most: a branch open 12:00–02:00 offers
+  /// 00:30 as the last start of *Tuesday's* evening, and that instant's own
+  /// calendar date is Wednesday. Filtering the book by calendar date put those
+  /// guests on Wednesday's page — invisible to the shift that was still
+  /// working when they walked in, and sitting above a service that had not
+  /// opened yet.
+  ///
+  /// Stored rather than recomputed for the same reason `seating_minutes` is:
+  /// it is decided by the hours in force when the booking was taken, and a
+  /// branch that shortens its night next month must not silently move guests
+  /// who are already in the book to another day.
+  serviceDate     DateTime          @map("service_date") @db.Date
   guests          Int               @db.SmallInt
   /// How long this booking holds its table, snapshotted when it was made — the
   /// same reason `orders.prep_min` is a snapshot rather than a lookup.
@@ -714,6 +730,10 @@ model Reservation {
   // collision that matters most — everybody books on the half hour.
   @@unique([tableId, activeSlot])
   @@index([branchId, reservedFor])
+  // The staff book is always "this branch, this service day", so that is the
+  // index it gets. `[branchId, reservedFor]` stays: availability still asks for
+  // an interval around a slot, which a date column cannot answer.
+  @@index([branchId, serviceDate])
   @@index([userId])
   @@map("reservations")
 }

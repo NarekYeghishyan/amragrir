@@ -256,6 +256,18 @@ calendar date: 01:00 on Tuesday belongs to Monday's shift, and `serviceDateOf`
 is what stops it being filed under the wrong day's sheet and gated against a
 Tuesday the kitchen may be shut for. `00:00–00:00` reads as the whole day.
 
+**The service date is written on the booking** (`reservations.service_date`),
+not worked out again whenever the book is read. `assertBookable` already
+resolves it to decide which hours the time is legal under, so the row records
+the day it was accepted for. Reading it back any other way went wrong in the
+one case the whole idea exists for: the staff book asked for `reserved_for`
+between local midnight and local midnight, so the 00:30 party booked for
+Tuesday night appeared on **Wednesday's** page — where the shift still working
+at 00:30 never looked, and above a service that had not opened. Storing it also
+keeps the answer stable: a branch that shortens its night next month changes
+what it offers from then on, and does not move guests already in the book to a
+different day.
+
 ### Rules **[proposed based on design]**
 
 - The restaurant can **enable/disable** booking (`reservations_enabled`). **[from design: `reserve` field]**

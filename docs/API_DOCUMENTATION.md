@@ -1516,8 +1516,12 @@ and who marked it sold out.
 - Scoped in the query, so a dish outside reach is **404**, not 403.
 
 ### GET /restaurant/reservations · *implemented* — `reservations:read`
-- **Query:** `branchId?, date=YYYY-MM-DD?` (a **Yerevan** calendar day),
-  `status?`, `page`, `limit`
+- **Query:** `branchId?, date=YYYY-MM-DD?`, `status?`, `page`, `limit`
+- `date` is a **service day**, not a calendar day — it matches
+  `reservations.service_date`. For a branch that shuts before midnight the two
+  are the same; for one open 12:00–02:00, the 00:30 party booked for Tuesday
+  night comes back under **Tuesday**, which is the shift that will seat them,
+  and not under the Wednesday its instant falls on. See BUSINESS_LOGIC.md §3.
 - **Response 200:** the reservation object plus `customerName` and
   `customerPhone`.
 

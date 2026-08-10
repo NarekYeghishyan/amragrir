@@ -23,7 +23,7 @@ import {
   policyForReservation,
   type ReservationDetail,
 } from '../reservations/reservations.service';
-import { instantOf, seatingRange, seatingsOverlap } from '../reservations/slots';
+import { dateOnly, seatingRange, seatingsOverlap } from '../reservations/slots';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
 import { branchScope } from '../staff/scope';
 import { ListStaffReservationsDto, SetReservationStatusDto } from '../reservations/dto';
@@ -61,12 +61,18 @@ export class RestaurantReservationsService {
       where.status = { in: [...ACTIVE_RESERVATION_STATUSES] };
     }
     if (query.date) {
-      // A local calendar day, not a UTC one: a restaurant's "today" ends when
-      // it closes, and Yerevan is four hours off UTC.
-      where.reservedFor = {
-        gte: instantOf(query.date, 0),
-        lt: instantOf(query.date, 24 * 60),
-      };
+      // The *service* day, which is the day the booking was taken for, and not
+      // the calendar day its instant falls on. The two are the same everywhere
+      // except a branch whose night runs past midnight — and there this is the
+      // whole difference between a host seeing the 00:30 party while the shift
+      // is still on and finding them at the top of tomorrow's page, hours after
+      // they gave up waiting.
+      //
+      // Filtered on a stored column rather than a computed range because a list
+      // may span branches whose nights end at different times, and because the
+      // answer belongs to the hours the booking was accepted under rather than
+      // to whatever the branch's hours say today.
+      where.serviceDate = dateOnly(query.date);
     }
 
     const [rows, total] = await Promise.all([

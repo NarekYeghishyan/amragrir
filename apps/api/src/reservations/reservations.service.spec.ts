@@ -384,6 +384,32 @@ describe('create', () => {
     await service.create('user-1', createDto());
     expect(created).toHaveBeenCalled();
   });
+
+  it('files the booking under its own service day', async () => {
+    const { service, created } = build();
+    await service.create('user-1', createDto());
+
+    expect(created.mock.calls[0][0].data.serviceDate).toEqual(new Date(`${DATE}T00:00:00.000Z`));
+  });
+
+  it('files a table taken after midnight under the evening it belongs to', async () => {
+    // The case the whole service-day idea exists for. A branch open 12:00–02:00
+    // offers 00:30 as the last start of *this* evening; the instant's own
+    // calendar date is tomorrow, and filing it there hides the booking from the
+    // only shift that will ever see those guests.
+    const { service, created } = build({
+      branch: branch({ bookingHours: { default: { open: '12:00', close: '02:00' } } }),
+    });
+
+    // 24:30 from DATE's midnight — half past midnight, on DATE's night.
+    await service.create('user-1', createDto({ reservedFor: at(24 * 60 + 30).toISOString() }));
+
+    const { data } = created.mock.calls[0][0];
+    expect(data.serviceDate).toEqual(new Date(`${DATE}T00:00:00.000Z`));
+    // And the instant itself is untouched — the guest is coming at 00:30, which
+    // is tomorrow's date. Both facts are true and the row holds both.
+    expect(localTimeLabel(data.reservedFor as Date)).toBe('00:30');
+  });
 });
 
 describe('cancel', () => {

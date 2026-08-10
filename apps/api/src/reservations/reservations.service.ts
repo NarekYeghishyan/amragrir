@@ -24,6 +24,7 @@ import { DepositsService } from '../payments/deposits.service';
 import {
   addLocalDays,
   bookingWindowFor,
+  dateOnly,
   depositFor,
   instantOf,
   isSlotBoundary,
@@ -267,7 +268,7 @@ export class ReservationsService {
     }
 
     const policy = policyOf(branch);
-    await this.assertBookable(branch, policy, reservedFor, dto.guests);
+    const serviceDate = await this.assertBookable(branch, policy, reservedFor, dto.guests);
 
     const depositAmd = depositFor(dto.guests, policy);
 
@@ -287,6 +288,7 @@ export class ReservationsService {
         branch,
         policy,
         reservedFor,
+        serviceDate,
         guests: dto.guests,
         depositAmd,
       });
@@ -488,7 +490,7 @@ export class ReservationsService {
     policy: ResolvedBookingPolicy,
     reservedFor: Date,
     guests: number,
-  ): Promise<void> {
+  ): Promise<string> {
     // The same resolution the slot list above uses, so what is offered and what
     // is accepted cannot disagree for a branch that answers for itself.
     const offering = resolveBranchOffering(branch, branch.restaurant);
@@ -549,6 +551,11 @@ export class ReservationsService {
         maxSeats: branch.tables.reduce((max, table) => Math.max(max, table.seats), 0),
       });
     }
+
+    // Handed back rather than recomputed by the caller: this is the day the
+    // booking was gated against, and it is the day it must be filed under.
+    // Working it out twice is how the two could ever disagree.
+    return serviceDate;
   }
 
   /**
@@ -584,6 +591,8 @@ export class ReservationsService {
     branch: BranchForBooking;
     policy: ResolvedBookingPolicy;
     reservedFor: Date;
+    /** The service day `assertBookable` gated this instant against, `YYYY-MM-DD`. */
+    serviceDate: string;
     guests: number;
     depositAmd: number;
   }): Promise<ReservationRow> {
@@ -622,6 +631,10 @@ export class ReservationsService {
                 tableId: free.id,
                 reservedFor: input.reservedFor,
                 activeSlot: input.reservedFor,
+                // Which evening this is, decided by the hours it was accepted
+                // under. A 00:30 table belongs to the night that is still going
+                // on, not to the morning it technically starts in.
+                serviceDate: dateOnly(input.serviceDate),
                 guests: input.guests,
                 // Snapshotted, so a branch that later lengthens its seating has
                 // not retrospectively changed what this guest was promised.
