@@ -432,16 +432,37 @@ already accounts for where it is.
 ## 8b. staff_notifications / staff_notification_reads
 
 Something a branch needs telling about, addressed to the **branch** rather than
-to a person. One kind so far: a pre-order is about to need cooking.
+to a person. Three kinds: a pre-order is about to need cooking (`prep_due`),
+somebody has paid for an order nobody has accepted yet (`order_placed`), and a
+table has been booked that nobody has accepted yet (`booking_placed`).
 
 | Field | Type | Description |
 |---|---|---|
 | id | uuid PK | |
 | branch_id | uuid FK→restaurant_branches.id ON DELETE CASCADE | who is being told |
-| type | enum(`prep_due`) | what kind of thing this is |
+| type | enum(`prep_due`, `order_placed`, `booking_placed`) | what kind of thing this is |
 | order_id | uuid FK→orders.id NULL ON DELETE CASCADE | what it is about, when it is about an order |
 | payload | jsonb NULL | the numbers the panel renders the line from — order code, when it is due, the prep estimate, the notice, the dish count. **Never the pickup code:** a bell is a screen a shift leaves open, and that is the last place to print the one thing the counter has to ask a guest for |
 | created_at | timestamptz | |
+
+**A booking produces one only where somebody must decide.** `booking_placed` is
+raised for a `pending` booking — one taken by a branch that asked to read every
+booking first. A booking that confirmed itself has no decision waiting on
+anybody and simply appears in the book; interrupting a shift for it would be
+noise of the kind that teaches people to stop looking at the bell. Its payload
+carries `service_date`, not a date derived from `reserved_for`, because the book
+is filed by the evening a table belongs to and a 00:30 table belongs to the
+night that is still going on.
+
+**Which order produces which kind.** An **immediate** order stops at `paid` and
+waits for a human to accept it, so `order_placed` is raised then — that is the
+moment a diner is watching a screen saying the restaurant has not looked at
+their order. A **pre-order** is accepted the moment it is paid for
+(BUSINESS_LOGIC.md §4), specifically so it does not sit unanswered for days; it
+raises nothing at that point and is announced later by `prep_due`, when the work
+is actually in front of somebody. The two kinds are therefore never both raised
+for one order, and the test is `orders.reminder_at` — a fact about how the order
+was placed, not about the clock.
 
 **Not a staff-side copy of `notifications` (§12).** That table has a `user_id`
 and is one customer's inbox. This one has a `branch_id`, because a shift is not
@@ -489,7 +510,14 @@ Indexed as `(branch_id, created_at)` — one branch's bell, newest first.
 | deposit_credited | boolean DEFAULT false | credited to bill |
 | status | enum(`pending`,`confirmed`,`seated`,`completed`,`cancelled`,`no_show`) | |
 | active_slot | timestamptz NULL | mirrors `reserved_for` while the booking holds the table |
+| reminder_sent_at | timestamptz NULL | **When the guest was reminded the table is coming up**, NULL if they have not been. A marker, not a schedule: the moment is derived from `reserved_for` less `BOOKING_REMINDER_LEAD_MINUTES`, and this only records that it happened. The sweep claims a row by matching on it still being NULL, so two instances cannot both send. A booking whose sitting has already passed, or which was made inside its own reminder window, is never sent and so keeps a NULL for good — the honest record, since nobody was reminded. |
 | created_at / updated_at | timestamptz | |
+
+`reservations_reminder_due_idx` is a **partial** index on `reserved_for`
+`WHERE reminder_sent_at IS NULL`, hand-written in its migration for the reason
+`orders_reminder_due_idx` is: the rows the sweep wants are a vanishing fraction
+of the table, and an index over the whole of `reservations` would be scanned
+past on every pass. Partial indexes have no `schema.prisma` spelling.
 
 `UNIQUE (table_id, active_slot)` is what makes a table exclusive. It is keyed on
 `active_slot` rather than `reserved_for` because Postgres treats NULLs in a
@@ -562,15 +590,20 @@ the reader is the row's owner, so `is_read` is a column.
 | type | enum(`order`,`reservation`,`promo`,`referral`,`system`) | |
 | title | varchar(160) NULL | the words, **when the server wrote them** — see below |
 | body | text NULL | |
-| payload | jsonb NULL | what the row is about; for `order`: `{ orderId, code, status }` |
+| payload | jsonb NULL | what the row is about; for `order`: `{ orderId, code, status }`, for `reservation`: `{ reservationId, status, reservedFor }` plus `reminder: true` on the one the reminder job writes |
 | is_read | boolean DEFAULT false | |
 | created_at | timestamptz | |
 
 **`title`/`body` are null for everything a client can draw itself**, which is
-every `order` row. Those carry `payload` and the client renders the line from
-the dictionary it already ships for its tracking screen — the map is
-`ORDER_STATUS_COPY` in `@amragrir/i18n`, shared so the web and the app cannot
-word the same fact differently.
+every `order` and every `reservation` row. Those carry `payload` and the client
+renders the line from the dictionary it already ships — `ORDER_STATUS_COPY` and
+`RESERVATION_NOTIFICATION_COPY` in `@amragrir/i18n`, shared so the web and the
+app cannot word the same fact differently.
+
+**The two maps are separate and keyed by kind, not merged by status.** Both an
+order and a booking have a `confirmed`, and they mean different things by it — a
+kitchen accepting an order, and a restaurant accepting a table. One map keyed by
+status alone would quietly draw the other's words.
 
 They were `NOT NULL` until the bell was actually built, and the first thing
 turning it on asked was: *in which language is `title` stored?* Every answer

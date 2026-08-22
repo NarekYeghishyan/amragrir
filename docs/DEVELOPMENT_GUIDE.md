@@ -10,7 +10,7 @@
 |---|---|
 | Backend | **NestJS** (TypeScript) |
 | Database | **PostgreSQL** + **Prisma** (ORM/migrations — chosen over TypeORM) |
-| Cache / queues / OTP | **Redis** |
+| Cache / queues / OTP / event fan-out | **Redis** |
 | Mobile | **React Native + Expo** (expo-router) |
 | Web | **Next.js** (App Router) — customer-facing; public restaurant/menu pages need SEO |
 | Admin / back office | **React + Vite** (SPA, no SSR) — internal tool for every staff role |

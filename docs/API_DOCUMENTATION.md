@@ -121,6 +121,9 @@ failing the signup.
 
 ### PATCH /me/settings
 - **Body (any):** `{ "notifPush": true, "notifPromo": false, "darkMode": false }`
+- `notifPush` is enforced server-side: with it off, an order still records a
+  notification (the bell keeps the history) but nothing is delivered — no socket
+  frame, and no push once `POST /devices` exists. See BUSINESS_LOGIC.md §4.
 
 ### PATCH /me/language
 - **Body:** `{ "language": "hy|ru|en" }` — **400** on any other value.
@@ -500,9 +503,12 @@ is written into every access log along the way.
   should reconnect and re-subscribe.
 - **Polling is still supported and returns the same fields.** This is an
   optimisation, not the only way to follow an order.
-- **Single-instance only today.** Fan-out is an in-process emitter, so a socket
-  on instance A would not hear a change made on instance B; that becomes Redis
-  pub/sub before the API is scaled out.
+- **Fan-out crosses instances.** Each process serves the sockets it holds from
+  its own emitter and republishes the event on Redis pub/sub, so a socket on
+  instance A hears a change made on B. Local delivery deliberately does *not*
+  travel through Redis: a broker that is down costs the other instances, never
+  the sockets a process is already holding. Each process drops its own echo, so
+  one change is one delivery.
 
 ---
 
@@ -721,11 +727,21 @@ BUSINESS_LOGIC.md §4.
 - **Response 200:** `{ "items":[ { "id","type","title","body","payload","isRead","createdAt" } ], "unread": 2 }`
 - **`type`** is one of `order`, `reservation`, `promo`, `referral`, `system`.
 - **`title` and `body` are null for everything the client can draw itself**,
-  which is every `order` row. Those carry `payload` —
-  `{ "orderId", "code", "status" }` — and the client renders the line from the
-  dictionary it already ships for its tracking screen (`statusReady`,
-  `statusReadyDesc`, and their siblings; the map is `ORDER_STATUS_COPY` in
-  `@amragrir/i18n`). **This feature added no copy in any language.**
+  which is every `order` and every `reservation` row. Those carry `payload` —
+  `{ "orderId", "code", "status" }` for an order, `{ "reservationId", "status",
+  "reservedFor" }` for a booking — and the client renders the line from the
+  dictionaries it already ships (`ORDER_STATUS_COPY` and
+  `RESERVATION_NOTIFICATION_COPY` in `@amragrir/i18n`).
+- **The two copy maps are separate and keyed by kind.** An order and a booking
+  both have a `confirmed` status and mean different things by it, so a client
+  that looked words up by status alone would draw the wrong ones. A booking row
+  is announced for three statuses only — `confirmed`, `cancelled`, `no_show`;
+  see BUSINESS_LOGIC.md §4 for why the other three are silent, and why a guest
+  cancelling their own table is never told about it.
+- **A booking reminder carries `"reminder": true`** beside an unchanged
+  `confirmed` status, and clients must read that marker *before* looking words
+  up by status — drawn by status it would say "Your table is booked" to somebody
+  who booked it weeks ago. Its words are `RESERVATION_REMINDER_COPY`.
   They are populated only where the server wrote the prose — a promo, a system
   note — and there the API's words are all there is.
   Storing a sentence for an order would freeze it in whatever language the

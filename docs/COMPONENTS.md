@@ -940,6 +940,21 @@ The customer's bell — see SCREENS.md §15. Two components rather than one,
 because the two clients learn about a change differently (below), but they draw
 the same thing and read the same endpoints.
 
+- **It draws two kinds of row**, orders and bookings, and picks the words by
+  **reminder marker first, then kind, then status** (`drawnBy` on web, the same
+  shape on mobile). The marker comes first because a reminder does not move a
+  booking — it is `confirmed` before and after — so status alone would draw the
+  confirmation's sentence at a guest who booked weeks ago.
+  Both kinds have a `confirmed` and mean different things by it — a kitchen
+  accepting an order, a restaurant accepting a table — so a lookup keyed by
+  status alone would quietly render the other's sentence. The maps are
+  `ORDER_STATUS_COPY` (total) and `RESERVATION_NOTIFICATION_COPY` (partial: only
+  the three booking statuses that say anything), both in `@amragrir/i18n`.
+- **A row leads to the thing it is about**: `${ordersBase}/${orderId}` or
+  `${reservationsBase}/${reservationId}` on web, `/tracking/{id}` or
+  `/booking/{id}` on mobile. A row whose kind this build does not know is
+  skipped rather than rendered blank — a newer API talking to an older page.
+
 - **Web props:** `endpoint` (`notificationsApiPath(language)`), `streamEndpoint`
   (`notificationsStreamPath(language)`), `ordersBase` (`ordersPath(language)`),
   `labels: { bell, empty, hint, enableAlerts, alertsOn }`,
@@ -1060,6 +1075,55 @@ The "food ready at" grid, shared rather than copied.
 - **The spec stayed in `apps/web`**, importing from the package: `@amragrir/shared` has no test runner of its own, and adding one to house four assertions is more machinery than the move is worth.
 - **Later options sit on clean quarter-hours**, so the grid reads 12:45 / 13:00 rather than 12:47 / 13:02.
 - **Pickup only on mobile.** A dine-in basket takes the booked table's instant as its `readyAt`, so it never draws this.
+
+### NotificationBell / alerts (`apps/admin/src/notifications.tsx`, `apps/admin/src/alerts.ts`)
+The back office's bell — a different component from the customer's above, and a
+different problem. It lives in the shell rather than on a screen because the
+point of a reminder is that it reaches somebody looking at something else.
+
+- **Three kinds of row.** `prep_due` — a pre-order needs starting —
+  `order_placed`, somebody has paid and is waiting to be accepted, and
+  `booking_placed`, a table has been booked and is waiting to be accepted. The
+  booking row names the party (*a table for four*) rather than a reference,
+  because that is what a shift is actually deciding about, and it links to the
+  book on the booking's **service date** — a 00:30 table belongs to the night
+  still going on, and the calendar date would open tomorrow's empty page. They share
+  one payload shape (`StaffNotificationPayload`) rather than a union, because
+  they describe the same order from two moments and the detail line draws them
+  identically; a kind simply omits what does not apply, as `order_placed` does
+  with `prepStartAt`. The headline switch is exhaustive, so a third kind cannot
+  be added without deciding what it says.
+- **Reaching a kitchen takes more than a badge.** `prep_due` is raised a minute
+  before work has to start, and the person it is for is at a stove with the
+  panel on a counter behind them. Two answers, deliberately different in kind: a
+  **chime**, which needs no permission and works in a tab that is open but
+  unwatched, and a **desktop notification**, which reaches a tab that is not in
+  front and which the browser grants only from a click.
+- **Sound is on by default**, unlike the customer's alerts. A back office is
+  opened in order to be told things, and a kitchen that has to find a setting
+  before it can hear a reminder has already missed one. The switch is remembered
+  per browser (`localStorage`, `amragrir.admin.chime`), not per account: the
+  panel by the pass wants sound, a manager's laptop in a meeting may not.
+- **`freshNotifications(seen, items)` decides what is news.** The list is
+  re-read on a 60-second poll and on every socket frame, so the same rows come
+  back repeatedly; a chime on each would train a shift to ignore the one that
+  mattered. A row already announced, or already read anywhere, is silent. The
+  first read of a session is the baseline rather than news — opening the panel
+  at the start of a shift must not sound for every reminder of the last one.
+- **One chime however many arrived**, and one desktop notification per row,
+  tagged by order id so a second reminder for an order replaces its first
+  instead of stacking beside it. The alert text is `notificationHeadline` and
+  `notificationDetail` — the same sentences as the row, so this added no copy.
+- **The chime is synthesised** (two notes, Web Audio), not an asset: a file is a
+  request that can fail on a panel whose network is having the same bad minute
+  that produced the reminder. `armChime()` resumes the `AudioContext` on the
+  first interaction anywhere, because browsers start it suspended and a panel
+  can be signed into and then left alone.
+- **Not shared with `apps/web/src/lib/browser-alerts.ts`.** That one has no
+  sound (a phone buzzing is the OS's job) and needs a service worker, because
+  Android Chrome refuses `new Notification()` and a customer is on a phone. This
+  one is the opposite case, and the package they would both have to live in is
+  consumed by the API, which has no DOM.
 
 ### ServiceRows (`apps/admin/src/screens/Restaurants.tsx`)
 How the restaurant will feed people, as three switches — Pre-Order (stored `pickup`), dine-in, table booking — in their own section on a restaurant's page. There is no fourth: `eat_in` stopped being a declared service, and eating in after collecting is now derived from whether the address takes bookings (BUSINESS_LOGIC.md §2).

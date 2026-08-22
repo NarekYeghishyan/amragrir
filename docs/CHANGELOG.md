@@ -7,6 +7,281 @@
 
 ## [Unreleased]
 
+### 2026-08-22 — The reminder a booking was still missing
+
+The booking bell shipped earlier today without the one notification nobody
+causes. Everything else a guest is told about their table is a decision somebody
+made — confirmed, cancelled, recorded as a no-show — and each has a mover and a
+moment to hang a producer on. A reminder has neither: nobody does anything three
+hours before dinner, which is exactly why it has to be a job.
+
+**Three hours, not the evening before.** A reminder the previous day cannot
+serve a table booked this morning for tonight, which is a large share of
+bookings; three hours reaches both and is still time to set off — or to cancel
+and free the table for somebody else, which is the restaurant's interest in it
+too. It is a constant rather than a `booking_policies` column for now; making it
+per-branch is a real want and is the same shape as `free_cancel_hours`, so it is
+a column and an admin control away rather than a redesign.
+
+**Only a promised table, and never a sitting that has already begun.** A
+`pending` booking may still be refused, and reminding somebody about a table
+that is then turned down is worse than saying nothing. The floor is in the query
+rather than in a check afterwards, because the case it exists for is a backlog:
+after an outage the due set contains evenings that have passed, and "your table
+is soon" arriving at midnight is worse than the silence it replaces. Those rows
+are never selected and so keep a NULL `reminder_sent_at` for good — the honest
+record, since nobody was reminded.
+
+Built on the same two mechanisms the prep sweep uses, deliberately: a Redis lock
+so one instance does the pass, and a claim that matches on `reminder_sent_at`
+still being NULL so two passes racing settle to one send. `reminder_sent_at` is
+a marker, not a schedule — the moment comes from `reserved_for` and the lead,
+and the column only records that it happened. Its partial index is hand-written
+for the reason the orders one is: the rows wanted are a vanishing fraction of
+the table.
+
+**The clients needed a new question, not a new lookup.** A reminder does not
+move a booking — it is `confirmed` before and after — so drawing it by status
+would have said "Your table is booked" to somebody who booked it three weeks
+ago. The row carries `reminder: true`, and both bells read that marker before
+they look anything up by status.
+
+`notif_push` governs it as it governs the rest: the row is written whatever the
+switch says, and the switch decides only whether anybody is interrupted. The
+guest's preference comes back on the same query that finds the due bookings, so
+honouring it costs no round trip per booking.
+
+**A review pass caught the case that would have annoyed people most.** A table
+booked at five for seven is already inside the three-hour window when it is
+made, so the first sweep would have announced "your table is soon" a minute
+after the guest chose it — telling somebody what they have just done, which is
+the exact mistake `created` is kept silent on an order to avoid. A reminder now
+goes only to somebody who booked *before* their own reminder point, which is the
+only guest who could have forgotten.
+
+The same pass added the first test of `RestaurantReservationsService.setStatus`,
+which had none: the guest's notification is written inside `settle`'s
+transaction callback and announced after it commits, joined by a variable
+captured out of a closure — an arrangement that compiles just as happily when
+the announcement never fires.
+
+One migration: `reservations.reminder_sent_at` plus a partial index on
+`reserved_for`.
+
+Docs: `DATABASE.md` (the column, the index, §12's payload), `BUSINESS_LOGIC.md`
+(§4), `API_DOCUMENTATION.md` (`GET /notifications`), `COMPONENTS.md`,
+`SCREENS.md` (§15). Two new customer strings in each of the three languages.
+
+### 2026-08-22 — A booking now tells both sides
+
+`NotificationType.reservation` had been in the enum since the table was created
+and nothing had ever written one. Bookings were the one part of the product that
+happened in silence: a guest waited to hear whether a restaurant had accepted
+their table, a shift never learned that one was waiting to be read, and the only
+way to find out either was to go and look.
+
+**To the guest**, three of the six statuses now speak — `confirmed`,
+`cancelled`, `no_show` — and the three that do not are as deliberate as the
+three that do. `pending` is the guest's own act, and they are looking at the
+screen that says the restaurant is reading it. `seated` and `completed` happen
+with the guest in the room, and telling somebody they are sitting at their table
+is the clearest case of a notification nobody needs.
+
+`no_show` is the uncomfortable one and it is sent on purpose. It is the status
+that can keep a deposit, and learning that silently from a card statement three
+weeks later is worse than being told by the app that did it.
+
+**Who moved it matters as much as where it moved to.** The producer sits on the
+staff path only, so a guest who cancels their own booking is not informed of
+what they just did. That is why this one is called rather than subscribed,
+unlike the two order producers beside it: an order is moved from three places
+and a fourth is coming, while a booking is moved from exactly two — and *which
+of the two* is the entire question here. A stream would flatten precisely the
+distinction this needs.
+
+**To the branch**, a `pending` booking now raises `booking_placed`. Same rule as
+`order_placed`: a notification is for work with a person waiting on an answer.
+A booking that confirmed itself has nobody waiting on anything and simply
+appears in the book. The row names the party — *a table for four* — rather than
+a reference nobody can weigh, and links to the book on the booking's **service
+date**, because a 00:30 table belongs to the night that is still going on and a
+calendar date would open tomorrow's empty page.
+
+**The two copy maps are separate, and that is the interesting part of the client
+work.** An order and a booking both have a `confirmed`, and they mean different
+things by it — a kitchen accepting an order, a restaurant accepting a table. The
+web and the app both looked their words up by status alone, which would have
+drawn "The kitchen accepted your order" over somebody's dinner reservation. Both
+now key by kind first, from `ORDER_STATUS_COPY` and the new
+`RESERVATION_NOTIFICATION_COPY`, which marks the silent statuses `null` rather
+than leaving them absent — so a seventh status is a decision this file forces
+somebody to make.
+
+Written with the move it describes, inside the same transaction, and announced
+only after it commits: a notification that outlived a rolled-back update would
+tell somebody their table was confirmed when it was not. The guest's
+`notif_push` is honoured here exactly as it is for an order — the row is written
+whatever the switch says, and the switch decides only whether anybody is
+interrupted.
+
+One migration, additive: `ALTER TYPE "StaffNotificationType" ADD VALUE
+'booking_placed'`.
+
+**Still missing:** the reminder before the sitting. A guest who booked three
+weeks ago is told nothing on the day, and that wants a scheduled job and a
+sent-marker column of its own, exactly as `orders.reminder_sent_at` does.
+
+Docs: `DATABASE.md` (§8b, §12), `BUSINESS_LOGIC.md` (§4),
+`API_DOCUMENTATION.md` (`GET /notifications`), `COMPONENTS.md` (both bells),
+`SCREENS.md` (§15). Six new customer strings and four new admin strings, in each
+of the three languages.
+
+### 2026-08-22 — The order that reached nobody
+
+A branch was only ever told one thing: that a pre-order was coming up. That is
+the right notification for a pre-order and the only one it needs — paying
+accepts one outright, precisely so it does not sit unanswered for five days, and
+the kitchen hears about it later when the work is in front of somebody.
+
+An immediate order had nothing at all. It stops at `paid` and waits for a human
+to say yes, with a diner watching a screen that says the restaurant has not
+looked at their order yet. It appeared on the board, silently — and a board is
+not something anybody watches, which is the entire reason the bell exists for
+the other kind. The one order in the product with somebody actively waiting on
+an answer was the one nothing interrupted anybody about.
+
+`order_placed` is that notification. **The trigger is `paid`, not `confirmed`:**
+`confirmed` is the answer to this row, and announcing it would be telling a
+shift about a decision it had just taken. `created` stays silent for the reason
+it is silent for the customer — an order nobody has paid for may never become
+work.
+
+**A pre-order raises nothing here**, so the two kinds are never both sent for
+one order. The test is `orders.reminder_at` alone — the same fact
+`payments.service.ts` already decides acceptance on, rather than a second
+opinion about the clock that could come to disagree with it.
+
+The producer subscribes to the order stream instead of being called from
+`payments.service.ts`, like the customer's bell beside it: whatever moves an
+order next is announced for free, where a third call site is a thing to
+remember. It records through the existing `StaffNotificationsService.record` and
+publishes only after the write, so a bell cannot describe a payment that rolled
+back.
+
+The panel draws the new row from the same payload shape as the old one, renamed
+`StaffNotificationPayload` now that it serves two kinds — they describe one
+order from two moments, and the detail line was already identical. The headline
+switch is exhaustive, which is what made adding the kind a compile error until
+it had words in all three languages.
+
+One migration, additive: `ALTER TYPE "StaffNotificationType" ADD VALUE
+'order_placed'`. The guard in `shared-wiring.spec.ts` did its job and failed
+until `@amragrir/shared` carried the value too.
+
+Docs: `DATABASE.md` (§8b — the second kind, and which order produces which),
+`BUSINESS_LOGIC.md` (§4), `COMPONENTS.md` (the back office's bell). Two new
+strings in each admin dictionary.
+
+### 2026-08-22 — The kitchen can hear the bell now
+
+A `prep_due` reminder is raised a minute before work has to start, and it landed
+in a panel that made no sound. The person it is for is at a stove with the panel
+on a counter behind them, so a badge changing quietly was, for that reader, not
+a notification at all — the one screen in the product where the news is urgent
+was also the only one with no way to interrupt anybody.
+
+The bell now chimes, and can raise a desktop notification. Two answers rather
+than one because they differ in kind: sound needs no permission and works in a
+tab that is open but unwatched, which is the kitchen's actual case; a desktop
+notification reaches a tab that is not even in front, and the browser grants it
+only from a click. The desktop half is offered exactly where pressing it can do
+something — `denied` cannot be re-asked from inside a page.
+
+**Sound is on by default**, the opposite of the customer's alerts. A back office
+is opened in order to be told things, and a kitchen that has to discover a
+setting before it can hear a reminder has already missed one. The switch is
+remembered per browser rather than per account, because it is a fact about the
+machine and the room: the panel by the pass wants sound, a manager's laptop in a
+meeting does not.
+
+**What counts as news** took the most care. The list is re-read on a 60-second
+poll and on every socket frame, so the same rows arrive again and again;
+chiming on each would teach a shift to ignore the one that mattered.
+`freshNotifications` announces only rows that are both unseen and unread, and
+the first read of a session is a baseline rather than news — opening the panel
+at the start of a shift must not sound for every reminder of the last one. Three
+reminders landing together are one chime and three tagged notifications, since
+they are one thing to look up for.
+
+The chime is synthesised from two notes rather than played from a file: an asset
+is a request that can fail on a panel whose network is having the same bad
+minute that produced the reminder. It is also why the panel arms its audio on
+the first interaction anywhere — browsers start an `AudioContext` suspended, and
+a panel is often signed into and then left alone for an hour.
+
+None of this is shared with the customer's `browser-alerts.ts`, deliberately:
+that one has no sound because a phone buzzing is the OS's job, and needs a
+service worker because Android Chrome refuses `new Notification()`. This is the
+opposite case, and the shared package they would both have to live in is
+consumed by the API, which has no DOM at all.
+
+Docs: `COMPONENTS.md` (the back office's `NotificationBell` / `alerts`, newly
+described there). Three new strings in each of the admin dictionaries.
+
+### 2026-08-22 — The switch in Settings is read, and a second instance is possible
+
+Two things that were written down as known gaps, both closed in the same pass.
+
+**`notif_push` did nothing.** The switch on the mobile Settings screen persisted
+through `PATCH /me/settings`, and no code on the server ever read the column
+back. Everyone got every notification, whatever they had asked for. It is now
+read on every order that moves — in the same statement that writes the row,
+rather than a second query on the path of every order.
+
+What it governs is delivery, not the record. The `notifications` row is written
+either way and the bell keeps its history; the switch decides whether the live
+frame goes out. The alternative — no row at all — would mean somebody who turns
+notifications back on finds a hole where the last fortnight of orders went,
+which is not what "do not notify me" asked for. This also matters more than it
+looks: it is the gate the OS-level push will sit behind when `POST /devices`
+exists, and a switch nobody reads is harmless right up until the day it is a
+phone buzzing at somebody who said no.
+
+**The three event services could not survive a second API process.** Each held
+a private `EventEmitter`, and each carried the same note saying so: a socket on
+instance A never heard an event published on B. They now share `RedisEventBus`,
+written once rather than three times, because the three differ in who they
+address and not in how a message crosses a process boundary.
+
+Local delivery deliberately does not travel through Redis. A publisher serves
+its own listeners directly and *also* hands the event to the broker, so a Redis
+outage costs the other instances and never the sockets a process is already
+holding. That is what makes the `origin` stamp necessary: Redis echoes a
+published message back to its sender, and without a marker every customer on the
+publishing instance would see each status twice.
+
+The subscriber needs its own connection with its own options, which cost a boot
+to learn. `duplicate()` carries across the shared client's `enableOfflineQueue:
+false` — right for an OTP request, which should error rather than hang, and
+wrong for a subscription, which is a standing intent with nobody waiting. The
+first SUBSCRIBE is issued before the socket has connected, so it was refused
+outright with "Stream isn't writeable" and the API came up healthy while
+listening to nothing. Verified against a real Redis this time: all three
+channels appear in `PUBSUB CHANNELS`, each with one subscriber.
+
+Docs: `BUSINESS_LOGIC.md` (§4, what the switch governs), `API_DOCUMENTATION.md`
+(the order stream is no longer single-instance; `PATCH /me/settings`),
+`DEVELOPMENT_GUIDE.md` (Redis now also carries event fan-out).
+
+### 2026-08-22 — The committed API address went stale again
+
+`app.json`'s `extra.apiUrl` pointed at `192.168.27.3:3007`; the dev machine's
+DHCP lease has moved to `.9`, so the address is now `192.168.27.9:3007`. The
+port was already right — 3000 stays free for another project's server, so the
+API came up on `PORT=3007` as it did on 2026-08-17 and the address did not have
+to follow it this time. Metro restarted with `--clear`, since a plain restart
+keeps the old value baked into the bundle. Nothing about the app changed.
+
 ### 2026-08-10 — `dev` clears its own port before Nest binds it
 
 `pnpm --filter @amragrir/api dev` failed on **`EADDRINUSE` on 3000** often

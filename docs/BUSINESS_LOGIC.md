@@ -448,6 +448,70 @@ only record it ever moved. A lead longer than the time remaining is legal and
 means "warn me now"; a terminal order and an order placed for as soon as
 possible are both refused, the latter because it has no warning to move.
 
+**An immediate order is announced the moment it is paid for**, as an
+`order_placed` row for the branch. It is the one order that reached nobody
+before: it stops at `paid` waiting for a human to accept it, while the diner
+watches a screen saying the restaurant has not looked at their order yet, and it
+appeared on the board silently — and a board is not something anybody watches,
+which is the whole reason the bell exists for the other kind.
+
+The trigger is `paid` and not `confirmed`: `confirmed` is the *answer* to this
+notification, and announcing it would be telling a shift about a decision it had
+just taken. A pre-order raises nothing here, because paying accepts one outright
+— it is announced later, by the reminder below, when the work is in front of
+somebody. The test is `reminder_at` alone, the same fact `payments.service.ts`
+decides acceptance on, so the two can never disagree about what kind of order
+this was.
+
+**A booking speaks to both sides.** To the **branch**, a `pending` booking
+raises `booking_placed` — the same rule as `order_placed`: somebody is waiting
+on a human decision. A booking that confirmed itself raises nothing and simply
+appears in the book.
+
+To the **guest**, three of the six booking statuses earn a notification:
+**`confirmed`, `cancelled`, `no_show`**. The three that do not:
+
+- **`pending`** is the guest's own act; they are looking at the screen that says
+  the restaurant is reading it.
+- **`seated`** and **`completed`** happen with the guest in the room. Telling
+  somebody they are sitting at their table is the clearest case of a
+  notification nobody needs.
+
+`no_show` is the uncomfortable one and it is sent deliberately: it is the status
+that can keep a deposit, and finding that out silently on a card statement weeks
+later is worse than being told.
+
+**Who moved it matters as much as where it moved to.** The producer sits on the
+staff path only, so a guest who cancels their own booking is not told what they
+just did — the same rule that keeps `created` silent on an order.
+
+**A guest is also reminded before the sitting**, `BOOKING_REMINDER_LEAD_MINUTES`
+(three hours) ahead. Three hours rather than the evening before: a reminder the
+previous day cannot serve a table booked this morning for tonight, and three
+hours is still time to set off — or to cancel and free the table for somebody
+else, which is the restaurant's interest in it too.
+
+This one is a scheduled job rather than a producer, because it is the only thing
+a guest is told that nobody *did*: every other booking notification has a mover
+and a moment, and this has neither. It sends only for a `confirmed` booking — a
+`pending` one may still be refused, and reminding somebody about a table that is
+then turned down is worse than saying nothing — and **never for a sitting that
+has already begun**, so a backlog after an outage cannot deliver "your table is
+soon" at midnight.
+
+**Nor for a guest who booked inside the window.** A table taken at five for
+seven is already within its own lead when it is made, so the sweep would say
+"your table is soon" a minute after somebody chose it — telling them what they
+have just done, which is what `created` is kept silent on an order to avoid. The
+test is where the booking was made relative to its own reminder point, not how
+recently: a reminder is for somebody who booked far enough ahead to have
+forgotten.
+
+A reminder does not move the booking, so its row carries `reminder: true` beside
+the unchanged status, and both clients read that marker *before* they look
+anything up by status. Without it the bell would say "Your table is booked" to
+somebody who booked it three weeks ago.
+
 **The warning itself** is raised by the API's one scheduled job
 (`OrderRemindersService`, every minute, Redis-locked so one instance sends),
 which writes a `staff_notifications` row for the branch and announces it on the
@@ -471,6 +535,19 @@ Six of the eight statuses earn a notification: **`confirmed`, `preparing`,
 
 A notification interrupts somebody, so it has to earn the interruption by
 telling them something they could not already see.
+
+**The customer's own switch decides whether anybody is interrupted.**
+`users.notif_push` (Settings, on by default) is read on every order that moves,
+in the same statement that writes the row. What it governs is **delivery, not
+the record**: the `notifications` row is written either way, and the switch
+decides whether the live frame goes out over the socket — and, once
+`POST /devices` exists, whether an OS-level push goes with it.
+
+The row survives a switched-off bell on purpose. A bell is two things at once —
+a nudge now, and this order's history when somebody opens it later — and "do
+not notify me" answers only the first. Dropping the write instead would mean a
+customer who turns notifications back on finds a hole where the last fortnight
+went, which is not what they asked for.
 
 **Pre-orders stay off the live board until their hour comes.** The back office
 splits every stage on `reminder_at` against the clock — never on

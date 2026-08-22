@@ -644,15 +644,23 @@ stop looking at it.
 
 ## 15. Notifications — the bell
 
-**Purpose:** tell somebody their order moved, wherever they are in the product.
+**Purpose:** tell somebody their order or their table moved, wherever they are
+in the product.
 **User:** a signed-in customer with a verified phone.
 **Where:** a screen (`/notifications`) on mobile, reached from the bell on Home;
 a panel under the header bell on the web, on every page.
 **Elements:** title, "clear all" beside it, one row per notification (status
 headline, order code chip, one-line description, unread dot, **a cross**), empty
 state.
-**Actions:** open a row → §7 Order Tracking for that order; **delete one (the
-cross); delete all**; pull to refresh (app).
+**Actions:** open a row → §7 Order Tracking for an order row, or the booking's
+own screen for a `reservation` row; **delete one (the cross); delete all**; pull
+to refresh (app).
+
+**Booking rows** appear for the three moves a guest cannot see from where they
+are standing — the restaurant confirming, cancelling, or recording a no-show
+(BUSINESS_LOGIC.md §4) — and once more three hours before the sitting, as a
+reminder. A guest cancelling their own table is never told about
+it, for the same reason placing an order does not announce itself.
 **API:** `GET /notifications`, `POST /notifications/read-all`,
 `PATCH /notifications/{id}/read`, `DELETE /notifications/{id}`,
 `DELETE /notifications`, and `watchMe` on the order socket.
