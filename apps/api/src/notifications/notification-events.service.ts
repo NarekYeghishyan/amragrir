@@ -1,8 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { EventEmitter } from 'node:events';
 import type { StaffNotificationType } from '@prisma/client';
+import { RedisEventBus } from '../redis/redis-event-bus';
 
 const STAFF_NOTIFIED = 'staff.notified';
+
+/** Namespaced against a Redis shared with another project. */
+const STAFF_NOTIFIED_CHANNEL = 'amragrir:staff.notified';
 
 /**
  * What a panel is told when its branch gets a notification.
@@ -33,22 +37,36 @@ export interface StaffNotificationEvent {
  *
  * It lives in its own module so both the reminder job (which publishes) and the
  * orders gateway (which broadcasts) can depend on it without depending on each
- * other. **The same thing breaks first here as there**: with a second API
- * instance a panel connected to A would never hear a reminder raised on B.
- * Swapping this for Redis pub/sub is a change to this file.
+ * other. A reminder raised on instance B now reaches a panel connected to A,
+ * because `RedisEventBus` carries it across — see that file for why local
+ * delivery does not itself go through Redis, and why the bus is optional.
  */
 @Injectable()
-export class NotificationEventsService {
+export class NotificationEventsService implements OnModuleInit, OnModuleDestroy {
   private readonly emitter = new EventEmitter();
+  private unsubscribeBus?: () => void;
 
-  constructor() {
+  constructor(@Optional() private readonly bus?: RedisEventBus) {
     // One listener per connected panel, so the default cap of 10 would print a
     // leak warning at the eleventh open board.
     this.emitter.setMaxListeners(0);
   }
 
+  onModuleInit(): void {
+    this.unsubscribeBus = this.bus?.subscribe(STAFF_NOTIFIED_CHANNEL, (event) => {
+      this.emitter.emit(STAFF_NOTIFIED, event as StaffNotificationEvent);
+    });
+  }
+
+  onModuleDestroy(): void {
+    this.unsubscribeBus?.();
+  }
+
+  /** The panels held here first, the other instances after — a broker that is
+   *  down must not cost this process its own board. */
   publish(event: StaffNotificationEvent): void {
     this.emitter.emit(STAFF_NOTIFIED, event);
+    this.bus?.publish(STAFF_NOTIFIED_CHANNEL, event);
   }
 
   /** Registers a listener and returns the function that removes it. Returning

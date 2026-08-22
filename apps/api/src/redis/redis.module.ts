@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { RedisEventBus } from './redis-event-bus';
 import { REDIS_CLIENT, RedisService } from './redis.service';
 
 @Global()
@@ -21,7 +22,8 @@ import { REDIS_CLIENT, RedisService } from './redis.service';
       },
     },
     RedisService,
+    RedisEventBus,
   ],
-  exports: [RedisService],
+  exports: [RedisService, RedisEventBus],
 })
 export class RedisModule {}

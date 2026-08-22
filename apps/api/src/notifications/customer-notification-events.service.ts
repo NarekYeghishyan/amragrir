@@ -1,8 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { EventEmitter } from 'node:events';
 import type { NotificationType } from '@prisma/client';
+import { RedisEventBus } from '../redis/redis-event-bus';
 
 const CUSTOMER_NOTIFIED = 'customer.notified';
+
+/** Namespaced against a Redis shared with another project. */
+const CUSTOMER_NOTIFIED_CHANNEL = 'amragrir:customer.notified';
 
 /**
  * What a customer's client is told when something lands in their bell.
@@ -35,23 +39,36 @@ export interface CustomerNotificationEvent {
  * to be in the app, which is the whole point of a bell. Folding them together
  * would make every subscriber filter a union to find its third.
  *
- * **The same thing breaks first here as there**: with a second API instance, a
- * browser connected to A would never hear about a status change made on B.
- * Swapping this for Redis pub/sub is a change to this file, which is why it is
- * a file.
+ * A browser connected to instance A now hears a status change made on B,
+ * because `RedisEventBus` carries the frame across — see that file for why
+ * local delivery does not itself go through Redis, and why the bus is optional.
  */
 @Injectable()
-export class CustomerNotificationEventsService {
+export class CustomerNotificationEventsService implements OnModuleInit, OnModuleDestroy {
   private readonly emitter = new EventEmitter();
+  private unsubscribeBus?: () => void;
 
-  constructor() {
+  constructor(@Optional() private readonly bus?: RedisEventBus) {
     // One listener per connected client, so the default cap of 10 would print a
     // leak warning at the eleventh customer with the site open.
     this.emitter.setMaxListeners(0);
   }
 
+  onModuleInit(): void {
+    this.unsubscribeBus = this.bus?.subscribe(CUSTOMER_NOTIFIED_CHANNEL, (event) => {
+      this.emitter.emit(CUSTOMER_NOTIFIED, event as CustomerNotificationEvent);
+    });
+  }
+
+  onModuleDestroy(): void {
+    this.unsubscribeBus?.();
+  }
+
+  /** The clients held here first, the other instances after — a broker that is
+   *  down must not cost this process its own bells. */
   publish(event: CustomerNotificationEvent): void {
     this.emitter.emit(CUSTOMER_NOTIFIED, event);
+    this.bus?.publish(CUSTOMER_NOTIFIED_CHANNEL, event);
   }
 
   /** Registers a listener and returns the function that removes it. Returning
