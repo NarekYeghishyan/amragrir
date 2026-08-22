@@ -10,11 +10,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Circle, G, Path, Svg } from 'react-native-svg';
 import { DEFAULT_PHONE_COUNTRY, toE164, type PhoneCountry } from '@amragrir/shared';
 import { auth } from '../src/api/endpoints';
 import { ApiError } from '../src/api/client';
+import { adoptGuestFavorites, adoptGuestFavoriteDishes } from '../src/guest-favorites';
+import { MIN_NAME, isValidName, normalizeName } from '../src/name';
 import { PhoneField } from '../src/components/PhoneField';
 import { useTranslate, type Translate } from '../src/language';
 import { useSession } from '../src/session';
@@ -22,34 +24,74 @@ import { useTheme } from '../src/theme/useTheme';
 
 type Step = 'phone' | 'code';
 
+/** Which tab is up. It picks whether the name field shows — not which endpoint
+ *  runs, and not what the API does with the number. See the note below. */
+type Mode = 'login' | 'register';
+
 /**
- * Sign-in — the artifact's AUTH GATE, with two departures it forces.
+ * Sign-in — the artifact's AUTH GATE.
  *
- * - **No Apple/Google buttons.** Customer identity is phone + OTP; there is no
- *   social endpoint to call, and a button that cannot work is worse than none.
- * - **No log-in / sign-up tabs.** `verify-code` takes an optional name and
- *   upgrades the guest in place, so there is one flow, not two. The name field
- *   appears with the code step, which is the moment the account becomes real.
+ * **The log-in / sign-up tabs choose a field, not an endpoint** (2026-08-11).
+ * There is one credential — phone + OTP — and one call behind both tabs:
+ * `verify-code` takes an optional name and upgrades the guest account in place
+ * whether the number is new or returning. So "sign up" is the same flow with the
+ * name field showing, which is exactly what the artifact does too, where both
+ * tabs run the same `submitAuth`. Nothing here can tell a returning number from
+ * a new one before the code is confirmed, and it does not need to: the API
+ * decides. This is the web's bargain (`apps/web/.../signin/page.tsx`) brought
+ * over — the phone had neither tab, so the one screen that says "create an
+ * account" said only "sign in", and the name every other client offers to take
+ * at the door could not be given here at all.
+ *
+ * The name is asked for on **this** step, not on the code step, and on the
+ * sign-up tab it is **required** (2026-08-11): a form headed "create an account"
+ * that accepts an empty name field is asking a question it does not mean, and
+ * the account it opens is then identified by a phone number for the rest of its
+ * life, since nothing in the product can rename it afterwards. Continue stays
+ * disabled until there is a name, and the field says why once it has been left.
+ *
+ * The requirement is this screen's, not the API's — `verify-code` takes the name
+ * as optional and the web still offers sign-up without one. It is also a rule
+ * about *this form*, not about the account: an existing account confirming its
+ * number here keeps whatever name it already has, because the API will not
+ * rename it from a sign-in (§10). The log-in tab draws no name field and is
+ * unaffected.
+ *
+ * The one departure the artifact forces: **no Apple/Google buttons.** Customer
+ * identity is phone + OTP; there is no social endpoint to call, and a button
+ * that cannot work is worse than none.
  *
  * The artifact also has no OTP step at all (SCREENS.md §0 records that it should
  * grow one). This screen keeps its two steps, because that is what the API does.
  *
- * The artifact's third departure, and the newest: **the `+374` it prints beside
- * the field is a country picker.** It was a constant here, so a diaspora or a
- * visiting customer — the people this product's own country list was built for —
- * could not sign in from the phone at all. See `src/components/PhoneField.tsx`.
+ * The artifact's other departure: **the `+374` it prints beside the field is a
+ * country picker.** It was a constant here, so a diaspora or a visiting customer
+ * — the people this product's own country list was built for — could not sign in
+ * from the phone at all. See `src/components/PhoneField.tsx`.
+ *
+ * **`?mode=register` opens on the sign-up tab**, which is the web's own address
+ * for it (`signinPath(...)&mode=register`) rather than a second convention
+ * invented for the phone. It seeds the tab and nothing else: whoever arrives
+ * that way can still switch, because the two tabs run the same call and picking
+ * the wrong one is not a mistake worth trapping anybody in.
  */
 export default function AuthScreen() {
   const { colors } = useTheme();
   const t = useTranslate();
   const router = useRouter();
   const { signIn } = useSession();
+  const { mode: requestedMode } = useLocalSearchParams<{ mode?: string }>();
 
   const [step, setStep] = useState<Step>('phone');
+  // Read once, on mount: every arrival here is a fresh push (this screen is
+  // popped on the way back), and re-reading it later would drag the tab back
+  // under somebody who had just switched it by hand.
+  const [mode, setMode] = useState<Mode>(requestedMode === 'register' ? 'register' : 'login');
   const [country, setCountry] = useState<PhoneCountry>(DEFAULT_PHONE_COUNTRY);
   const [national, setNational] = useState('');
-  const [code, setCode] = useState('');
   const [name, setName] = useState('');
+  const [nameLeft, setNameLeft] = useState(false);
+  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,10 +104,21 @@ export default function AuthScreen() {
    * says *why* in the field itself.
    */
   const phone = toE164(country, national);
-  const ready = step === 'phone' ? phone !== null : code.length >= 4;
+  /** What the API would be sent, and what the tab requires there to be. The
+   *  rule is shared with the Settings sheet that edits the same field. */
+  const given = normalizeName(name);
+  const hasName = isValidName(name);
+  const ready =
+    step === 'phone' ? phone !== null && (mode === 'login' || hasName) : code.length >= 4;
+  // Silence while they are still typing — `PhoneField`'s rule, for the same
+  // reason: an empty field is not yet a mistake, it is a field nobody has
+  // reached. It speaks once they leave it, and once the number is whole: at
+  // that point Continue would be lit if not for this field, and a dead button
+  // with nothing explaining it is the one thing worse than an early hint.
+  const showNameHint = mode === 'register' && !hasName && (nameLeft || phone !== null);
 
   async function submitPhone() {
-    if (phone === null) {
+    if (phone === null || (mode === 'register' && !hasName)) {
       return;
     }
     setBusy(true);
@@ -93,9 +146,30 @@ export default function AuthScreen() {
     setError(null);
     try {
       // The stored guest bearer rides along, so the server upgrades that
-      // account rather than creating a second one.
-      const result = await auth.verifyCode(phone, code, name.trim() || undefined);
-      signIn(result.user, result.accessToken);
+      // account rather than creating a second one. The name goes with it only
+      // from the sign-up tab — the log-in tab draws no name field, and a name
+      // arriving without one would be a name nobody typed. Trimmed and capped
+      // as the web sends it, so the two clients agree on what reaches the API.
+      const sending = mode === 'register' ? given : '';
+      const result = await auth.verifyCode(phone, code, sending || undefined);
+      // The refresh token goes to the session too: it is what `Log out` on the
+      // settings screen revokes, and dropping it here would leave every
+      // sign-out unable to end the session anywhere but on this phone.
+      signIn(result.user, result.accessToken, result.refreshToken);
+      // Whatever this guest saved on the phone becomes the account's, before
+      // the home screen is shown — the tabs read the favourites list on focus,
+      // and handing it over afterwards would let somebody watch their own
+      // hearts come back one repaint later. Awaited rather than fired and
+      // forgotten, since it is one `POST /favorites` per saved restaurant and
+      // usually none; swallowed rather than surfaced, because a sign-in that
+      // worked must not report itself as failed over a transfer that keeps its
+      // list and retries on the next one.
+      // Both lists, in parallel and independently: a dish that has since left
+      // the menu must not take the restaurants' handover down with it.
+      await Promise.all([
+        adoptGuestFavorites().catch(() => 0),
+        adoptGuestFavoriteDishes().catch(() => 0),
+      ]);
       router.replace('/');
     } catch (err) {
       setError(describe(err, t));
@@ -130,23 +204,78 @@ export default function AuthScreen() {
           </View>
 
           <View style={styles.body}>
-            <Text style={[styles.title, { color: colors.ink }]}>
-              {step === 'phone' ? t('signIn') : t('codeLabel')}
-            </Text>
-            <Text style={[styles.hint, { color: colors.ink2 }]}>
-              {step === 'phone' ? t('authOtpNote') : `${t('codeHint')} ${phone ?? ''}`}
-            </Text>
+            {/* The tabs belong to the first step only. The code step is the
+                second half of the act they named, not a place to change your
+                mind about it — and switching tabs under a live OTP would offer
+                a name field for a code that was already sent without one. */}
+            {step === 'phone' ? (
+              <View style={[styles.tabs, { backgroundColor: colors.chip }]}>
+                <Tab
+                  label={t('authLogin')}
+                  selected={mode === 'login'}
+                  onPress={() => setMode('login')}
+                />
+                <Tab
+                  label={t('authRegister')}
+                  selected={mode === 'register'}
+                  onPress={() => setMode('register')}
+                />
+              </View>
+            ) : (
+              <Text style={[styles.title, { color: colors.ink }]}>{t('codeLabel')}</Text>
+            )}
+
+            {step === 'phone' && mode === 'register' ? (
+              <View style={styles.field}>
+                {/* The asterisk is on the one field that carries it, so it
+                    marks a requirement rather than decorating every label. */}
+                <Text style={[styles.label, { color: colors.ink2 }]}>{t('authName')} *</Text>
+                <TextInput
+                  value={name}
+                  onChangeText={setName}
+                  onFocus={() => setNameLeft(false)}
+                  onBlur={() => setNameLeft(true)}
+                  placeholder={t('authNamePlaceholder')}
+                  placeholderTextColor={colors.ink3}
+                  autoComplete="name"
+                  textContentType="name"
+                  maxLength={120}
+                  accessibilityLabel={t('authName')}
+                  style={[
+                    ...inputStyle,
+                    showNameHint ? { borderColor: colors.danger } : null,
+                  ]}
+                />
+                {showNameHint ? (
+                  <Text
+                    style={[styles.fieldHint, { color: colors.danger }]}
+                    accessibilityLiveRegion="polite"
+                  >
+                    {t('authNameRequired')}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
 
             {step === 'phone' ? (
-              <PhoneField
-                country={country}
-                national={national}
-                onChangeCountry={setCountry}
-                onChangeNational={setNational}
-                autoFocus
-              />
+              <>
+                {/* The note sits under the field, as the artifact draws it: it
+                    explains what pressing Continue will do, so it belongs
+                    beside the button rather than above the thing being typed. */}
+                <PhoneField
+                  country={country}
+                  national={national}
+                  onChangeCountry={setCountry}
+                  onChangeNational={setNational}
+                  autoFocus
+                />
+                <Text style={[styles.hint, { color: colors.ink3 }]}>{t('authOtpNote')}</Text>
+              </>
             ) : (
               <>
+                <Text style={[styles.hint, { color: colors.ink2 }]}>
+                  {t('codeHint')} {phone ?? ''}
+                </Text>
                 <TextInput
                   value={code}
                   onChangeText={(next) => setCode(next.replace(/\D/g, ''))}
@@ -156,14 +285,6 @@ export default function AuthScreen() {
                   maxLength={6}
                   autoFocus
                   style={[...inputStyle, styles.code]}
-                />
-                <Text style={[styles.label, { color: colors.ink2 }]}>{t('authName')}</Text>
-                <TextInput
-                  value={name}
-                  onChangeText={setName}
-                  placeholder={t('authNamePlaceholder')}
-                  placeholderTextColor={colors.ink3}
-                  style={inputStyle}
                 />
               </>
             )}
@@ -208,6 +329,37 @@ export default function AuthScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
+  );
+}
+
+/** One half of the log-in / sign-up pair. The selected tab is a raised card on
+ *  the tinted track, exactly as the artifact draws it — colour alone would not
+ *  survive a colour-blind reader, and there are only two of them to compare. */
+function Tab({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="tab"
+      accessibilityState={{ selected }}
+      style={({ pressed }) => [
+        styles.tab,
+        {
+          backgroundColor: selected ? colors.card : 'transparent',
+          transform: [{ scale: pressed ? 0.97 : 1 }],
+        },
+      ]}
+    >
+      <Text style={[styles.tabText, { color: selected ? colors.ink : colors.ink2 }]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -264,7 +416,13 @@ const styles = StyleSheet.create({
   body: { padding: 24, gap: 12 },
   title: { fontSize: 27, fontWeight: '800', letterSpacing: -0.6 },
   hint: { fontSize: 13.5, lineHeight: 19, marginBottom: 6 },
-  label: { fontSize: 12.5, fontWeight: '700', marginTop: 6 },
+  tabs: { flexDirection: 'row', gap: 4, borderRadius: 15, padding: 4 },
+  tab: { flex: 1, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  tabText: { fontSize: 14.5, fontWeight: '700' },
+  /** Matches `PhoneField`'s own label and spacing, so the two read as one form. */
+  label: { fontSize: 12.5, fontWeight: '700' },
+  field: { gap: 6 },
+  fieldHint: { fontSize: 12.5, fontWeight: '600' },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 14,

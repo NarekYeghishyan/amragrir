@@ -4,7 +4,7 @@ import { notFound, redirect } from 'next/navigation';
 import {
   api,
   ApiError,
-  type FavoriteRestaurant,
+  type FavoriteBranch,
   type MeProfile,
   type OrderSummary,
 } from '@/lib/api';
@@ -60,13 +60,16 @@ export default async function ProfilePage({ params, searchParams }: Props) {
   let me: MeProfile;
   let active: { items: OrderSummary[] };
   let past: { items: OrderSummary[] };
-  let favorites: { items: FavoriteRestaurant[] };
+  let favorites: { items: FavoriteBranch[] };
+  let savedDishes: { ids: string[] };
   try {
-    [me, active, past, favorites] = await Promise.all([
+    [me, active, past, favorites, savedDishes] = await Promise.all([
       api.me(session.accessToken, language),
       api.orders('active', session.accessToken, language),
       api.orders('past', session.accessToken, language),
       api.favorites(session.accessToken, language),
+      // Ids, not the dishes: this page counts them and never draws one.
+      api.favoriteDishIds(session.accessToken, language),
     ]);
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
@@ -75,10 +78,15 @@ export default async function ProfilePage({ params, searchParams }: Props) {
     throw error;
   }
 
+  // Both kinds, because "Favourites" is now both: the screen this number leads to
+  // holds the saved addresses under one tab and the saved dishes under the other,
+  // and a count of half of it would send somebody looking for the rest.
+  const savedCount = favorites.items.length + savedDishes.ids.length;
+
   const stats = [
     { value: me.ordersCount, label: label('ordersCount') },
     { value: me.rewardPoints, label: label('rewardPoints') },
-    { value: favorites.items.length, label: label('favoritesTitle') },
+    { value: savedCount, label: label('favoritesTitle') },
   ];
 
   return (
@@ -201,7 +209,7 @@ export default async function ProfilePage({ params, searchParams }: Props) {
                   ❤️
                 </span>
                 <span className="text">{label('profileFavorites')}</span>
-                <span className="value">{favorites.items.length}</span>
+                <span className="value">{savedCount}</span>
                 <span className="chev" aria-hidden="true">
                   ›
                 </span>

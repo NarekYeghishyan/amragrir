@@ -1,5 +1,6 @@
 import { HttpException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Language } from '@amragrir/shared';
 import { OtpService } from './otp.service';
 import { RedisService } from '../redis/redis.service';
 import type { SmsSender } from '../sms/sms.sender';
@@ -64,7 +65,7 @@ describe('OtpService', () => {
   it('sends a 4-digit code and reports its lifetime', async () => {
     const { service, sent } = build();
 
-    const result = await service.send(PHONE);
+    const result = await service.send(PHONE, Language.Hy);
 
     expect(result.expiresIn).toBe(120);
     expect(sent).toHaveLength(1);
@@ -74,7 +75,7 @@ describe('OtpService', () => {
 
   it('accepts the code it just issued', async () => {
     const { service, codeOf } = build();
-    await service.send(PHONE);
+    await service.send(PHONE, Language.Hy);
 
     await expect(service.verify(PHONE, codeOf())).resolves.toBeUndefined();
   });
@@ -82,7 +83,7 @@ describe('OtpService', () => {
   // Never store a usable code: a Redis dump must not hand over live logins.
   it('stores the code hashed rather than in plaintext', async () => {
     const { service, redis, codeOf } = build();
-    await service.send(PHONE);
+    await service.send(PHONE, Language.Hy);
 
     const stored = await redis.get(`otp:code:${PHONE}`);
     expect(stored).not.toBeNull();
@@ -92,7 +93,7 @@ describe('OtpService', () => {
 
   it('rejects a wrong code', async () => {
     const { service, codeOf } = build();
-    await service.send(PHONE);
+    await service.send(PHONE, Language.Hy);
     const wrong = codeOf() === '0000' ? '1111' : '0000';
 
     await expect(service.verify(PHONE, wrong)).rejects.toThrow(UnauthorizedException);
@@ -107,7 +108,7 @@ describe('OtpService', () => {
   // Single use — a leaked code must not be replayable.
   it('consumes the code so it cannot be redeemed twice', async () => {
     const { service, codeOf } = build();
-    await service.send(PHONE);
+    await service.send(PHONE, Language.Hy);
     const code = codeOf();
 
     await service.verify(PHONE, code);
@@ -117,15 +118,37 @@ describe('OtpService', () => {
 
   it('enforces the resend cooldown', async () => {
     const { service } = build();
-    await service.send(PHONE);
+    await service.send(PHONE, Language.Hy);
 
-    await expect(service.send(PHONE)).rejects.toThrow(HttpException);
+    await expect(service.send(PHONE, Language.Hy)).rejects.toThrow(HttpException);
+  });
+
+  // The clients render this refusal verbatim, so an English-only string would
+  // put English on an Armenian or Russian screen.
+  it.each([
+    [Language.Hy, /^Սպասիր \d+ վայրկյան/],
+    [Language.Ru, /^Подождите \d+ с,/],
+    [Language.En, /^Please wait \d+s before/],
+  ])('writes the cooldown refusal in %s', async (language, expected) => {
+    const { service } = build();
+    await service.send(PHONE, language);
+
+    const error = await service.send(PHONE, language).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(HttpException);
+    const body = (error as HttpException).getResponse() as {
+      message: string;
+      retryAfter: number;
+    };
+    expect(body.message).toMatch(expected);
+    expect(body.message).toContain(String(body.retryAfter));
+    expect(body.retryAfter).toBe(60);
   });
 
   // Without this, a 4-digit code is brute-forceable inside its 120s window.
   it('burns the code after too many wrong attempts', async () => {
     const { service, codeOf } = build();
-    await service.send(PHONE);
+    await service.send(PHONE, Language.Hy);
     const wrong = codeOf() === '0000' ? '1111' : '0000';
     const correct = codeOf();
 
@@ -141,7 +164,7 @@ describe('OtpService', () => {
   it('scopes codes per phone number', async () => {
     const { service, codeOf } = build();
     const other = '+37499000111';
-    await service.send(PHONE);
+    await service.send(PHONE, Language.Hy);
 
     await expect(service.verify(other, codeOf())).rejects.toThrow(/expired|never requested/i);
   });

@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Language } from '@amragrir/shared';
 import { createHash, randomInt } from 'node:crypto';
 import { RedisService } from '../redis/redis.service';
 import { SMS_SENDER, SmsSender } from '../sms/sms.sender';
@@ -18,6 +19,21 @@ const ATTEMPTS_KEY = (phone: string): string => `otp:attempts:${phone}`;
 interface SendResult {
   expiresIn: number;
 }
+
+/**
+ * The resend cooldown is the one OTP failure a client renders verbatim
+ * (`apps/mobile/src/api/client.ts`), so it has to arrive already written in
+ * the caller's language rather than in English with a number in it.
+ *
+ * Seconds are abbreviated in `hy`/`ru` for the same reason the dictionaries
+ * abbreviate minutes: the count is interpolated, and a spelled-out unit would
+ * need Russian plural agreement that a template string cannot do.
+ */
+const COOLDOWN_MESSAGE: Record<Language, (seconds: number) => string> = {
+  [Language.Hy]: (seconds) => `Սպասիր ${seconds} վայրկյան՝ նոր կոդ պահանջելուց առաջ`,
+  [Language.Ru]: (seconds) => `Подождите ${seconds} с, прежде чем запросить новый код`,
+  [Language.En]: (seconds) => `Please wait ${seconds}s before requesting another code`,
+};
 
 /**
  * OTP issue/verify with the abuse controls the flow needs: a resend cooldown
@@ -42,12 +58,13 @@ export class OtpService {
     this.pepper = this.config.getOrThrow<string>('JWT_SECRET');
   }
 
-  async send(phone: string): Promise<SendResult> {
+  /** @param language the caller's `Accept-Language`, for the cooldown message. */
+  async send(phone: string, language: Language): Promise<SendResult> {
     const remainingCooldown = await this.redis.ttl(COOLDOWN_KEY(phone));
     if (remainingCooldown > 0) {
       throw new HttpException(
         {
-          message: `Please wait ${remainingCooldown}s before requesting another code`,
+          message: COOLDOWN_MESSAGE[language](remainingCooldown),
           retryAfter: remainingCooldown,
         },
         HttpStatus.TOO_MANY_REQUESTS,

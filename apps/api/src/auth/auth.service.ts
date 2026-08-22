@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Role } from '@amragrir/shared';
+import { Language, Role } from '@amragrir/shared';
 import { Prisma, type User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferralsService } from '../referrals/referrals.service';
@@ -36,9 +36,11 @@ export class AuthService {
     private readonly referrals: ReferralsService,
   ) {}
 
-  async sendCode(dto: SendCodeDto): Promise<{ sent: true; expiresIn: number }> {
+  /** @param language resolved from `Accept-Language`; the resend-cooldown
+   *   refusal is written in it. */
+  async sendCode(dto: SendCodeDto, language: Language): Promise<{ sent: true; expiresIn: number }> {
     const phone = normalizePhone(dto.phone);
-    const { expiresIn } = await this.otp.send(phone);
+    const { expiresIn } = await this.otp.send(phone, language);
     this.logger.log(`OTP issued for ${maskPhone(phone)}`);
     return { sent: true, expiresIn };
   }
@@ -52,6 +54,13 @@ export class AuthService {
     const phone = normalizePhone(dto.phone);
     await this.otp.verify(phone, dto.code);
 
+    /**
+     * The name, when the sign-up tab sent one.
+     *
+     * Trimmed here as well as on the clients, so that whitespace cannot pass
+     * for a name — and, below, cannot blank one that is already stored.
+     */
+    const name = dto.name?.trim();
     const existing = await this.prisma.user.findUnique({ where: { phone } });
     const caller = await this.tokens.tryReadAccess(callerToken);
     const guestId = caller?.isGuest ? caller.sub : null;
@@ -65,12 +74,22 @@ export class AuthService {
       // decision, not something to do implicitly here.
       user = await this.prisma.user.update({
         where: { id: existing.id },
-        // Verifying again also settles a previously unverified record, and
-        // lets the register screen fill in a name that was missing.
+        // Verifying again also settles a previously unverified record.
+        //
+        // **A name sent here replaces the stored one** (2026-08-11). It used to
+        // fill in only a missing name, which meant somebody signing up again on
+        // a number they already had typed a name into a form that silently
+        // discarded it — and, since nothing else in the product renames an
+        // account, left them stuck with whatever was recorded the first time.
+        // This is the one place a customer can correct it, and the correction is
+        // as authorised as the sign-in around it: the OTP for this number was
+        // accepted a few lines up, so the sender has proved they hold the phone
+        // the account is keyed on. An absent name (the log-in tab sends none)
+        // changes nothing.
         data: {
           phoneVerified: true,
           isGuest: false,
-          ...(dto.name && !existing.name ? { name: dto.name } : {}),
+          ...(name ? { name } : {}),
         },
       });
       isNewUser = false;
@@ -81,7 +100,7 @@ export class AuthService {
           phone,
           phoneVerified: true,
           isGuest: false,
-          ...(dto.name ? { name: dto.name } : {}),
+          ...(name ? { name } : {}),
         },
       });
       isNewUser = true;
@@ -96,7 +115,7 @@ export class AuthService {
           data: {
             phone,
             phoneVerified: true,
-            name: dto.name ?? null,
+            name: name || null,
             role: 'customer',
           },
         });

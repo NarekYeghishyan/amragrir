@@ -38,8 +38,21 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, dto: UpdateMeDto): Promise<MeProfile> {
+    // The name is trimmed, and whitespace is not a name: an empty result leaves
+    // the stored one alone rather than blanking it. Same rule as `verify-code`,
+    // and for a stronger reason here — sign-up will not open an account without
+    // a name (SCREENS.md §0), so a settings screen that could empty it a minute
+    // later would undo that rule with one keystroke.
+    const data: UpdateMeDto = { ...dto };
+    const name = dto.name?.trim();
+    if (name) {
+      data.name = name;
+    } else {
+      delete data.name;
+    }
+
     try {
-      await this.prisma.user.update({ where: { id: userId }, data: dto });
+      await this.prisma.user.update({ where: { id: userId }, data });
     } catch (err) {
       // email carries a unique constraint; surface it as 409 rather than 500.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {

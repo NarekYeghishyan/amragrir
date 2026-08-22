@@ -170,12 +170,49 @@ describe('AuthService.verifyCode', () => {
     expect(result.isNewUser).toBe(false);
   });
 
-  it('does not overwrite an existing name', async () => {
+  // Reversed on 2026-08-11: it used to fill in only a *missing* name, so
+  // signing up again on a number that already had an account meant typing a
+  // name into a form that discarded it — and nothing else in the product
+  // renames an account. The OTP for this number was accepted first, so the
+  // sender has proved they hold the phone the account is keyed on.
+  it('replaces the stored name when the sign-up tab sends one', async () => {
     const existing = userRow({ id: 'existing-1', name: 'Original' });
     const { service, update } = build({ existing });
 
     await service.verifyCode({ phone: '99123456', code: '1234', name: 'Replacement' });
 
+    expect(update.mock.calls[0]![0].data).toMatchObject({ name: 'Replacement' });
+  });
+
+  it('fills in a name that was missing', async () => {
+    const existing = userRow({ id: 'existing-1', name: null });
+    const { service, update } = build({ existing });
+
+    await service.verifyCode({ phone: '99123456', code: '1234', name: 'Aram' });
+
+    expect(update.mock.calls[0]![0].data).toMatchObject({ name: 'Aram' });
+  });
+
+  // The log-in tab sends none, and a rename must be something somebody typed.
+  it.each([
+    ['no name at all', undefined],
+    ['a name of only whitespace', '   '],
+  ])('leaves the stored name alone when the request carries %s', async (_case, name) => {
+    const existing = userRow({ id: 'existing-1', name: 'Original' });
+    const { service, update } = build({ existing });
+
+    await service.verifyCode({ phone: '99123456', code: '1234', name });
+
     expect(update.mock.calls[0]![0].data).not.toHaveProperty('name');
+  });
+
+  it('does not store whitespace as the name of a new account', async () => {
+    const { service, create } = build();
+
+    await service.verifyCode({ phone: '99123456', code: '1234', name: '  ' });
+
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ name: null }),
+    });
   });
 });

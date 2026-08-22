@@ -1,32 +1,68 @@
-import { useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { Path, Svg } from 'react-native-svg';
+import { referrals } from '../src/api/endpoints';
+import type { ReferralSummary } from '../src/api/types';
 import { useTranslate } from '../src/language';
-import { useSession } from '../src/session';
 import { useTheme } from '../src/theme/useTheme';
 
 /**
  * Referral — the artifact's REFERRAL screen.
  *
- * The counters it draws (friends joined, discount earned) come from the
- * referrals API rather than the artifact's hardcoded 3 and 6%, and are simply
- * absent until it answers — an invented number here is a promise about somebody
- * else's money.
+ * **The code comes from `GET /referrals/me`, and can come from nowhere else**
+ * (2026-08-11). This screen used to build the link out of the first six
+ * characters of the account id, which reads like a code and is not one: no
+ * `referrals` row has it, so `attribute()` looks it up, finds nothing, and
+ * returns without crediting anybody. Every link shared from this phone was
+ * quietly worth nothing to both sides. The real code is minted by that first
+ * read — which is why the screen has to ask for it rather than derive it.
+ *
+ * The counters it draws (friends joined, discount earned) come from the same
+ * answer rather than the artifact's hardcoded 3 and 6%: an invented number here
+ * is a promise about somebody else's money.
  */
 export default function ReferralScreen() {
   const { colors } = useTheme();
   const t = useTranslate();
   const router = useRouter();
-  const { user } = useSession();
 
   const [copied, setCopied] = useState(false);
+  const [summary, setSummary] = useState<ReferralSummary | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // The code is the customer's own; until the referrals endpoint is wired into
-  // this app there is nothing truthful to show, so the link is built from the
-  // account id the session already carries.
-  const code = user?.id ? user.id.slice(0, 6).toUpperCase() : null;
-  const link = code ? `amragrir.am/i/${code}` : null;
+  useEffect(() => {
+    let live = true;
+    referrals
+      .me()
+      .then((result) => {
+        if (live) {
+          setSummary(result);
+        }
+      })
+      // A guest, or an API that is down. The screen still explains the offer —
+      // it just cannot hand out a link, which is better than handing out one
+      // that credits nobody.
+      .catch(() => undefined)
+      .finally(() => {
+        if (live) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const link = summary?.link ?? null;
 
   const share = async () => {
     if (!link) {
@@ -66,7 +102,9 @@ export default function ReferralScreen() {
         <Text style={styles.heroSub}>{t('refHeroSub')}</Text>
       </View>
 
-      {link ? (
+      {loading ? <ActivityIndicator style={styles.loading} color={colors.accent} /> : null}
+
+      {link !== null && summary !== null ? (
         <>
           <Text style={[styles.section, { color: colors.ink2 }]}>{t('refYourCode')}</Text>
           <View style={styles.codeRow}>
@@ -84,6 +122,14 @@ export default function ReferralScreen() {
           >
             <Text style={[styles.shareText, { color: colors.ink }]}>{t('refShare')}</Text>
           </Pressable>
+
+          {/* The artifact's pair of tiles, with the API's own numbers in them.
+              A brand-new account reads 0 and 0% — which is the truth, and the
+              reason the steps below it are worth reading. */}
+          <View style={styles.stats}>
+            <Stat value={String(summary.invitedCount)} label={t('refInvited')} />
+            <Stat value={`${summary.discountEarnedPct}%`} label={t('refEarned')} />
+          </View>
         </>
       ) : null}
 
@@ -102,8 +148,30 @@ export default function ReferralScreen() {
   );
 }
 
+/** One of the two counters under the link. */
+function Stat({ value, label }: { value: string; label: string }) {
+  const { colors } = useTheme();
+  return (
+    <View style={[styles.stat, { backgroundColor: colors.card, borderColor: colors.line }]}>
+      <Text style={[styles.statValue, { color: colors.accent }]}>{value}</Text>
+      <Text style={[styles.statLabel, { color: colors.ink2 }]}>{label}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   content: { padding: 20, paddingTop: 58, paddingBottom: 40 },
+  loading: { marginTop: 28 },
+  stats: { flexDirection: 'row', gap: 12, marginTop: 14 },
+  stat: {
+    flex: 1,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    paddingVertical: 18,
+  },
+  statValue: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
+  statLabel: { fontSize: 12, fontWeight: '600', marginTop: 4, textAlign: 'center' },
   back: {
     width: 42,
     height: 42,

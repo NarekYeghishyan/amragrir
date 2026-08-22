@@ -23,7 +23,8 @@ import { useTheme } from '../../src/theme/useTheme';
  * placing an order — which is one of the three numbers.
  *
  * A guest has no record to show, so the row is absent rather than three zeros:
- * "0 orders" is a statement about somebody, and there is nobody yet.
+ * "0 orders" is a statement about somebody, and there is nobody yet. The same
+ * reading now governs the menu below it — see `rows`.
  */
 export default function ProfileScreen() {
   const { colors } = useTheme();
@@ -58,22 +59,45 @@ export default function ProfileScreen() {
     }, [signedIn]),
   );
 
-  const displayName = user?.name?.trim() || t('authGuest');
-  const initial = displayName.charAt(0).toUpperCase();
-  // Customers sign in by phone; email is optional and usually absent, so the
-  // subtitle prefers the identifier this account actually has.
-  const subtitle = user?.phone ?? user?.email ?? '';
+  // Nobody is asked for a name at sign-in any more (SCREENS.md §0), so an
+  // account without one is now the ordinary case: it is identified by the
+  // number it verified, the one thing every account here has — the same
+  // reading as the web profile. The title used to fall back to "Continue as
+  // guest", which is a button's label and nobody's name.
+  const name = user?.name?.trim() ?? '';
+  const displayName = name || user?.phone || t('navProfile');
+  // Digits only: the initial of an E.164 number would otherwise be a "+".
+  const initial = (name || user?.phone?.replace(/\D/g, '') || 'A').charAt(0).toUpperCase();
+  // Customers sign in by phone; email is optional and usually absent. The
+  // number goes under the title only when it is not already the title.
+  const subtitle = (name ? user?.phone : null) ?? user?.email ?? '';
 
-  const rows = [
-    { icon: '💳', label: t('profilePaymentMethods'), onPress: () => router.push('/settings') },
-    { icon: '❤️', label: t('profileFavorites'), onPress: () => router.push('/favorites') },
-    { icon: '🧾', label: t('profileOrderHistory'), onPress: () => router.push('/orders') },
-    // Beside the order history, because they are the same question asked of the
-    // other half of the product — what have I got coming.
-    { icon: '🪑', label: t('myReservations'), onPress: () => router.push('/bookings') },
-    { icon: '🎁', label: t('profileRewards'), onPress: () => router.push('/referral') },
-    { icon: '⚙️', label: t('profileSettings'), onPress: () => router.push('/settings') },
-  ];
+  /**
+   * The account rows.
+   *
+   * Five of the six name something an account owns — cards it has saved, orders
+   * it has placed, tables it holds, points it has earned, preferences stored
+   * against it. A guest owns none of it, so those rows are absent rather than
+   * drawn dead: an entry that opens an empty screen, or a sign-in wall behind a
+   * chevron, promises a record that does not exist yet. The way to acquire one
+   * is the Sign in button above, which is the whole of what this screen can
+   * honestly offer somebody with no account.
+   *
+   * Favourites keeps its row: it is already a tab, so hiding it here hides
+   * nothing, and its empty state is a route back to browsing rather than a wall.
+   */
+  const rows = signedIn
+    ? [
+        { icon: '💳', label: t('profilePaymentMethods'), onPress: () => router.push('/settings') },
+        { icon: '❤️', label: t('profileFavorites'), onPress: () => router.push('/favorites') },
+        { icon: '🧾', label: t('profileOrderHistory'), onPress: () => router.push('/orders') },
+        // Beside the order history, because they are the same question asked of
+        // the other half of the product — what have I got coming.
+        { icon: '🪑', label: t('myReservations'), onPress: () => router.push('/bookings') },
+        { icon: '🎁', label: t('profileRewards'), onPress: () => router.push('/referral') },
+        { icon: '⚙️', label: t('profileSettings'), onPress: () => router.push('/settings') },
+      ]
+    : [{ icon: '❤️', label: t('profileFavorites'), onPress: () => router.push('/favorites') }];
 
   return (
     <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
@@ -111,16 +135,33 @@ export default function ProfileScreen() {
         </View>
       ) : null}
 
-      {/* The artifact reaches sign-in through a full-screen auth gate, which is
-          not built yet. Until it is, this is the only way in — and dropping it
-          would strand a guest with no route to verifying a phone. */}
-      {user?.phoneVerified ? null : (
-        <Pressable
-          onPress={() => router.push('/auth')}
-          style={[styles.signIn, { borderColor: colors.accent }]}
-        >
-          <Text style={[styles.signInText, { color: colors.accent }]}>{t('signIn')}</Text>
-        </Pressable>
+      {/* Both doors, named. The gate's two tabs choose a field and not an
+          endpoint (`app/auth.tsx`), so this is one flow either way — but a
+          guest standing on an empty profile is usually here to *get* an
+          account, and "Sign in" on its own is a door for people who already
+          have one. Sign up therefore says so outright and takes the accent,
+          and `mode=register` opens the tab it promises rather than dropping
+          somebody on the log-in tab to find it. That parameter is the web's
+          own address for that tab, so neither client invents its own.
+
+          Sign in keeps its place beside it: the artifact reaches this gate
+          full-screen, which is not built, so this row is still the only route
+          a guest has to a verified phone. */}
+      {signedIn ? null : (
+        <View style={styles.authRow}>
+          <Pressable
+            onPress={() => router.push('/auth')}
+            style={[styles.authButton, styles.authGhost, { borderColor: colors.accent }]}
+          >
+            <Text style={[styles.authText, { color: colors.accent }]}>{t('signIn')}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push({ pathname: '/auth', params: { mode: 'register' } })}
+            style={[styles.authButton, { backgroundColor: colors.accent }]}
+          >
+            <Text style={[styles.authText, styles.authTextOnAccent]}>{t('authRegister')}</Text>
+          </Pressable>
+        </View>
       )}
 
       <Pressable
@@ -215,15 +256,19 @@ const styles = StyleSheet.create({
   headerText: { flex: 1, minWidth: 0 },
   name: { fontSize: 22, fontWeight: '800', letterSpacing: -0.4 },
   subtitle: { fontSize: 13.5, marginTop: 2 },
-  signIn: {
-    marginTop: 20,
+  // Two equal halves: neither act is the lesser one, so neither button is
+  // narrower. The accent fill is the only thing separating them.
+  authRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  authButton: {
+    flex: 1,
     height: 52,
     borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  signInText: { fontSize: 15.5, fontWeight: '700' },
+  authGhost: { borderWidth: StyleSheet.hairlineWidth },
+  authText: { fontSize: 15.5, fontWeight: '700' },
+  authTextOnAccent: { color: '#fff' },
   referral: {
     marginTop: 20,
     borderRadius: 20,

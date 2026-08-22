@@ -1,5 +1,6 @@
 import { Body, Controller, Headers, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { resolveLanguage } from '../common/i18n';
 import { AuthService } from './auth.service';
 import { RefreshDto, SendCodeDto, VerifyCodeDto } from './dto';
 import { Public } from './decorators';
@@ -18,8 +19,8 @@ export class AuthController {
   @Public()
   @Post('send-code')
   @HttpCode(HttpStatus.OK)
-  sendCode(@Body() dto: SendCodeDto) {
-    return this.auth.sendCode(dto);
+  sendCode(@Body() dto: SendCodeDto, @Headers('accept-language') acceptLanguage?: string) {
+    return this.auth.sendCode(dto, resolveLanguage(acceptLanguage));
   }
 
   /** Public, but honours an optional bearer: a guest presenting their token
