@@ -73,8 +73,35 @@ export class CustomerNotificationsService implements OnModuleInit, OnModuleDestr
         type: NotificationType.order,
         payload: payload as unknown as Prisma.InputJsonValue,
       },
-      select: { id: true, type: true, title: true, body: true, isRead: true, createdAt: true },
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        body: true,
+        isRead: true,
+        createdAt: true,
+        // The preference rides back with the row it belongs to. Reading it in a
+        // second query would be a second round trip on the hot path of every
+        // order that moves, for one boolean the same statement can return.
+        user: { select: { notifPush: true } },
+      },
     });
+
+    // **The row is written either way; what the switch turns off is the
+    // interruption.** A bell is two things at once — a nudge now, and this
+    // order's history when somebody opens it later — and "do not notify me" is
+    // an answer about the first. Dropping the write instead would mean a
+    // customer who turns notifications back on finds a hole where the last
+    // fortnight went, which is not what they asked for.
+    //
+    // Today that costs the live frame over the socket. It is also the gate the
+    // OS-level push will sit behind when `POST /devices` exists
+    // (API_DOCUMENTATION.md), which is the case that made this worth fixing
+    // first: a switch nobody reads is harmless until the day it is a phone
+    // buzzing at somebody who said no.
+    if (!row.user.notifPush) {
+      return;
+    }
 
     this.events.publish({
       id: row.id,

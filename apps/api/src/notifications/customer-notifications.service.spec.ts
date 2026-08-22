@@ -31,7 +31,13 @@ function statusEvent(over: Partial<OrderStatusEvent> = {}): OrderStatusEvent {
 }
 
 function build(
-  options: { create?: jest.Mock; updateMany?: jest.Mock; deleteMany?: jest.Mock } = {},
+  options: {
+    create?: jest.Mock;
+    updateMany?: jest.Mock;
+    deleteMany?: jest.Mock;
+    /** What `users.notif_push` says. Selected back with the created row. */
+    notifPush?: boolean;
+  } = {},
 ) {
   const create =
     options.create ??
@@ -42,6 +48,7 @@ function build(
       body: null,
       isRead: false,
       createdAt: CREATED_AT,
+      user: { notifPush: options.notifPush ?? true },
     });
 
   const prisma = {
@@ -257,6 +264,68 @@ describe('throwing them away', () => {
     // Not an error: clearing an empty bell leaves the caller where they asked
     // to be, which is the definition of success for this verb.
     await expect(service.removeAll('user-1')).resolves.toEqual({ deleted: 0 });
+    service.onModuleDestroy();
+  });
+});
+
+describe('the switch in Settings', () => {
+  /**
+   * `notif_push` is the customer's answer to being interrupted, and until now
+   * nothing on the server read it — the toggle persisted and changed nothing.
+   * The ruling these cases pin down is that it governs *delivery*, not the
+   * record: the bell stays this order's history, and the switch decides whether
+   * anybody is nudged about it.
+   */
+
+  it('still records the notification when push is off', async () => {
+    // Turning the switch back on must not reveal a hole where the last
+    // fortnight of orders went.
+    const { orderEvents, create, service } = build({ notifPush: false });
+
+    orderEvents.publish(statusEvent({ status: OrderStatus.Ready }));
+    await settle();
+
+    expect(create).toHaveBeenCalledTimes(1);
+    service.onModuleDestroy();
+  });
+
+  it('does not announce it when push is off', async () => {
+    const { orderEvents, events, service } = build({ notifPush: false });
+    const heard: unknown[] = [];
+    events.subscribe((event) => heard.push(event));
+
+    orderEvents.publish(statusEvent({ status: OrderStatus.Ready }));
+    await settle();
+
+    expect(heard).toEqual([]);
+    service.onModuleDestroy();
+  });
+
+  it('announces it when push is on', async () => {
+    const { orderEvents, events, service } = build({ notifPush: true });
+    const heard: unknown[] = [];
+    events.subscribe((event) => heard.push(event));
+
+    orderEvents.publish(statusEvent({ status: OrderStatus.Ready }));
+    await settle();
+
+    expect(heard).toHaveLength(1);
+    service.onModuleDestroy();
+  });
+
+  it('reads the preference in the same statement that writes the row', async () => {
+    // A second query for one boolean would be a round trip on the path of every
+    // order that moves.
+    const { orderEvents, create, service } = build();
+
+    orderEvents.publish(statusEvent({ status: OrderStatus.Ready }));
+    await settle();
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ user: { select: { notifPush: true } } }),
+      }),
+    );
     service.onModuleDestroy();
   });
 });
