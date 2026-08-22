@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, StaffNotificationType } from '@prisma/client';
 import {
   ACTIVE_RESERVATION_STATUSES,
   DepositOutcome,
@@ -21,6 +21,7 @@ import {
 } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { DepositsService } from '../payments/deposits.service';
+import { StaffNotificationsService } from '../notifications/staff-notifications.service';
 import {
   addLocalDays,
   bookingWindowFor,
@@ -135,6 +136,7 @@ export class ReservationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly deposits: DepositsService,
+    private readonly staffNotifications: StaffNotificationsService,
   ) {}
 
   /**
@@ -318,7 +320,65 @@ export class ReservationsService {
       include: RESERVATION_INCLUDE,
     });
 
+    await this.tellTheBranch(withPayment);
+
     return this.toDetail(withPayment);
+  }
+
+  /**
+   * Tells a branch a booking is waiting on it, when one is.
+   *
+   * **Only a `pending` booking.** One that confirmed itself has no decision
+   * waiting on anybody — it is simply in the book, and interrupting a shift for
+   * it would be noise of exactly the kind that teaches people to stop looking
+   * at the bell. This is the same line `order_placed` draws: a notification is
+   * for work with a person waiting on an answer.
+   *
+   * Written after the booking's own transaction rather than inside it. That one
+   * is serializable and retried on conflict (`claimTable`), so a notification
+   * written in it would be written again on every retry.
+   *
+   * Failure is logged and swallowed: the guest has a table and their deposit is
+   * held, and unwinding that because a bell could not be rung would be the
+   * wrong way round.
+   */
+  private async tellTheBranch(reservation: ReservationRow): Promise<void> {
+    if (reservation.status !== ReservationStatus.Pending) {
+      return;
+    }
+
+    try {
+      const notification = await this.staffNotifications.record(this.prisma, {
+        branchId: reservation.branchId,
+        type: StaffNotificationType.booking_placed,
+        payload: {
+          // Numbers and no sentence, like every other row a branch is told:
+          // the panel renders them through its own dictionary.
+          reservationId: reservation.id,
+          reservedFor: reservation.reservedFor.toISOString(),
+          guests: reservation.guests,
+          // The *service* date, not the calendar date of `reservedFor` — the
+          // book is filed by the evening a table belongs to, and a 00:30 table
+          // belongs to the night that is still going on. A link built from the
+          // calendar date would land the shift on tomorrow's empty page.
+          serviceDate: reservation.serviceDate.toISOString().slice(0, 10),
+        },
+      });
+
+      this.staffNotifications.publish({
+        id: notification.id,
+        branchId: reservation.branchId,
+        type: StaffNotificationType.booking_placed,
+        orderId: null,
+        payload: null,
+        createdAt: notification.createdAt,
+      });
+    } catch (err) {
+      this.logger.error(
+        `Booked table ${reservation.id} but could not tell the branch`,
+        err as Error,
+      );
+    }
   }
 
   async list(

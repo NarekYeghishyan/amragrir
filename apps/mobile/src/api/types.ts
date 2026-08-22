@@ -323,7 +323,21 @@ export interface NotificationItem {
   type: 'order' | 'reservation' | 'promo' | 'referral' | 'system';
   title: string | null;
   body: string | null;
-  payload: { orderId?: string; code?: string; status?: OrderStatus } | null;
+  /**
+   * What the row is about, shaped by `type`. An `order` row carries
+   * `orderId`/`code` and an `OrderStatus`; a `reservation` row carries
+   * `reservationId`, `reservedFor` and a `ReservationStatus`.
+   */
+  payload: {
+    orderId?: string;
+    code?: string;
+    reservationId?: string;
+    reservedFor?: string;
+    /** Marks a booking row as a reminder rather than a move. Read *before*
+     *  `status`, which a reminder leaves where it was. */
+    reminder?: boolean;
+    status?: OrderStatus | ReservationStatus;
+  } | null;
   isRead: boolean;
   createdAt: string;
 }

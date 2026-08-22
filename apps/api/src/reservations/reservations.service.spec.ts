@@ -10,6 +10,7 @@ import { instantOf, localTimeLabel } from './slots';
 import { AvailabilityQueryDto, CreateReservationDto } from './dto';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { DepositsService } from '../payments/deposits.service';
+import type { StaffNotificationsService } from '../notifications/staff-notifications.service';
 
 const BRANCH_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -50,6 +51,9 @@ function reservationRow(over: Record<string, unknown> = {}) {
     id: 'res-1',
     status: ReservationStatus.Confirmed,
     reservedFor: at(19 * 60),
+    // The evening this table belongs to — what the branch's notification links
+    // the book to, and not always the calendar date of `reservedFor`.
+    serviceDate: new Date(`${DATE}T00:00:00.000Z`),
     guests: 2,
     depositAmd: 2 * DEPOSIT_PER_GUEST_AMD,
     depositCredited: false,
@@ -73,13 +77,21 @@ function build(
     taken?: unknown[];
     reservation?: unknown;
     closure?: unknown;
+    /** What the finished booking's status is, once its deposit is attached —
+     *  which is what decides whether the branch is told about it. */
+    settledStatus?: ReservationStatus;
   } = {},
 ) {
   const created = jest.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) =>
     Promise.resolve(reservationRow({ ...data, status: ReservationStatus.Pending })),
   );
   const updated = jest.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) =>
-    Promise.resolve(reservationRow(data)),
+    Promise.resolve(
+      reservationRow({
+        ...data,
+        ...(options.settledStatus ? { status: options.settledStatus } : {}),
+      }),
+    ),
   );
   const paymentUpdate = jest.fn().mockResolvedValue({});
 
@@ -123,10 +135,22 @@ function build(
     settle: jest.fn().mockResolvedValue(PaymentStatus.Cancelled),
   };
 
+  // What the branch was told, so a case can assert on it without these cases
+  // needing a bell of their own.
+  const staffNotifications = {
+    record: jest.fn().mockResolvedValue({ id: 'staff-notification-1', createdAt: new Date() }),
+    publish: jest.fn(),
+  };
+
   return {
-    service: new ReservationsService(prisma, deposits as unknown as DepositsService),
+    service: new ReservationsService(
+      prisma,
+      deposits as unknown as DepositsService,
+      staffNotifications as unknown as StaffNotificationsService,
+    ),
     prisma,
     deposits,
+    staffNotifications,
     created,
     updated,
   };
@@ -485,5 +509,72 @@ describe('detail', () => {
 
     expect(detail.localTime).toBe(localTimeLabel(at(19 * 60)));
     expect(detail.tableNo).toBe('2');
+  });
+});
+
+describe('telling the branch a table is waiting on it', () => {
+  /**
+   * The other half of the rule `order_placed` states: a notification is for work
+   * with a person waiting on an answer. A booking the branch has to read is
+   * that; one that confirmed itself is simply in the book.
+   */
+
+  it('rings the branch when the booking needs a human', async () => {
+    const { service, staffNotifications } = build({
+      branch: branch({ bookingPolicy: { autoConfirm: false } }),
+      settledStatus: ReservationStatus.Pending,
+    });
+
+    await service.create('user-1', createDto());
+
+    expect(staffNotifications.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ type: 'booking_placed' }),
+    );
+    expect(staffNotifications.publish).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays quiet when the booking confirmed itself', async () => {
+    // Nobody has to decide anything, so there is nothing to interrupt a shift
+    // about — it is in the book like every other accepted table.
+    const { service, staffNotifications } = build({
+      settledStatus: ReservationStatus.Confirmed,
+    });
+
+    await service.create('user-1', createDto());
+
+    expect(staffNotifications.record).not.toHaveBeenCalled();
+  });
+
+  it('carries the numbers the panel draws the line from', async () => {
+    const { service, staffNotifications } = build({
+      branch: branch({ bookingPolicy: { autoConfirm: false } }),
+      settledStatus: ReservationStatus.Pending,
+    });
+
+    await service.create('user-1', createDto());
+
+    expect(staffNotifications.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          reservationId: 'res-1',
+          guests: 2,
+          serviceDate: DATE,
+        }),
+      }),
+    );
+  });
+
+  it('keeps the table when the bell cannot be rung', async () => {
+    // The guest has a table and their deposit is held. Unwinding that because a
+    // notification failed would be the wrong way round.
+    const { service, staffNotifications } = build({
+      branch: branch({ bookingPolicy: { autoConfirm: false } }),
+      settledStatus: ReservationStatus.Pending,
+    });
+    staffNotifications.record.mockRejectedValue(new Error('database is on fire'));
+
+    await expect(service.create('user-1', createDto())).resolves.toBeDefined();
   });
 });

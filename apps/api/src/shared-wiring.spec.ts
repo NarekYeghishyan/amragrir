@@ -59,6 +59,10 @@ describe('@amragrir/shared wiring', () => {
     ]);
     expect(Object.values(OrderActorType)).toEqual(['customer', 'staff', 'system']);
     // `staff_notifications.type` is one too, and the bell switches on it.
-    expect(Object.values(StaffNotificationType)).toEqual(['prep_due']);
+    expect(Object.values(StaffNotificationType)).toEqual([
+      'prep_due',
+      'order_placed',
+      'booking_placed',
+    ]);
   });
 });

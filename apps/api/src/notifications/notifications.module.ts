@@ -9,6 +9,9 @@ import { StaffNotificationsService } from './staff-notifications.service';
 import { CustomerNotificationsService } from './customer-notifications.service';
 import { CustomerNotificationEventsService } from './customer-notification-events.service';
 import { OrderRemindersService } from './order-reminders.service';
+import { OrderPlacedNotificationsService } from './order-placed-notifications.service';
+import { ReservationNotificationsService } from './reservation-notifications.service';
+import { BookingRemindersService } from './booking-reminders.service';
 
 /**
  * Telling a branch what it needs to know before it needs to know it.
@@ -32,9 +35,16 @@ import { OrderRemindersService } from './order-reminders.service';
     OrderRemindersService,
     CustomerNotificationsService,
     CustomerNotificationEventsService,
+    OrderPlacedNotificationsService,
+    ReservationNotificationsService,
+    BookingRemindersService,
   ],
   // The customer emitter is exported for the orders gateway, which pushes these
   // to whichever socket said `watchMe`.
-  exports: [StaffNotificationsService, CustomerNotificationEventsService],
+  exports: [
+    StaffNotificationsService,
+    CustomerNotificationEventsService,
+    ReservationNotificationsService,
+  ],
 })
 export class NotificationsModule {}

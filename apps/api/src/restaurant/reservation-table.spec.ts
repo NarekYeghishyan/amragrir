@@ -5,8 +5,17 @@ import { instantOf } from '../reservations/slots';
 import { ReservationsService } from '../reservations/reservations.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AuditService } from '../audit/audit.service';
+import type { ReservationNotificationsService } from '../notifications/reservation-notifications.service';
+import type { StaffNotificationsService } from '../notifications/staff-notifications.service';
 import type { DepositsService } from '../payments/deposits.service';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
+
+/** A branch bell that records nothing. These cases are about tables. */
+const quietBell = (): StaffNotificationsService =>
+  ({
+    record: jest.fn().mockResolvedValue({ id: 'n-1', createdAt: new Date() }),
+    publish: jest.fn(),
+  }) as unknown as StaffNotificationsService;
 
 /**
  * Moving a booking to a different table by hand.
@@ -93,11 +102,22 @@ function build(
     ),
   } as unknown as PrismaService;
 
-  const reservations = new ReservationsService(prisma, {} as unknown as DepositsService);
+  const reservations = new ReservationsService(
+      prisma,
+      {} as unknown as DepositsService,
+      quietBell(),
+    );
   const audit = { record } as unknown as AuditService;
+  // These cases are about tables and overlaps, not about the bell. A stub that
+  // writes nothing keeps `record` returning `null`, which is exactly what a
+  // move nobody is told about looks like.
+  const guestNotifications = {
+    record: jest.fn().mockResolvedValue(null),
+    publish: jest.fn(),
+  } as unknown as ReservationNotificationsService;
 
   return {
-    service: new RestaurantReservationsService(prisma, reservations, audit),
+    service: new RestaurantReservationsService(prisma, reservations, audit, guestNotifications),
     prisma,
     record,
     update,
@@ -224,8 +244,17 @@ describe('the book for a service', () => {
     } as unknown as PrismaService;
     const service = new RestaurantReservationsService(
       prisma,
-      new ReservationsService(prisma, {} as unknown as DepositsService),
+      new ReservationsService(
+      prisma,
+      {} as unknown as DepositsService,
+      quietBell(),
+    ),
       { record: jest.fn() } as unknown as AuditService,
+      // Listing tells nobody anything; the bell is not in this case's way.
+      {
+        record: jest.fn().mockResolvedValue(null),
+        publish: jest.fn(),
+      } as unknown as ReservationNotificationsService,
     );
     return { service, findMany };
   };

@@ -41,4 +41,9 @@ export { ORDER_STATUS_COPY } from './order-status-copy';
  * The booking equivalents. Same argument as `ORDER_STATUS_COPY`: these are
  * keys rather than strings, and both clients read them.
  */
-export { RESERVATION_STATUS_LABEL, depositLabelFor } from './reservation-status-copy';
+export {
+  RESERVATION_STATUS_LABEL,
+  RESERVATION_NOTIFICATION_COPY,
+  RESERVATION_REMINDER_COPY,
+  depositLabelFor,
+} from './reservation-status-copy';

@@ -2,7 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Path, Svg } from 'react-native-svg';
-import { ORDER_STATUS_COPY } from '@amragrir/i18n';
+import {
+  ORDER_STATUS_COPY,
+  RESERVATION_NOTIFICATION_COPY,
+  RESERVATION_REMINDER_COPY,
+} from '@amragrir/i18n';
+import type { OrderStatus, ReservationStatus } from '@amragrir/shared';
 import { notifications as notificationsApi } from '../src/api/endpoints';
 import type { NotificationItem } from '../src/api/types';
 import { subscribeToMyNotifications } from '../src/order-stream';
@@ -138,7 +143,21 @@ export default function NotificationsScreen() {
           )
         }
         renderItem={({ item }) => {
-          const keys = item.payload?.status ? ORDER_STATUS_COPY[item.payload.status] : undefined;
+          // Keyed by kind first and status second: both kinds have a
+          // `confirmed`, and they mean different things by it — a kitchen
+          // accepting an order, and a restaurant accepting a table.
+          const status = item.payload?.status;
+          // The reminder check comes first: a reminder does not move a booking,
+          // so its status is `confirmed` before and after, and looking it up
+          // would say "Your table is booked" to somebody who booked it weeks ago.
+          const keys =
+            item.type === 'reservation' && item.payload?.reminder
+              ? RESERVATION_REMINDER_COPY
+              : !status
+                ? undefined
+                : item.type === 'reservation'
+                  ? (RESERVATION_NOTIFICATION_COPY[status as ReservationStatus] ?? undefined)
+                  : ORDER_STATUS_COPY[status as OrderStatus];
           // `title`/`body` are the fallback rather than the source: they are
           // only populated for the kinds this app cannot draw itself (a promo,
           // a system note), and for those the API's words are all there is.
@@ -150,6 +169,13 @@ export default function NotificationsScreen() {
             return null;
           }
           const orderId = item.payload?.orderId;
+          const reservationId = item.payload?.reservationId;
+          // Where the row leads: the booking it is about, or the order it is
+          // about. A row with neither is text and does not press.
+          const goTo =
+            item.type === 'reservation'
+              ? reservationId && (`/booking/${reservationId}` as const)
+              : orderId && (`/tracking/${orderId}` as const);
           return (
             <View style={[styles.row, { backgroundColor: colors.card, borderColor: colors.line }]}>
               {/* The cross is a sibling of the row's own press, not nested in
@@ -158,8 +184,8 @@ export default function NotificationsScreen() {
                   a matter of geometry. */}
               <Pressable
                 accessibilityRole="button"
-                disabled={!orderId}
-                onPress={() => orderId && router.push(`/tracking/${orderId}`)}
+                disabled={!goTo}
+                onPress={() => goTo && router.push(goTo)}
                 style={styles.rowMain}
               >
                 <View style={styles.rowTop}>

@@ -8,6 +8,21 @@ export const SERVICE_FEE_AMD = 360;
 /** Table deposit per guest, in AMD. Credited to the final bill, never an extra charge. [design] */
 export const DEPOSIT_PER_GUEST_AMD = 2000;
 
+/**
+ * How long before a table is due the guest is reminded of it, in minutes.
+ *
+ * **Three hours rather than "the day before".** A reminder the previous evening
+ * cannot serve a table booked this morning for tonight, which is a large share
+ * of bookings; three hours reaches both, and is still long enough to be useful
+ * — it is time to set off, or to cancel and free the table for somebody else.
+ *
+ * A constant rather than a `booking_policies` column, for now. Making it
+ * per-branch is a real want — a place taking bookings weeks out may prefer a
+ * day's notice — and it is the same shape as `free_cancel_hours`, so it is a
+ * column and an admin control away rather than a redesign.
+ */
+export const BOOKING_REMINDER_LEAD_MINUTES = 180;
+
 /** Referral discount: invitee gets it on their first order, inviter gets it on their next. */
 export const REFERRAL_DISCOUNT_PCT = 2;
 

@@ -1,4 +1,5 @@
 import { ORDER_STATUS_COPY, type TranslationKey } from '@amragrir/i18n';
+import type { OrderStatus } from '@amragrir/shared';
 import type { Bell, NotificationItem } from './notifications';
 
 export { ORDER_STATUS_COPY };
@@ -43,7 +44,11 @@ export function orderCopy(
   if (item.type !== 'order' || !status) {
     return null;
   }
-  return ORDER_STATUS_COPY[status] ?? null;
+  // Narrowed by the guard above rather than by the type: `payload.status` holds
+  // whichever status the row's kind uses, and an `order` row's is an
+  // `OrderStatus`. The lookup still answers `null` for a value this build does
+  // not know, which is what a newer API talking to an older page produces.
+  return ORDER_STATUS_COPY[status as OrderStatus] ?? null;
 }
 
 /**

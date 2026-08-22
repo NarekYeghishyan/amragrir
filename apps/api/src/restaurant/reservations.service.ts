@@ -16,6 +16,7 @@ import {
 } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { ReservationNotificationsService } from '../notifications/reservation-notifications.service';
 import {
   RESERVATION_INCLUDE,
   ReservationsService,
@@ -40,6 +41,7 @@ export class RestaurantReservationsService {
     private readonly prisma: PrismaService,
     private readonly reservations: ReservationsService,
     private readonly audit: AuditService,
+    private readonly guestNotifications: ReservationNotificationsService,
   ) {}
 
   /** The book for a service: who is coming, when, and to which table. */
@@ -253,17 +255,56 @@ export class RestaurantReservationsService {
               Date.now(),
           );
 
-    return this.reservations.settle(reservation, dto.status, outcome, (tx) =>
-      this.audit.record(tx, staff, {
-        action: AuditAction.ReservationStatus,
-        entityId: id,
-        scope: { restaurantId: reservation.branch.restaurantId, branchId: reservation.branchId },
-        before: { status: from },
-        // The deposit outcome, because "no-show" and "no-show, and the deposit
-        // was kept" are different things to have done to a guest, and the second
-        // is the one that gets queried later.
-        after: { status: dto.status, ...(outcome ? { depositOutcome: outcome } : {}) },
-      }),
+    const move = {
+      reservationId: id,
+      userId: reservation.userId,
+      status: dto.status,
+      reservedFor: reservation.reservedFor,
+    };
+
+    /**
+     * The guest's notification, written with the move and announced after it.
+     *
+     * Captured out of the transaction rather than returned from `settle`,
+     * because `settle` answers with the booking and its shape is the customer
+     * API's. `null` here means the move was not news — see
+     * `reservation-notifications.ts` for which three are.
+     */
+    let written: Awaited<ReturnType<ReservationNotificationsService['record']>> = null;
+
+    const detail = await this.reservations.settle(
+      reservation,
+      dto.status,
+      outcome,
+      async (tx) => {
+        await this.audit.record(tx, staff, {
+          action: AuditAction.ReservationStatus,
+          entityId: id,
+          scope: { restaurantId: reservation.branch.restaurantId, branchId: reservation.branchId },
+          before: { status: from },
+          // The deposit outcome, because "no-show" and "no-show, and the deposit
+          // was kept" are different things to have done to a guest, and the second
+          // is the one that gets queried later.
+          after: { status: dto.status, ...(outcome ? { depositOutcome: outcome } : {}) },
+        });
+
+        // In the same transaction as the move it describes: a notification that
+        // outlived a rolled-back update would tell somebody their table was
+        // confirmed when it was not.
+        written = await this.guestNotifications.record(tx, move);
+      },
     );
+
+    if (written !== null) {
+      // Read only when there is something to announce, which is three statuses
+      // in six — not on every booking a shift touches.
+      const guest = await this.prisma.user.findUnique({
+        where: { id: reservation.userId },
+        select: { notifPush: true },
+      });
+      this.guestNotifications.publish(written, move, guest?.notifPush ?? true);
+    }
+
+    return detail;
   }
 }

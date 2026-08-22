@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { OrderStatus } from '@amragrir/shared';
+import type { OrderStatus, ReservationStatus } from '@amragrir/shared';
 import type { Bell, NotificationItem } from '@/lib/notifications';
 import {
   BELL_POLL_MS,
@@ -19,6 +19,59 @@ import { alertState, raiseAlert, requestAlerts, type AlertState } from '@/lib/br
  *  stay out of the browser bundle — the same trade `BasketButton` makes with its
  *  `label` prop. */
 export type StatusCopy = Readonly<Record<OrderStatus, { title: string; body: string }>>;
+
+/**
+ * The booking sentences, resolved the same way.
+ *
+ * Partial rather than total, because only three booking statuses are ever
+ * announced — see `RESERVATION_NOTIFICATION_COPY`, which decides that and hands
+ * this map only what it says out loud.
+ *
+ * **A separate map from `StatusCopy` and not one merged by status**, because
+ * `confirmed` is a status both kinds have and they mean different things by it:
+ * a kitchen accepting an order, and a restaurant accepting a table. Keyed by
+ * status alone, one would quietly draw the other's words.
+ */
+export type ReservationCopy = Readonly<
+  Partial<Record<ReservationStatus, { title: string; body: string }>>
+>;
+
+/**
+ * The words for one row, or undefined where this build cannot draw it.
+ *
+ * Keyed by `type` first and status second, because the two kinds share status
+ * names and mean different things by them.
+ */
+function drawnBy(
+  item: NotificationItem,
+  statusCopy: StatusCopy,
+  reservationCopy: ReservationCopy,
+  reminderCopy: { title: string; body: string },
+): { title: string; body: string } | undefined {
+  // Before the status lookup, because a reminder does not move a booking: it is
+  // `confirmed` before and after, and drawing it by status would say "Your
+  // table is booked" to somebody who booked it three weeks ago.
+  if (item.type === 'reservation' && item.payload?.reminder) {
+    return reminderCopy;
+  }
+
+  const status = item.payload?.status;
+  if (!status) {
+    return undefined;
+  }
+  return item.type === 'reservation'
+    ? reservationCopy[status as ReservationStatus]
+    : statusCopy[status as OrderStatus];
+}
+
+/** Where a row leads: the thing it is about, or the list it lives on. */
+function linkFor(item: NotificationItem, ordersBase: string, reservationsBase: string): string {
+  if (item.type === 'reservation') {
+    const id = item.payload?.reservationId;
+    return id ? `${reservationsBase}/${id}` : reservationsBase;
+  }
+  return item.payload?.orderId ? `${ordersBase}/${item.payload.orderId}` : ordersBase;
+}
 
 /**
  * The header bell.
@@ -51,8 +104,11 @@ export function NotificationBell({
   endpoint,
   streamEndpoint,
   ordersBase,
+  reservationsBase,
   labels,
   statusCopy,
+  reservationCopy,
+  reminderCopy,
 }: {
   /** `notificationsApiPath(language)` — built on the server, because the
    *  language-prefix rule lives there and this runs in the browser. */
@@ -61,6 +117,9 @@ export function NotificationBell({
   streamEndpoint: string;
   /** `ordersPath(language)`; a line links to `${ordersBase}/${orderId}`. */
   ordersBase: string;
+  /** `reservationsPath(language)`; a booking line links to
+   *  `${reservationsBase}/${reservationId}`. */
+  reservationsBase: string;
   labels: {
     bell: string;
     empty: string;
@@ -71,6 +130,9 @@ export function NotificationBell({
     clearAll: string;
   };
   statusCopy: StatusCopy;
+  reservationCopy: ReservationCopy;
+  /** The one sentence a booking reminder draws. */
+  reminderCopy: { title: string; body: string };
 }) {
   const router = useRouter();
   const [bell, setBell] = useState<Bell | null>(null);
@@ -181,22 +243,21 @@ export function NotificationBell({
         { refresh: true },
       );
 
-      const status = item.payload?.status;
-      const copy = status ? statusCopy[status] : undefined;
+      const copy = drawnBy(item, statusCopy, reservationCopy, reminderCopy);
       const title = copy?.title ?? item.title;
       const body = copy?.body ?? item.body ?? '';
       if (title) {
         void raiseAlert({
           title,
           body,
-          url: item.payload?.orderId ? `${ordersBase}/${item.payload.orderId}` : ordersBase,
-          // One alert per order, replaced as it moves — six stages should not
-          // leave six alerts stacked up.
-          tag: item.payload?.orderId ?? item.id,
+          url: linkFor(item, ordersBase, reservationsBase),
+          // One alert per order or booking, replaced as it moves — six stages
+          // should not leave six alerts stacked up.
+          tag: item.payload?.orderId ?? item.payload?.reservationId ?? item.id,
         });
       }
     },
-    [ordersBase, replace, statusCopy],
+    [ordersBase, reservationsBase, replace, statusCopy, reservationCopy, reminderCopy],
   );
 
   useEffect(() => {
@@ -366,7 +427,7 @@ export function NotificationBell({
           ) : (
             <ul className="bell-list">
               {bell.items.map((item) => {
-                const copy = item.payload?.status ? statusCopy[item.payload.status] : undefined;
+                const copy = drawnBy(item, statusCopy, reservationCopy, reminderCopy);
                 // `title`/`body` are the fallback rather than the source: they
                 // are only populated for the kinds this app cannot draw itself
                 // (a promo, a system note), and for those the API's words are
@@ -378,9 +439,7 @@ export function NotificationBell({
                   // older page. Skipped rather than rendered blank.
                   return null;
                 }
-                const href = item.payload?.orderId
-                  ? `${ordersBase}/${item.payload.orderId}`
-                  : ordersBase;
+                const href = linkFor(item, ordersBase, reservationsBase);
                 return (
                   <li key={item.id} className={item.isRead ? 'bell-item' : 'bell-item is-unread'}>
                     <Link href={href} onClick={() => setOpen(false)}>

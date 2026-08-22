@@ -1,10 +1,10 @@
 import {
   Language,
-  type MenuTab,
   type OrderStatus,
   type PaymentMethod,
   type PaymentStatus,
   type PickupOption,
+  type ReservationStatus,
   type ServiceMode,
 } from '@amragrir/shared';
 
@@ -487,7 +487,25 @@ export interface NotificationItem {
   type: 'order' | 'reservation' | 'promo' | 'referral' | 'system';
   title: string | null;
   body: string | null;
-  payload: { orderId?: string; code?: string; status?: OrderStatus } | null;
+  /**
+   * What the row is about, structured — shaped by `type`.
+   *
+   * An `order` row carries `orderId`/`code` and an `OrderStatus`; a
+   * `reservation` row carries `reservationId`, `reservedFor` and a
+   * `ReservationStatus`. One optional-field shape rather than a discriminated
+   * union: the bell reads three fields out of it, and a union would make every
+   * read a narrowing exercise for no reader's benefit.
+   */
+  payload: {
+    orderId?: string;
+    code?: string;
+    reservationId?: string;
+    reservedFor?: string;
+    /** Marks a booking row as a reminder rather than a move. Read *before*
+     *  `status`, which a reminder leaves where it was. */
+    reminder?: boolean;
+    status?: OrderStatus | ReservationStatus;
+  } | null;
   isRead: boolean;
   createdAt: string;
 }

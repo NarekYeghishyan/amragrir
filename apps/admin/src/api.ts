@@ -525,15 +525,24 @@ export interface StaffNotification {
   type: StaffNotificationType;
   branchId: string;
   orderId: string | null;
-  payload: PrepDuePayload | null;
+  payload: StaffNotificationPayload | null;
   createdAt: string;
   read: boolean;
 }
 
-/** What a `prep_due` row carries. Every field nullable in the way the order's
- *  own columns are: an order from before pre-ordering existed recorded none of
- *  them, and the bell says so rather than printing "null minutes". */
-export interface PrepDuePayload {
+/**
+ * What a notification row carries, whichever kind it is.
+ *
+ * One shape for both `prep_due` and `order_placed` rather than a union: they
+ * describe the same order from two moments, and the bell draws them through the
+ * same detail line. A kind simply leaves out what does not apply to it —
+ * `prepStartAt` means nothing on an order somebody wants now.
+ *
+ * Every field optional in the way the order's own columns are: an order from
+ * before pre-ordering existed recorded none of them, and the bell says so
+ * rather than printing "null minutes".
+ */
+export interface StaffNotificationPayload {
   /** The order's name. Never its collection code — the bell is a screen a shift
    *  leaves open, and the code is the one thing the counter has to ask for. */
   code?: string;
@@ -545,6 +554,15 @@ export interface PrepDuePayload {
   /** Whether anybody still has to accept it. False for every pre-order placed
    *  since paying began to confirm them; true on the ones that predate it. */
   needsConfirming?: boolean;
+
+  // ── `booking_placed` ──────────────────────────────────────────────────────
+  reservationId?: string;
+  /** When the table is for. */
+  reservedFor?: string;
+  guests?: number;
+  /** The evening the table belongs to, `YYYY-MM-DD` — which is what the book is
+   *  filed by, and not always the calendar date of `reservedFor`. */
+  serviceDate?: string;
 }
 
 /**

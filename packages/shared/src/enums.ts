@@ -119,6 +119,24 @@ export const StaffNotificationType = {
   /** A pre-order is coming up and the kitchen has to start soon — raised by the
    *  reminder job when `orders.reminder_at` falls due. */
   PrepDue: 'prep_due',
+
+  /** Somebody has paid for an order the restaurant has not accepted yet.
+   *
+   *  Only ever an **immediate** order. A pre-order is accepted the moment it is
+   *  paid for, so that it does not sit unanswered for days, and it announces
+   *  itself later through `PrepDue` when the work is actually in front of
+   *  somebody. An immediate order instead waits at `paid` for a human to say
+   *  yes — with a diner watching a screen that says the restaurant has not
+   *  looked at it. */
+  OrderPlaced: 'order_placed',
+
+  /** A table has been booked and the branch has not accepted it yet.
+   *
+   *  Only where the branch asked to read every booking first. One that
+   *  confirmed itself has no decision waiting on anybody and simply appears in
+   *  the book — the same line `OrderPlaced` draws between work that needs an
+   *  answer now and work that does not. */
+  BookingPlaced: 'booking_placed',
 } as const;
 export type StaffNotificationType =
   (typeof StaffNotificationType)[keyof typeof StaffNotificationType];

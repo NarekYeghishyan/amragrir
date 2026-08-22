@@ -34,12 +34,28 @@ export function notificationHeadline(t: Translate, item: StaffNotification): str
   switch (item.type) {
     case StaffNotificationType.PrepDue:
       // The order's name. It used to be the pickup code, and a bell left open
-      // on a counter is the last place that belongs — see `PrepDuePayload`.
+      // on a counter is the last place that belongs — see `StaffNotificationPayload`.
       // Rows written before the switch carry `code` too, so nothing older
       // falls back to the nameless line for want of the field.
       return item.payload?.code === undefined
         ? t('notificationPrepDue')
         : t('notificationPrepDueCode', { code: item.payload.code });
+
+    case StaffNotificationType.OrderPlaced:
+      // Deliberately not "new order": what this row asks for is a decision, and
+      // a shift reading a list of them needs to see which ones are still
+      // waiting on it rather than which ones exist.
+      return item.payload?.code === undefined
+        ? t('notificationOrderPlaced')
+        : t('notificationOrderPlacedCode', { code: item.payload.code });
+
+    case StaffNotificationType.BookingPlaced:
+      // The party size rather than a booking reference: a shift deciding
+      // whether to accept a table is deciding about *four people at eight*, and
+      // an id it would have to look up is not the thing being weighed.
+      return item.payload?.guests === undefined
+        ? t('notificationBookingPlaced')
+        : t.plural('notificationBookingPlacedGuests', item.payload.guests);
   }
 }
 
@@ -71,6 +87,12 @@ export function notificationDetail(
   if (payload.itemsCount !== undefined) {
     parts.push(t.plural('dishCount', payload.itemsCount));
   }
+  // A booking says when the table is for. `reservedFor` rather than
+  // `serviceDate`: the shift needs the hour, and the date is only how the book
+  // is filed.
+  if (payload.reservedFor !== undefined) {
+    parts.push(t('bookingAt', { when: formatDateTime(payload.reservedFor, language) }));
+  }
   return parts.length === 0 ? null : parts.join(' · ');
 }
 
@@ -82,6 +104,20 @@ export function notificationDetail(
  * names no order, which no kind does yet and a later one might.
  */
 export function notificationHref(item: StaffNotification): string | null {
+  // A booking leads to the book, on the evening it belongs to — which is what
+  // `serviceDate` is for, and why the row carries it rather than a date derived
+  // from `reservedFor`: a table at 00:30 belongs to the night that is still
+  // going on, and the calendar date would open tomorrow's empty page.
+  if (item.type === StaffNotificationType.BookingPlaced) {
+    const date = item.payload?.serviceDate;
+    return date === undefined
+      ? null
+      : routePath({
+          tab: 'Bookings',
+          book: { restaurantId: null, branchId: item.branchId, date },
+        });
+  }
+
   const code = item.payload?.code;
   if (code === undefined) {
     return null;

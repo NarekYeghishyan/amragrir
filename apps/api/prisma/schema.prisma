@@ -139,6 +139,26 @@ enum NotificationType {
 enum StaffNotificationType {
   /// A pre-order is about to need cooking — see `orders.reminder_at`.
   prep_due
+
+  /// Somebody has paid for an order the restaurant has not accepted yet.
+  ///
+  /// Only ever an **immediate** order. A pre-order is accepted the moment it is
+  /// paid for (`payments.service.ts`), precisely so it does not sit unanswered
+  /// for five days, and it is announced later by `prep_due` when the work is
+  /// actually in front of somebody. An immediate order is the opposite case:
+  /// it stays `paid` until a human says yes, with a diner watching a screen
+  /// that says the restaurant has not looked at it — and until now nothing
+  /// interrupted anybody to say so.
+  order_placed
+
+  /// A table has been booked and the branch has not accepted it yet.
+  ///
+  /// Only where the branch asked to read every booking first
+  /// (`booking_policies.auto_confirm` off). A booking that confirmed itself has
+  /// no decision waiting on anybody and simply appears in the book — the same
+  /// line `order_placed` draws between work that needs an answer now and work
+  /// that does not.
+  booking_placed
 }
 
 enum CouponSource {
@@ -711,6 +731,15 @@ model Reservation {
   // NULLs in a unique index as distinct, which is exactly the wanted
   // behaviour: see the @@unique below.
   activeSlot      DateTime?         @map("active_slot") @db.Timestamptz(6)
+  /// When the guest was reminded that this table is coming up, or NULL if they
+  /// have not been.
+  ///
+  /// A marker, not a schedule: the moment to send is derived from
+  /// `reserved_for` and a fixed lead, and this only records that it happened.
+  /// Written in the same transaction as the notification it describes, so a
+  /// reminder cannot be sent twice — the sweep claims a row by matching on this
+  /// still being NULL, exactly as `orders.reminder_sent_at` does.
+  reminderSentAt  DateTime?         @map("reminder_sent_at") @db.Timestamptz(6)
   createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
