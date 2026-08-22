@@ -7,6 +7,32 @@
 
 ## [Unreleased]
 
+### 2026-08-23 — The four statements every migration carried
+
+`prisma migrate dev` had been attaching four statements to whatever the author
+had actually changed: a `DROP INDEX` on
+`restaurant_branches_services_overridden_idx`, and three `DROP DEFAULT`s. Three
+migrations in a row picked them up this week and had to be trimmed by hand
+before they could be applied.
+
+They were nobody's drift. They came from hand-written migrations that created
+things `schema.prisma` never declared — `20260804120000_branch_level_offering`
+added both the index and `services`'s `DEFAULT '{}'`, and wrote a comment
+explaining why the index exists. Prisma, finding no declaration, proposed to
+drop a deliberately created index every single run. `DATABASE.md` had it right
+all along: it has documented `services text[] NOT NULL DEFAULT '{}'` since that
+migration landed. The schema was the file telling the untruth.
+
+Declared rather than dropped, because the database is right: `@default([])` on
+`services`, `@@index([servicesOverridden])` on the model, and `@default(now())`
+on the two `updated_at` columns whose migration gave them one. No DB change.
+`migrate dev` now generates an empty migration.
+
+Two of the four are committed here; the other two belong to a migration that is
+not committed yet and are declared in the working tree so they land with it.
+
+Docs: `DATABASE.md` (§ restaurant_branches — the index is now written down).
+
 ### 2026-08-22 — The reminder a booking was still missing
 
 The booking bell shipped earlier today without the one notification nobody

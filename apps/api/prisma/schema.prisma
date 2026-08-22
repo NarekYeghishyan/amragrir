@@ -273,7 +273,11 @@ model RestaurantBranch {
   ///
   /// The rules in `checkServices` (BUSINESS_LOGIC.md §2) apply per branch, since
   /// each set now describes one address rather than the business.
-  services String[]
+  /// `@default([])` because the migration that added this column gave it one
+  /// (`20260804120000_branch_level_offering`). Declared here so the schema tells
+  /// the truth about the database: without it every `migrate dev` generates an
+  /// `ALTER COLUMN ... DROP DEFAULT` nobody asked for.
+  services String[] @default([])
 
   /// Whether `services` above is this branch's answer or the restaurant's.
   ///
@@ -322,6 +326,10 @@ model RestaurantBranch {
 
   @@index([restaurantId])
   @@index([lat, lng])
+  /// Finding the branches that answer for themselves — created by hand in
+  /// `20260804120000_branch_level_offering` and never declared, so `migrate dev`
+  /// kept proposing to drop it.
+  @@index([servicesOverridden])
   @@map("restaurant_branches")
 }
 
