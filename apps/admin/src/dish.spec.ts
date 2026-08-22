@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { MenuTab } from '@amragrir/shared';
 import type { StaffMenuItem } from './api';
 import { dishForm, dishFormValid, dishNames, dishPatch, NO_DISH, type DishForm } from './dish';
 
@@ -15,7 +14,9 @@ const DISH: StaffMenuItem = {
   id: 'd1',
   branchId: 'b1',
   categoryId: null,
-  menuTab: MenuTab.Mains,
+  effectiveCategoryId: 'cat-grill',
+  sectionId: 'sec-1',
+  isPopular: false,
   nameI18n: { hy: 'Խորոված', ru: 'Хоровац' },
   descI18n: null,
   priceAmd: 5800,
@@ -37,7 +38,9 @@ describe('dishForm', () => {
       en: '',
       priceAmd: '5800',
       prepMin: '25',
-      menuTab: MenuTab.Mains,
+      sectionId: 'sec-1',
+      categoryId: '',
+      isPopular: false,
       photoUrl: 'https://cdn.amragrir.am/khorovats.jpg',
     });
   });
@@ -134,10 +137,22 @@ describe('dishPatch', () => {
     });
   });
 
-  it('sends the tab it was moved to', () => {
-    expect(dishPatch(DISH, typed({ menuTab: MenuTab.Popular }))).toEqual({
-      menuTab: MenuTab.Popular,
-    });
+  it('sends the section it was moved to', () => {
+    expect(dishPatch(DISH, typed({ sectionId: 'sec-2' }))).toEqual({ sectionId: 'sec-2' });
+  });
+
+  it('sends the Popular shelf as a flag, not as a move', () => {
+    // A bestseller keeps its section and its category — the old four-tab enum
+    // forced a dish to choose between being popular and being pizza.
+    expect(dishPatch(DISH, typed({ isPopular: true }))).toEqual({ isPopular: true });
+  });
+
+  it('sends null when a dish stops naming its own category', () => {
+    // `''` in the form is "inherit from the section", which the API spells
+    // `null`. Sending nothing would leave a stale override in place.
+    const own = { ...DISH, categoryId: 'cat-healthy' };
+
+    expect(dishPatch(own, { ...dishForm(own), categoryId: '' })).toEqual({ categoryId: null });
   });
 
   it('sends the new photograph', () => {
@@ -176,13 +191,13 @@ describe('dishPatch', () => {
     expect(
       dishPatch(
         DISH,
-        typed({ hy: 'Խորոված խոզի', priceAmd: '6400', prepMin: '30', menuTab: MenuTab.Popular }),
+        typed({ hy: 'Խորոված խոզի', priceAmd: '6400', prepMin: '30', isPopular: true }),
       ),
     ).toEqual({
       nameI18n: { hy: 'Խորոված խոզի', ru: 'Хоровац' },
       priceAmd: 6400,
       prepMin: 30,
-      menuTab: MenuTab.Popular,
+      isPopular: true,
     });
   });
 

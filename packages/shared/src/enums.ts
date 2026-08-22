@@ -199,13 +199,10 @@ export const PaymentStatus = {
 } as const;
 export type PaymentStatus = (typeof PaymentStatus)[keyof typeof PaymentStatus];
 
-export const MenuTab = {
-  Popular: 'popular',
-  Mains: 'mains',
-  Sides: 'sides',
-  Drinks: 'drinks',
-} as const;
-export type MenuTab = (typeof MenuTab)[keyof typeof MenuTab];
+// `MenuTab` was here — a fixed enum of popular/mains/sides/drinks that every
+// restaurant on the platform had to lay its menu out in. It is now
+// `branch_menu_sections`, a table the branch owns, and "popular" is a flag on a
+// dish rather than a place to put one. See `menu.ts`.
 
 /**
  * How a list of restaurants is ordered.

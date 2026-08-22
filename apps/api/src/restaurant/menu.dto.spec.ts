@@ -1,6 +1,5 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import { MenuTab } from '@amragrir/shared';
 import { CreateMenuItemDto, UpdateMenuItemDto } from './menu.dto';
 
 /**
@@ -13,6 +12,7 @@ import { CreateMenuItemDto, UpdateMenuItemDto } from './menu.dto';
  * part of the answer instead of an implementation detail.
  */
 const BRANCH_ID = '11111111-1111-4111-8111-111111111111';
+const SECTION_ID = '55555555-5555-4555-8555-555555555555';
 const PHOTO = 'https://cdn.amragrir.am/khorovats.jpg';
 
 const failedFields = (dto: object): string[] =>
@@ -22,7 +22,7 @@ const failedFields = (dto: object): string[] =>
 
 const createBody = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   branchId: BRANCH_ID,
-  menuTab: MenuTab.Mains,
+  sectionId: SECTION_ID,
   nameI18n: { hy: 'Խորոված' },
   priceAmd: 5800,
   photoUrl: PHOTO,

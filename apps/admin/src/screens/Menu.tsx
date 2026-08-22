@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MenuTab } from '@amragrir/shared';
-import { api, errorText, type StaffBranch, type StaffMenuItem } from '../api';
+import { POPULAR_SECTION_ID } from '@amragrir/shared';
+import {
+  api,
+  errorText,
+  type CategoryOption,
+  type StaffBranch,
+  type StaffMenuItem,
+  type StaffMenuSection,
+} from '../api';
 import { EditDish, NewDish } from '../dish-form';
+import { SectionsDialog } from '../menu-sections';
 import { useLanguage } from '../i18n';
 import type { Translate } from '../language';
 import { formatAmd, pickLabel } from '../format';
@@ -29,7 +37,15 @@ import {
   useToast,
 } from '../ui';
 
-type TabFilter = MenuTab | 'all';
+/**
+ * What the strip above the list filters to.
+ *
+ * A section id, or one of the two that are not sections: everything, and the
+ * Popular shelf — which is a property of a dish rather than a place for one, so
+ * it can never be a section id and `POPULAR_SECTION_ID` is not a uuid.
+ */
+type TabFilter = string;
+const ALL_SECTIONS = 'all';
 
 export function Menu({
   branches,
@@ -88,11 +104,24 @@ export function Menu({
   const [restaurantId, setRestaurantId] = useState(landed?.restaurantId ?? '');
   const [branchId, setBranchId] = useState(landed?.id ?? '');
   const [items, setItems] = useState<StaffMenuItem[] | null>(null);
+  /** This branch's headings, in its own order — the strip, the Section column
+   *  and both dish forms all read them. */
+  const [sections, setSections] = useState<StaffMenuSection[]>([]);
+  /**
+   * The live category rail, fetched from the **public** endpoint.
+   *
+   * A restaurant admin holds none of `categories:write` and so cannot read the
+   * editor's list — but they do need to see what a shelf can be mapped to, and
+   * the guest-facing list is exactly the right answer: it leaves out the
+   * retired ones, which nothing should be newly mapped to anyway.
+   */
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [tab, setTab] = useState<TabFilter>('all');
+  const [tab, setTab] = useState<TabFilter>(ALL_SECTIONS);
   const [adding, setAdding] = useState(false);
+  const [managingSections, setManagingSections] = useState(false);
   /**
    * The dish whose form is open, or none.
    *
@@ -108,14 +137,20 @@ export function Menu({
     async (id: string) => {
       if (!id) {
         setItems([]);
+        setSections([]);
         return;
       }
       try {
-        const page = await api.menu(id);
+        // Together, because a dish row cannot name its section and neither form
+        // can offer one until both have landed — two sequential awaits would
+        // draw the menu once with every heading missing.
+        const [page, headings] = await Promise.all([api.menu(id), api.menuSections(id)]);
         setItems(page.items);
+        setSections(headings.items);
         setError(null);
       } catch (err) {
         setItems([]);
+        setSections([]);
         setError(errorText(t, err, 'errorLoadMenu'));
       }
     },
@@ -125,6 +160,17 @@ export function Menu({
   useEffect(() => {
     void load(branchId);
   }, [branchId, load]);
+
+  // Once per screen rather than per branch: the vocabulary is the platform's
+  // and does not change when the branch picker moves. A failure here is not
+  // worth a banner — the forms fall back to naming no category, and the menu
+  // itself is unaffected.
+  useEffect(() => {
+    void api
+      .categories()
+      .then((list) => setCategories(list.items))
+      .catch(() => setCategories([]));
+  }, []);
 
   // The address changing under a menu that is already up: the back button, a
   // second dish followed from the board in the same tab, or one of the pickers
@@ -154,8 +200,18 @@ export function Menu({
     }
   };
 
+  const matchesTab = (item: StaffMenuItem, filter: TabFilter): boolean => {
+    if (filter === ALL_SECTIONS) {
+      return true;
+    }
+    if (filter === POPULAR_SECTION_ID) {
+      return item.isPopular;
+    }
+    return item.sectionId === filter;
+  };
+
   const countIn = (list: StaffMenuItem[], filter: TabFilter): number =>
-    filter === 'all' ? list.length : list.filter((item) => item.menuTab === filter).length;
+    list.filter((item) => matchesTab(item, filter)).length;
 
   // Derived from the branches rather than fetched: every restaurant that owns
   // one is in here, and one that owns none has no menu to edit.
@@ -204,10 +260,19 @@ export function Menu({
     const needle = query.trim().toLowerCase();
     return all.filter(
       (item) =>
-        (tab === 'all' || item.menuTab === tab) &&
+        matchesTab(item, tab) &&
         (needle === '' || pickLabel(item.nameI18n, language).toLowerCase().includes(needle)),
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [all, tab, query, language]);
+
+  const sectionName = (id: string): string => {
+    const section = sections.find((entry) => entry.id === id);
+    return section === undefined ? '—' : pickLabel(section.nameI18n, language);
+  };
+
+  const categoryName = (id: string | null): string | null =>
+    id === null ? null : (categories.find((entry) => entry.id === id)?.name ?? null);
 
   /** The dish the address came for — marked on its row, and brought into view
    *  once the menu holding it has landed. Null on a branch this account cannot
@@ -281,12 +346,31 @@ export function Menu({
         description={t('menuDesc')}
         actions={
           canWrite && (
-            <Button variant="primary" icon="plus" onClick={() => setAdding(true)}>
-              {t('menuAddDish')}
-            </Button>
+            <span className="row row--tight">
+              {/* Before "Add a dish", because on an empty menu it is the first
+                  thing to do: a dish needs a heading to go under. */}
+              <Button icon="menu" onClick={() => setManagingSections(true)}>
+                {t('menuSectionsAction')}
+              </Button>
+              <Button
+                variant="primary"
+                icon="plus"
+                onClick={() => setAdding(true)}
+                disabled={sections.length === 0}
+              >
+                {t('menuAddDish')}
+              </Button>
+            </span>
           )
         }
       />
+
+      {/* A branch whose menu has no headings at all — a new branch, or one
+          whose sections were all retired. Said here rather than left as a
+          disabled button nobody can explain. */}
+      {canWrite && items !== null && sections.length === 0 && (
+        <Banner tone="warn">{t('menuNoSections')}</Banner>
+      )}
 
       {error !== null && <Banner>{error}</Banner>}
 
@@ -332,11 +416,24 @@ export function Menu({
           onValueChange={setTab}
           label={t('menuFilterLabel')}
           segments={[
-            { value: 'all' as TabFilter, label: t('menuTabAll'), count: countIn(all, 'all') },
-            ...Object.values(MenuTab).map((value) => ({
-              value: value as TabFilter,
-              label: t(`menuTab_${value}`),
-              count: countIn(all, value),
+            {
+              value: ALL_SECTIONS,
+              label: t('menuTabAll'),
+              count: countIn(all, ALL_SECTIONS),
+            },
+            // The showcase, first and apart: a dish is popular *as well as*
+            // being on a shelf, so this segment overlaps the ones after it —
+            // which is why it is named rather than sitting among them as if it
+            // were another heading.
+            {
+              value: POPULAR_SECTION_ID,
+              label: t('menuTabPopular'),
+              count: countIn(all, POPULAR_SECTION_ID),
+            },
+            ...sections.map((section) => ({
+              value: section.id,
+              label: pickLabel(section.nameI18n, language),
+              count: countIn(all, section.id),
             })),
           ]}
         >
@@ -360,7 +457,7 @@ export function Menu({
                 <thead>
                   <tr>
                     <th>{t('menuColDish')}</th>
-                    <th>{t('menuColTab')}</th>
+                    <th>{t('menuColSection')}</th>
                     <th className="table__num">{t('menuColPrice')}</th>
                     <th>{t('menuColAvailable')}</th>
                     {/* Always present now: History needs only `menu:read`, which
@@ -414,7 +511,23 @@ export function Menu({
                         </div>
                       </td>
                       <td>
-                        <Badge>{t(`menuTab_${item.menuTab}`)}</Badge>
+                        {/* Both axes in one cell: the heading it sits under on
+                            this branch's page, and the category the city files
+                            it under — which is usually inherited from that same
+                            heading and is the thing a guest actually searches
+                            by. A dish in none is the failure worth shouting
+                            about: nothing on the home screen leads to it. */}
+                        <span className="row row--tight">
+                          <Badge>{sectionName(item.sectionId)}</Badge>
+                          {item.isPopular && <Badge tone="accent">{t('menuTabPopular')}</Badge>}
+                          {categoryName(item.effectiveCategoryId) === null ? (
+                            <Badge tone="warn">{t('menuNoCategory')}</Badge>
+                          ) : (
+                            <span className="faint">
+                              {categoryName(item.effectiveCategoryId)}
+                            </span>
+                          )}
+                        </span>
                       </td>
                       <td className="table__num">
                         {canWrite ? (
@@ -522,8 +635,25 @@ export function Menu({
       )}
 
       {canWrite && (
-        <NewDish
+        <SectionsDialog
           branchId={branchId}
+          sections={sections}
+          categories={categories}
+          open={managingSections}
+          onOpenChange={setManagingSections}
+          onChanged={() => void load(branchId)}
+        />
+      )}
+
+      {/* Keyed by the branch's headings, so a dialog opened after a section was
+          just added starts on the list that now includes it rather than on the
+          one captured when the form first mounted. */}
+      {canWrite && (
+        <NewDish
+          key={sections.map((section) => section.id).join()}
+          branchId={branchId}
+          sections={sections}
+          categories={categories}
           open={adding}
           onOpenChange={setAdding}
           onCreated={() => {
@@ -541,6 +671,8 @@ export function Menu({
         <EditDish
           key={editing.id}
           item={editing}
+          sections={sections}
+          categories={categories}
           onOpenChange={(open) => {
             if (!open) {
               setEditing(null);

@@ -50,6 +50,7 @@ import { Dashboard } from './screens/Dashboard';
 import { Users } from './screens/Users';
 import { People } from './screens/People';
 import { Platform } from './screens/Platform';
+import { Categories } from './screens/Categories';
 
 /**
  * Every screen has an address.
@@ -484,6 +485,7 @@ function Shell({
               canOpenOrders={can(Permission.OrdersRead)}
             />
           )}
+          {active === 'Categories' && <Categories />}
           {active === 'Platform' && <Platform />}
         </div>
       </main>

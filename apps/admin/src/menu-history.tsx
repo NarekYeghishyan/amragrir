@@ -48,6 +48,12 @@ const FIELD_LABEL: Readonly<Record<string, AdminTranslationKey>> = {
   nameI18n: 'menuField_name',
   descI18n: 'menuField_desc',
   priceAmd: 'menuField_price',
+  sectionId: 'menuField_section',
+  isPopular: 'menuField_popular',
+  // Kept for the entries written before menus had headings of their own. The
+  // field no longer exists; the rows recording it do, and a timeline that
+  // rendered them under the raw key `menuTab` would be an audit trail going
+  // vague about its own past.
   menuTab: 'menuField_tab',
   categoryId: 'menuField_category',
   caloriesKcal: 'menuField_calories',
@@ -99,8 +105,11 @@ export function formatValue(
       return Array.isArray(value) && value.length > 0
         ? value.join(', ')
         : t('menuHistoryValueNone');
-    // A uuid, and a URL nobody reads. That there is one is the readable part.
+    // Two uuids and a URL, none of which anybody reads. That there is one is
+    // the readable part — "the section changed from 8f3c… to b210…" answers
+    // nothing somebody came to this dialog for.
     case 'categoryId':
+    case 'sectionId':
     case 'photoUrl':
       return t('menuHistoryValueSet');
     default:

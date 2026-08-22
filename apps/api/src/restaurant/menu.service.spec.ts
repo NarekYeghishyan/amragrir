@@ -3,13 +3,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import {
-  AuditAction,
-  AuditEntity,
-  MenuTab,
-  RestaurantService,
-  StaffRole,
-} from '@amragrir/shared';
+import { AuditAction, AuditEntity, RestaurantService, StaffRole } from '@amragrir/shared';
 import { MenuService, stripEmpty } from './menu.service';
 
 import {
@@ -29,6 +23,7 @@ import type { StaffJwtPayload } from '../staff/staff-token.service';
 const BRANCH_ID = '11111111-1111-4111-8111-111111111111';
 const ITEM_ID = '22222222-2222-4222-8222-222222222222';
 const CATEGORY_ID = '33333333-3333-4333-8333-333333333333';
+const SECTION_ID = '55555555-5555-4555-8555-555555555555';
 
 const RESTAURANT_ID = '44444444-4444-4444-8444-444444444444';
 
@@ -44,7 +39,12 @@ function itemRow(over: Record<string, unknown> = {}) {
     id: ITEM_ID,
     branchId: BRANCH_ID,
     categoryId: CATEGORY_ID,
-    menuTab: MenuTab.Mains,
+    sectionId: SECTION_ID,
+    isPopular: false,
+    // The shelf's own mapping, which the dish inherits when its `categoryId` is
+    // null. Included on every row because `toStaffMenuItem` resolves the
+    // effective category from the pair.
+    section: { categoryId: null },
     nameI18n: { hy: 'Բուրգեր', en: 'Burger' },
     descI18n: null,
     priceAmd: 5800,
@@ -61,6 +61,9 @@ function build(
   options: {
     branch?: unknown;
     item?: unknown;
+    /** What `branchMenuSection.findFirst` answers — `null` for a section that
+     *  is not this branch's, `{ categoryId: null }` for an unmapped shelf. */
+    section?: unknown;
     ordered?: unknown;
     restaurants?: unknown[];
     /** What `restaurant.findFirst` answers — the single-restaurant lookups. */
@@ -112,6 +115,16 @@ function build(
     },
     orderItem: { findFirst: jest.fn().mockResolvedValue(options.ordered ?? null) },
     category: { findUnique: jest.fn().mockResolvedValue({ id: CATEGORY_ID }) },
+    // The section a dish is filed under, proven to belong to the same branch.
+    // Mapped to a category by default, which is the arrangement that lets a
+    // dish carry none of its own.
+    branchMenuSection: {
+      findFirst: jest
+        .fn()
+        .mockResolvedValue(
+          options.section === undefined ? { categoryId: CATEGORY_ID } : options.section,
+        ),
+    },
     restaurant: {
       findFirst: jest
         .fn()
@@ -138,7 +151,7 @@ function build(
 const createDto = (over: Partial<CreateMenuItemDto> = {}): CreateMenuItemDto =>
   Object.assign(new CreateMenuItemDto(), {
     branchId: BRANCH_ID,
-    menuTab: MenuTab.Mains,
+    sectionId: SECTION_ID,
     nameI18n: { hy: 'Բուրգեր', en: 'Burger' },
     priceAmd: 5800,
     // Required by the DTO — a dish is not added without one. What refuses a
@@ -984,7 +997,11 @@ describe('update', () => {
     const { service, menuUpdate } = build();
     await service.update(admin, ITEM_ID, Object.assign(new UpdateMenuItemDto(), { priceAmd: 7000 }));
 
-    expect(menuUpdate).toHaveBeenCalledWith({ where: { id: ITEM_ID }, data: { priceAmd: 7000 } });
+    expect(menuUpdate).toHaveBeenCalledWith(
+      // `include` rides along — the response resolves the dish's effective
+      // category, which needs its section's. The assertion is about `data`.
+      expect.objectContaining({ where: { id: ITEM_ID }, data: { priceAmd: 7000 } }),
+    );
   });
 
   it('404s on a dish outside the caller scope', async () => {
@@ -994,11 +1011,48 @@ describe('update', () => {
     ).rejects.toThrow(NotFoundException);
   });
 
-  it('disconnects the category when it is cleared', async () => {
-    const { service, menuUpdate } = build();
+  it('disconnects the category when it is cleared, if the section supplies one', async () => {
+    // Clearing a dish's own category is it handing the question to its shelf.
+    // Legitimate only while the shelf can answer — hence the mapped section
+    // here, and the refusal in the test below when it cannot.
+    const { service, menuUpdate } = build({
+      item: {
+        ...itemRow({ section: { categoryId: CATEGORY_ID } }),
+        branch: { restaurantId: RESTAURANT_ID },
+      },
+    });
     await service.update(admin, ITEM_ID, Object.assign(new UpdateMenuItemDto(), { categoryId: null }));
 
     expect(menuUpdate.mock.calls[0][0].data.category).toEqual({ disconnect: true });
+  });
+
+  it('refuses to leave a dish in no category at all', async () => {
+    // The failure this whole change exists to make impossible: a dish that
+    // belongs to no category is a dish no chip on the home screen leads to,
+    // and nothing in the panel used to say so. The section here maps to
+    // nothing, so clearing the dish's own category strands it.
+    const { service, menuUpdate } = build();
+
+    await expect(
+      service.update(admin, ITEM_ID, Object.assign(new UpdateMenuItemDto(), { categoryId: null })),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(menuUpdate).not.toHaveBeenCalled();
+  });
+
+  it('404s on a section belonging to another branch', async () => {
+    // Section ids are uuids from a table every branch shares, so filing a dish
+    // under somebody else's heading is one copied id away — and the foreign key
+    // would take it. The lookup is by (id, branch), so it simply does not
+    // resolve.
+    const { service } = build({ section: null });
+
+    await expect(
+      service.update(
+        admin,
+        ITEM_ID,
+        Object.assign(new UpdateMenuItemDto(), { sectionId: SECTION_ID }),
+      ),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('clears the prep estimate on a null, and records that it went', async () => {
@@ -1024,7 +1078,7 @@ describe('update', () => {
     await service.update(
       admin,
       ITEM_ID,
-      Object.assign(new UpdateMenuItemDto(), { priceAmd: 5800, menuTab: MenuTab.Mains }),
+      Object.assign(new UpdateMenuItemDto(), { priceAmd: 5800, sectionId: SECTION_ID }),
     );
 
     expect(auditCreate).not.toHaveBeenCalled();

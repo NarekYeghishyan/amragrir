@@ -17,6 +17,7 @@ import { StaffDirectoryService } from '../staff/staff-directory.service';
 import { ListTeamDto } from '../staff/dto';
 import { RestaurantOrdersService } from './orders.service';
 import { MenuService } from './menu.service';
+import { MenuSectionsService } from './menu-sections.service';
 import { MenuHistoryService } from './menu-history.service';
 import { RestaurantReservationsService } from './reservations.service';
 import { BookingSettingsService } from './booking-settings.service';
@@ -36,7 +37,9 @@ import { ListQueueDto, SetOrderReminderDto, SetOrderStatusDto } from './dto';
 import {
   CreateBranchDto,
   CreateMenuItemDto,
+  CreateMenuSectionDto,
   ListMenuItemsDto,
+  ListMenuSectionsDto,
   ListRestaurantsDto,
   SetAvailabilityDto,
   SetBranchBookingsDto,
@@ -47,6 +50,7 @@ import {
   SetRestaurantServicesDto,
   UpdateBranchDto,
   UpdateMenuItemDto,
+  UpdateMenuSectionDto,
 } from './menu.dto';
 
 /**
@@ -64,6 +68,7 @@ export class RestaurantController {
   constructor(
     private readonly orders: RestaurantOrdersService,
     private readonly menu: MenuService,
+    private readonly sections: MenuSectionsService,
     private readonly menuHistory: MenuHistoryService,
     private readonly reservations: RestaurantReservationsService,
     private readonly bookingSettings: BookingSettingsService,
@@ -572,5 +577,48 @@ export class RestaurantController {
   @HttpCode(204)
   removeMenuItem(@CurrentStaff() staff: StaffJwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.menu.remove(staff, id);
+  }
+
+  /**
+   * The branch's own menu headings — "Mains", "Сеты", "Խորոված".
+   *
+   * A branch names as many as its menu needs and orders them itself; the four
+   * fixed tabs this replaced could not express a fifth. Where a heading maps
+   * onto a platform category, every dish under it inherits that category and
+   * becomes findable from the home screen without anybody tagging dishes one at
+   * a time — which is the whole reason the mapping exists.
+   *
+   * `menu:write`, the same permission that adds and prices a dish. A shift with
+   * `menu:availability` may flip a dish sold out and may not reorganise a menu.
+   */
+  @Get('menu-sections')
+  @RequiresPermission(Permission.MenuRead)
+  listMenuSections(@CurrentStaff() staff: StaffJwtPayload, @Query() query: ListMenuSectionsDto) {
+    return this.sections.list(staff, query);
+  }
+
+  @Post('menu-sections')
+  @RequiresPermission(Permission.MenuWrite)
+  createMenuSection(@CurrentStaff() staff: StaffJwtPayload, @Body() dto: CreateMenuSectionDto) {
+    return this.sections.create(staff, dto);
+  }
+
+  @Patch('menu-sections/:id')
+  @RequiresPermission(Permission.MenuWrite)
+  updateMenuSection(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateMenuSectionDto,
+  ) {
+    return this.sections.update(staff, id, dto);
+  }
+
+  /** Refused while live dishes sit under it — 409 with the count. Moving them
+   *  somewhere automatically would put food on a shelf nobody chose. */
+  @Delete('menu-sections/:id')
+  @RequiresPermission(Permission.MenuWrite)
+  @HttpCode(204)
+  removeMenuSection(@CurrentStaff() staff: StaffJwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.sections.remove(staff, id);
   }
 }

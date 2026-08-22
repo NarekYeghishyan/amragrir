@@ -14,8 +14,18 @@ export interface CategoryDto {
 export class CategoriesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * The chip rail, in the reader's language.
+   *
+   * Retired categories are left out: `is_active` is how a super admin takes one
+   * off the rail without deleting the row that dishes still point at, and this
+   * is the read that has to honour it. The panel's own list
+   * (`GET /admin/categories`) shows them, because that is the screen that puts
+   * one back.
+   */
   async list(language: Language): Promise<{ items: CategoryDto[] }> {
     const rows = await this.prisma.category.findMany({
+      where: { isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { key: 'asc' }],
     });
 

@@ -46,6 +46,13 @@ const ICONS = {
       <path d="M18 20V10M12 20V4M6 20v-6" />
     </>
   ),
+  // A price tag — the chips the whole catalogue is browsed by.
+  categories: (
+    <>
+      <path d="M20.6 13.4 12 22l-9-9V4a1 1 0 0 1 1-1h8l8.6 8.6a2 2 0 0 1 0 2.8z" />
+      <circle cx="7.5" cy="7.5" r="1.2" />
+    </>
+  ),
   customers: (
     <>
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />

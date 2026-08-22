@@ -1,16 +1,31 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import { Permission } from '@amragrir/shared';
 import { CurrentStaff, RequiresPermission, StaffRoute } from '../staff/decorators';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
 import { AdminService } from './admin.service';
+import { CategoriesAdminService } from './categories.service';
 import { MetricsService } from './metrics.service';
 import {
+  CreateCategoryDto,
   CreateRestaurantDto,
   IssuePromoDto,
   ListCustomerOrdersDto,
   ListUsersDto,
   MetricsQueryDto,
+  UpdateCategoryDto,
 } from './dto';
 
 /**
@@ -32,6 +47,7 @@ export class AdminController {
   constructor(
     private readonly admin: AdminService,
     private readonly metrics: MetricsService,
+    private readonly categories: CategoriesAdminService,
   ) {}
 
   @Get('metrics')
@@ -100,5 +116,50 @@ export class AdminController {
   @RequiresPermission(Permission.PromoIssue)
   issuePromo(@Body() dto: IssuePromoDto) {
     return this.admin.issuePromo(dto);
+  }
+
+  /**
+   * The platform's category vocabulary — the chips the whole catalogue is
+   * browsed by.
+   *
+   * `categories:write` on all four, including the read: this is the editor's
+   * list, retired rows and usage counts and all, and it is the only screen that
+   * can put a retired category back. Guests and every other panel screen read
+   * the public `GET /categories`, which shows the live rail in one language.
+   *
+   * The permission is held by `super_admin` alone. Not tightness for its own
+   * sake — one person here changes how every restaurant on the platform is
+   * indexed, and a duplicate spelling added in good faith splits a chip's
+   * traffic with nothing in the product to report it.
+   */
+  @Get('categories')
+  @RequiresPermission(Permission.CategoriesWrite)
+  listCategories() {
+    return this.categories.list();
+  }
+
+  @Post('categories')
+  @RequiresPermission(Permission.CategoriesWrite)
+  createCategory(@CurrentStaff() staff: StaffJwtPayload, @Body() dto: CreateCategoryDto) {
+    return this.categories.create(staff, dto);
+  }
+
+  @Patch('categories/:id')
+  @RequiresPermission(Permission.CategoriesWrite)
+  updateCategory(
+    @CurrentStaff() staff: StaffJwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateCategoryDto,
+  ) {
+    return this.categories.update(staff, id, dto);
+  }
+
+  /** Only while nothing points at it; otherwise `PATCH … { isActive: false }`
+   *  is the answer, and the refusal says so with the counts. */
+  @Delete('categories/:id')
+  @RequiresPermission(Permission.CategoriesWrite)
+  @HttpCode(204)
+  deleteCategory(@CurrentStaff() staff: StaffJwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.categories.remove(staff, id);
   }
 }

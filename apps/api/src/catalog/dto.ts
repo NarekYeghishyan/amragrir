@@ -9,11 +9,12 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
-import { DietaryTag, MenuTab, RestaurantService, RestaurantSort } from '@amragrir/shared';
+import { DietaryTag, RestaurantService, RestaurantSort } from '@amragrir/shared';
 import { toBool } from '../common/query';
 
 /** Re-exported so the callers that import it from here keep working; it is
@@ -156,10 +157,23 @@ export class SearchQueryDto {
 }
 
 export class MenuQueryDto {
-  @IsIn(Object.values(MenuTab))
+  /**
+   * One heading of *this branch's* menu (`branch_menu_sections.id`).
+   *
+   * A uuid rather than the old four-value `menuTab`, because the headings are
+   * the branch's own now and no fixed vocabulary can name them.
+   */
+  @IsUUID()
   @IsOptional()
-  menuTab?: MenuTab;
+  sectionId?: string;
 
+  /**
+   * A platform category key, e.g. `sushi` — the other axis entirely.
+   *
+   * Matches a dish by its **effective** category: its own, or its section's
+   * where it names none. This is how a guest arriving from a category chip sees
+   * only the part of the menu they came for.
+   */
   @IsString()
   @IsOptional()
   @MaxLength(40)

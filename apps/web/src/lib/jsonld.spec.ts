@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { MenuTab } from '@amragrir/shared';
-import { groupByTab, restaurantJsonLd } from './jsonld';
-import type { MenuItem, RestaurantDetail } from './api';
+import { POPULAR_SECTION_ID } from '@amragrir/shared';
+import { itemsUnder, menuTabs, restaurantJsonLd, tabOfItem } from './jsonld';
+import type { MenuItem, MenuSection, RestaurantDetail } from './api';
 
 const restaurant = (over: Partial<RestaurantDetail> = {}): RestaurantDetail => ({
   id: 'branch-1',
@@ -40,14 +40,24 @@ const dish = (over: Partial<MenuItem> = {}): MenuItem => ({
   photoUrl: null,
   dietaryTags: ['vegetarian'],
   isAvailable: true,
-  menuTab: MenuTab.Mains,
+  sectionId: 'sec-mains',
+  isPopular: false,
   categoryId: null,
   ...over,
 });
 
+const section = (over: Partial<MenuSection> = {}): MenuSection => ({
+  id: 'sec-mains',
+  name: 'Основные',
+  categoryId: null,
+  ...over,
+});
+
+const SECTIONS = [section()];
+
 describe('restaurantJsonLd', () => {
   it('describes the restaurant with an absolute, language-specific url', () => {
-    const data = restaurantJsonLd(restaurant(), [dish()], 'ru');
+    const data = restaurantJsonLd(restaurant(), SECTIONS, [dish()], 'ru');
 
     expect(data['@type']).toBe('Restaurant');
     expect(data.name).toBe('Sunny Table');
@@ -56,7 +66,7 @@ describe('restaurantJsonLd', () => {
   });
 
   it('carries the rating a search result can display', () => {
-    const data = restaurantJsonLd(restaurant(), [dish()], 'hy');
+    const data = restaurantJsonLd(restaurant(), SECTIONS, [dish()], 'hy');
     expect(data.aggregateRating).toEqual({
       '@type': 'AggregateRating',
       ratingValue: 4.8,
@@ -67,18 +77,18 @@ describe('restaurantJsonLd', () => {
   it('omits the rating entirely when nobody has reviewed it', () => {
     // A rating with a zero review count is invalid structured data, and a
     // broken block is worse than a missing one.
-    const data = restaurantJsonLd(restaurant({ reviewsCount: 0, rating: 0 }), [dish()], 'hy');
+    const data = restaurantJsonLd(restaurant({ reviewsCount: 0, rating: 0 }), SECTIONS, [dish()], 'hy');
     expect(data).not.toHaveProperty('aggregateRating');
   });
 
   it('omits geo when the branch has no coordinates', () => {
     const branch = { ...restaurant().branch, lat: null, lng: null };
-    const data = restaurantJsonLd(restaurant({ branch }), [dish()], 'hy');
+    const data = restaurantJsonLd(restaurant({ branch }), SECTIONS, [dish()], 'hy');
     expect(data).not.toHaveProperty('geo');
   });
 
   it('prices every dish in dram', () => {
-    const data = restaurantJsonLd(restaurant(), [dish(), dish({ id: 'd2', priceAmd: 5800 })], 'hy');
+    const data = restaurantJsonLd(restaurant(), SECTIONS, [dish(), dish({ id: 'd2', priceAmd: 5800 })], 'hy');
     const menu = data.hasMenu as { hasMenuSection: { hasMenuItem: { offers: unknown }[] }[] };
 
     expect(menu.hasMenuSection[0]?.hasMenuItem[0]?.offers).toEqual({
@@ -89,27 +99,80 @@ describe('restaurantJsonLd', () => {
   });
 
   it('drops empty menu sections rather than emitting hollow ones', () => {
-    const data = restaurantJsonLd(restaurant(), [dish({ menuTab: MenuTab.Mains })], 'hy');
+    // The branch's headings under the names it gave them — strictly better
+    // structured data than the four fixed English words this used to emit for
+    // every restaurant on the platform.
+    const data = restaurantJsonLd(
+      restaurant(),
+      [section(), section({ id: 'sec-drinks', name: 'Напитки' })],
+      [dish()],
+      'hy',
+    );
     const menu = data.hasMenu as { hasMenuSection: { name: string }[] };
 
-    expect(menu.hasMenuSection.map((section) => section.name)).toEqual([MenuTab.Mains]);
+    expect(menu.hasMenuSection.map((entry) => entry.name)).toEqual(['Основные']);
   });
 
   it('is serialisable — it goes into the page as JSON', () => {
-    expect(() => JSON.stringify(restaurantJsonLd(restaurant(), [dish()], 'en'))).not.toThrow();
+    expect(() => JSON.stringify(restaurantJsonLd(restaurant(), SECTIONS, [dish()], 'en'))).not.toThrow();
   });
 });
 
-describe('groupByTab', () => {
-  it('keeps dishes in the tab they belong to', () => {
-    const grouped = groupByTab([
-      dish({ id: '1', menuTab: MenuTab.Mains }),
-      dish({ id: '2', menuTab: MenuTab.Drinks }),
-      dish({ id: '3', menuTab: MenuTab.Mains }),
-    ]);
+describe('menuTabs', () => {
+  const drinks = section({ id: 'sec-drinks', name: 'Напитки' });
 
-    expect(grouped[MenuTab.Mains]).toHaveLength(2);
-    expect(grouped[MenuTab.Drinks]).toHaveLength(1);
-    expect(grouped[MenuTab.Sides]).toBeUndefined();
+  it('draws the branch headings it has, in its own order', () => {
+    const tabs = menuTabs(
+      [section(), drinks],
+      [dish({ id: '1' }), dish({ id: '2', sectionId: 'sec-drinks' })],
+    );
+
+    expect(tabs.map((tab) => tab.label)).toEqual(['Основные', 'Напитки']);
+  });
+
+  it('leaves out a heading with nothing under it', () => {
+    // A pill that empties the page when pressed is worse than a menu with one
+    // fewer division. The API still returns the empty section — the panel needs
+    // it — so this is a rendering decision, made here.
+    const tabs = menuTabs([section(), drinks], [dish()]);
+
+    expect(tabs.map((tab) => tab.id)).toEqual(['sec-mains']);
+  });
+
+  it('puts Popular first, and only when something is on it', () => {
+    expect(menuTabs([section()], [dish()]).map((tab) => tab.id)).toEqual(['sec-mains']);
+
+    const withHit = menuTabs([section()], [dish({ isPopular: true })]);
+    expect(withHit.map((tab) => tab.id)).toEqual([POPULAR_SECTION_ID, 'sec-mains']);
+    // Translated by the page, since the platform names this one rather than
+    // the restaurant.
+    expect(withHit[0]?.translate).toBe(true);
+  });
+});
+
+describe('itemsUnder', () => {
+  it('shows a bestseller under Popular *and* under its own heading', () => {
+    // The old four-tab enum made a dish choose: a Margherita in the Popular tab
+    // was not in any other, so it vanished from the pizza section of the very
+    // restaurant that is known for it.
+    const hit = dish({ id: 'hit', isPopular: true });
+    const items = [hit, dish({ id: 'plain' })];
+
+    expect(itemsUnder(POPULAR_SECTION_ID, items).map((item) => item.id)).toEqual(['hit']);
+    expect(itemsUnder('sec-mains', items).map((item) => item.id)).toEqual(['hit', 'plain']);
+  });
+});
+
+describe('tabOfItem', () => {
+  it('opens a linked dish on its section, never on Popular', () => {
+    // A link is to a place on the menu; the showcase is not one, and landing
+    // there would leave the dish's real heading unopened underneath.
+    const items = [dish({ id: 'hit', isPopular: true, sectionId: 'sec-drinks' })];
+
+    expect(tabOfItem('hit', items)).toBe('sec-drinks');
+  });
+
+  it('answers null for a dish this menu does not have', () => {
+    expect(tabOfItem('gone', [dish()])).toBeNull();
   });
 });

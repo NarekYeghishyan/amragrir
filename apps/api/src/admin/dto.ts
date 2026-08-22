@@ -13,10 +13,19 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { CouponSource } from '@prisma/client';
-import { CustomerOrderFilter, REFERRAL_MAX_STACK_PCT, Role } from '@amragrir/shared';
+import {
+  CATEGORY_KEY_PATTERN,
+  CustomerOrderFilter,
+  REFERRAL_MAX_STACK_PCT,
+  Role,
+} from '@amragrir/shared';
 import { toBool } from '../common/query';
+// The one shape both halves of the platform share: a translated label, with
+// Armenian required because it is what the public API falls back to.
+import { I18nTextDto } from '../restaurant/menu.dto';
 
 export class MetricsQueryDto {
   @IsISO8601()
@@ -208,3 +217,63 @@ export class IssuePromoDto {
 }
 
 export const PROMO_SOURCE = CouponSource.promo;
+
+/**
+ * A new platform category.
+ *
+ * `key` is the permanent one — the value in `?category=`, in deep links and in
+ * the seed's placeholder filenames — so it is asked for once, checked against
+ * `CATEGORY_KEY_PATTERN`, and never editable afterwards. Everything a guest
+ * reads is `nameI18n`, which may change any day.
+ */
+export class CreateCategoryDto {
+  @IsString()
+  @MaxLength(40)
+  @Matches(CATEGORY_KEY_PATTERN, {
+    message: 'key must be lowercase latin letters, digits and underscores, starting with a letter',
+  })
+  key!: string;
+
+  /** One emoji, which is what the chip rail draws. */
+  @IsString()
+  @IsOptional()
+  @MaxLength(8)
+  icon?: string;
+
+  @ValidateNested()
+  @Type(() => I18nTextDto)
+  nameI18n!: I18nTextDto;
+
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  @Max(999)
+  @Type(() => Number)
+  sortOrder?: number;
+}
+
+export class UpdateCategoryDto {
+  /** `key` is deliberately absent — see `CategoriesAdminService.update`. */
+  @IsString()
+  @IsOptional()
+  @MaxLength(8)
+  icon?: string | null;
+
+  @ValidateNested()
+  @Type(() => I18nTextDto)
+  @IsOptional()
+  nameI18n?: I18nTextDto;
+
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  @Max(999)
+  @Type(() => Number)
+  sortOrder?: number;
+
+  /** `false` retires the category: the chip leaves the rail and the filter, and
+   *  every dish filed under it keeps its row. Reversible. */
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
+}

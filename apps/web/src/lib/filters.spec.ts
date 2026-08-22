@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Language } from '@amragrir/shared';
 import {
   FILTER_CHIPS,
+  categoryHref,
   chipHref,
   chipsFor,
   clearHref,
@@ -145,12 +146,51 @@ describe('toApiQuery', () => {
       openNow: undefined,
       sort: undefined,
       service: undefined,
+      category: undefined,
     });
   });
 
   it('maps an active state to /restaurants parameters', () => {
-    expect(toApiQuery(parseFilters({ openNow: '1', sort: 'fastest', service: 'pickup,reserve' }))).toEqual(
-      { openNow: '1', sort: 'fastest', service: 'pickup,reserve' },
-    );
+    expect(
+      toApiQuery(parseFilters({ openNow: '1', sort: 'fastest', service: 'pickup,reserve' })),
+    ).toEqual({
+      openNow: '1',
+      sort: 'fastest',
+      service: 'pickup,reserve',
+      category: undefined,
+    });
+  });
+});
+
+describe('the category rail', () => {
+  it('reads a key off the address and sends it to the API', () => {
+    const state = parseFilters({ category: 'sushi' });
+
+    expect(state.category).toBe('sushi');
+    expect(toApiQuery(state).category).toBe('sushi');
+    expect(hasAnyFilter(state)).toBe(true);
+  });
+
+  it('ignores a key that could not be one', () => {
+    // Not checked against the live rail — that is a database read on every home
+    // render — but a value that cannot be a key at all is dropped rather than
+    // forwarded. A key that merely names nothing matches no dish, which is the
+    // same empty listing by a shorter route.
+    expect(parseFilters({ category: 'Sushi; DROP' }).category).toBeUndefined();
+  });
+
+  it('keeps the other filters when a category is picked', () => {
+    // The rail sits above the chips, and pressing it must not quietly undo
+    // them: somebody who narrowed to "open now" and then tapped Sushi asked for
+    // both.
+    const state = parseFilters({ openNow: '1' });
+
+    expect(categoryHref(state, 'sushi', Language.Ru)).toBe('/ru?openNow=1&category=sushi');
+  });
+
+  it('clears the category when the lit one is pressed again', () => {
+    const state = parseFilters({ category: 'sushi', openNow: '1' });
+
+    expect(categoryHref(state, 'sushi', Language.Ru)).toBe('/ru?openNow=1');
   });
 });

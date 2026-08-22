@@ -1,9 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { Language, resolveBranchOffering } from '@amragrir/shared';
+import {
+  CARD_DISH_SLIDER_LIMIT,
+  Language,
+  effectiveCategoryId,
+  resolveBranchOffering,
+} from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { localize, type I18nField } from '../common/i18n';
-import { LIVE_MENU_ITEM } from '../common/menu-visibility';
+import { LIVE_MENU_ITEM, LIVE_MENU_SECTION } from '../common/menu-visibility';
 import { boundingBox, distanceKm, roundKm } from './geo';
 import { SearchService } from './search.service';
 import { ListRestaurantsDto, MenuQueryDto, RestaurantSort } from './dto';
@@ -28,15 +33,35 @@ const MAX_DISTANCE_CANDIDATES = 500;
  */
 const MAX_GROUPED_CANDIDATES = 500;
 
+/**
+ * A dish on a restaurant card, shown when a category filter is on.
+ *
+ * The card normally wears the branch's photograph. Under a category chip that
+ * picture answers the wrong question: the guest asked for sushi, and a shot of
+ * the dining room does not tell them whether this kitchen has any. So the cover
+ * gives way to the matching dishes themselves, with the two facts somebody
+ * choosing between restaurants actually compares — what it is and what it costs.
+ *
+ * `sectionId` travels so the tap can land on the dish rather than on the top of
+ * a menu the guest then has to search.
+ */
+export interface CardDish {
+  id: string;
+  name: string;
+  priceAmd: number;
+  photoUrl: string | null;
+  sectionId: string;
+}
+
 export interface RestaurantListItem {
   id: string;
   /**
    * The business behind the row, since `id` is the branch's.
    *
-   * A favourite is stored against the restaurant, not the branch (DATABASE.md
-   * §13), so a card with a heart on it has to be able to name the restaurant it
-   * would save — and it could not, when the only id it carried was the branch's.
-   * `SearchRestaurant` has always sent both for the same reason.
+   * The name, cuisine and rating on this row are the business's; the distance,
+   * hours, prep time and cover are the branch's — and so is the heart, which
+   * posts `id` (DATABASE.md §13). Both ids travel because a card is genuinely
+   * about both; `SearchRestaurant` has always sent the pair for the same reason.
    */
   restaurantId: string;
   slug: string;
@@ -51,6 +76,16 @@ export interface RestaurantListItem {
   services: string[];
   reservationsEnabled: boolean;
   coverUrl: string | null;
+  /**
+   * The dishes that matched the category filter, or `undefined` when no
+   * category was asked for.
+   *
+   * Undefined and empty mean different things and the clients read both: no
+   * filter is on (wear the cover), versus a filter is on but every match is
+   * sold out tonight (wear the cover, and the card is still a true answer —
+   * the kitchen does serve this, just not right now).
+   */
+  dishes?: CardDish[];
 }
 
 export interface RestaurantDetail {
@@ -96,7 +131,20 @@ export interface MenuItemDto {
   photoUrl: string | null;
   dietaryTags: string[];
   isAvailable: boolean;
-  menuTab: string;
+  sectionId: string;
+  /** On the branch's "Popular" shelf — a showcase across the whole menu, not a
+   *  section, so this is true *as well as* the dish having a section. */
+  isPopular: boolean;
+  /** The **effective** category: the dish's own, or its section's. Resolved
+   *  here so no client has to know the inheritance rule to draw a chip. */
+  categoryId: string | null;
+}
+
+/** One heading of a branch's menu, in the reader's language. */
+export interface MenuSectionDto {
+  id: string;
+  name: string;
+  /** The platform category this whole shelf maps onto, or null. */
   categoryId: string | null;
 }
 
@@ -118,7 +166,7 @@ export class RestaurantsService {
    */
   async list(
     query: ListRestaurantsDto,
-    _language: Language,
+    language: Language,
   ): Promise<{ items: RestaurantListItem[]; total: number; page: number }> {
     const origin = this.origin(query);
 
@@ -146,7 +194,7 @@ export class RestaurantsService {
     );
 
     if (query.groupByRestaurant) {
-      return this.listGrouped(query, where, origin, radiusKm);
+      return this.listGrouped(query, where, origin, radiusKm, language);
     }
 
     if (!usesDistance) {
@@ -159,7 +207,15 @@ export class RestaurantsService {
         }),
         this.prisma.restaurantBranch.count({ where }),
       ]);
-      return { items: rows.map((row) => this.toListItem(row, origin)), total, page: query.page };
+      return {
+        items: await this.withDishes(
+          rows.map((row) => this.toListItem(row, origin)),
+          query.category,
+          language,
+        ),
+        total,
+        page: query.page,
+      };
     }
 
     // The bounding box above already narrows this in SQL; the cap is a backstop
@@ -188,7 +244,11 @@ export class RestaurantsService {
     scored = scored.slice(start, start + query.limit);
 
     return {
-      items: scored.map(({ row }) => this.toListItem(row, origin)),
+      items: await this.withDishes(
+        scored.map(({ row }) => this.toListItem(row, origin)),
+        query.category,
+        language,
+      ),
       total,
       page: query.page,
     };
@@ -213,6 +273,7 @@ export class RestaurantsService {
     where: Prisma.RestaurantBranchWhereInput,
     origin: { lat: number; lng: number } | null,
     radiusKm: number | undefined,
+    language: Language,
   ): Promise<{ items: RestaurantListItem[]; total: number; page: number }> {
     const rows = await this.prisma.restaurantBranch.findMany({
       where,
@@ -258,7 +319,11 @@ export class RestaurantsService {
     const start = (query.page - 1) * query.limit;
 
     return {
-      items: collapsed.slice(start, start + query.limit).map((row) => this.toListItem(row, origin)),
+      items: await this.withDishes(
+        collapsed.slice(start, start + query.limit).map((row) => this.toListItem(row, origin)),
+        query.category,
+        language,
+      ),
       total,
       page: query.page,
     };
@@ -309,25 +374,46 @@ export class RestaurantsService {
     };
   }
 
+  /**
+   * A branch's menu: its own headings, and the dishes under them.
+   *
+   * The sections travel **with** the items and are not derivable from them — a
+   * heading a kitchen has created but not filled yet still belongs on its page,
+   * and a `?category=` narrowing must not make the empty ones disappear and the
+   * tab strip jump about. So the sections are always the branch's full set, in
+   * its own order, and only `items` answers to the filters.
+   */
   async menu(
     idOrSlug: string,
     query: MenuQueryDto,
     language: Language,
-  ): Promise<{ items: MenuItemDto[] }> {
+  ): Promise<{ sections: MenuSectionDto[]; items: MenuItemDto[] }> {
     const branch = await this.resolveBranch(idOrSlug);
 
-    const items = await this.prisma.menuItem.findMany({
-      where: {
-        branchId: branch.id,
-        // A dish taken off the menu is off it for customers first of all.
-        ...LIVE_MENU_ITEM,
-        ...(query.menuTab ? { menuTab: query.menuTab } : {}),
-        ...(query.category ? { category: { key: query.category } } : {}),
-      },
-      orderBy: [{ menuTab: 'asc' }, { priceAmd: 'asc' }],
-    });
+    const [sections, items] = await Promise.all([
+      this.prisma.branchMenuSection.findMany({
+        where: { branchId: branch.id, ...LIVE_MENU_SECTION },
+        orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+      }),
+      this.prisma.menuItem.findMany({
+        where: {
+          branchId: branch.id,
+          // A dish taken off the menu is off it for customers first of all.
+          ...LIVE_MENU_ITEM,
+          ...(query.sectionId ? { sectionId: query.sectionId } : {}),
+          ...(query.category ? categoryMatch(query.category) : {}),
+        },
+        include: { section: { select: { categoryId: true, sortOrder: true } } },
+        orderBy: [{ section: { sortOrder: 'asc' } }, { priceAmd: 'asc' }],
+      }),
+    ]);
 
     return {
+      sections: sections.map((section) => ({
+        id: section.id,
+        name: localize(section.nameI18n as I18nField, language),
+        categoryId: section.categoryId,
+      })),
       items: items.map((item) => ({
         id: item.id,
         name: localize(item.nameI18n as I18nField, language),
@@ -338,8 +424,9 @@ export class RestaurantsService {
         photoUrl: item.photoUrl,
         dietaryTags: item.dietaryTags,
         isAvailable: item.isAvailable,
-        menuTab: item.menuTab,
-        categoryId: item.categoryId,
+        sectionId: item.sectionId,
+        isPopular: item.isPopular,
+        categoryId: effectiveCategoryId(item, item.section),
       })),
     };
   }
@@ -441,7 +528,7 @@ export class RestaurantsService {
     // that have at least one matching item.
     const menuItem: Prisma.MenuItemWhereInput = {};
     if (query.category) {
-      menuItem.category = { key: query.category };
+      Object.assign(menuItem, categoryMatch(query.category));
     }
     if (query.dietary?.length) {
       menuItem.dietaryTags = { hasSome: query.dietary };
@@ -516,6 +603,98 @@ export class RestaurantsService {
     return distanceKm(origin, { lat: Number(row.lat), lng: Number(row.lng) });
   }
 
+  /**
+   * Hangs the matching dishes on the cards, when a category was asked for.
+   *
+   * Runs after paging, never before: the slider is decoration on twenty rows,
+   * and fetching menus for the five hundred candidates a distance query
+   * materialises to then throw away 96% of them would be paying for a picture
+   * nobody sees.
+   *
+   * One round trip for the whole page. The obvious alternative — a query per
+   * card — is twenty; the other one, a single unranked `findMany`, cannot cap
+   * *per branch*, so one restaurant with a sixty-dish pizza list would spend
+   * the whole budget and leave the other nineteen cards blank.
+   */
+  private async withDishes(
+    items: RestaurantListItem[],
+    categoryKey: string | undefined,
+    language: Language,
+  ): Promise<RestaurantListItem[]> {
+    if (!categoryKey || items.length === 0) {
+      return items;
+    }
+
+    const byBranch = await this.cardDishes(
+      items.map((item) => item.id),
+      categoryKey,
+      language,
+    );
+
+    // Every card gets the key, empty array included: `undefined` means "no
+    // filter is on" to the clients, and a branch whose matches are all sold out
+    // tonight is not that.
+    return items.map((item) => ({ ...item, dishes: byBranch.get(item.id) ?? [] }));
+  }
+
+  private async cardDishes(
+    branchIds: string[],
+    categoryKey: string,
+    language: Language,
+  ): Promise<Map<string, CardDish[]>> {
+    // `ROW_NUMBER` per branch, because the cap is per card. Ordered the way a
+    // kitchen would introduce itself: what it is known for first, then cheapest
+    // — and `id` last so two dishes at one price cannot swap places between
+    // requests and make the slider look shuffled.
+    //
+    // `COALESCE(m.category_id, s.category_id)` is `effectiveCategoryId` in SQL.
+    // The two are the same rule and have to stay so; the branch filter that
+    // decided this card belongs on the page used the TypeScript one.
+    const rows = await this.prisma.$queryRaw<
+      {
+        id: string;
+        branch_id: string;
+        name_i18n: Prisma.JsonValue;
+        price_amd: number;
+        photo_url: string | null;
+        section_id: string;
+      }[]
+    >`
+      SELECT id, branch_id, name_i18n, price_amd, photo_url, section_id
+        FROM (
+          SELECT m.id, m.branch_id, m.name_i18n, m.price_amd, m.photo_url, m.section_id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY m.branch_id
+                   ORDER BY m.is_popular DESC, m.price_amd ASC, m.id ASC
+                 ) AS rn
+            FROM menu_items m
+            JOIN branch_menu_sections s ON s.id = m.section_id
+           WHERE m.branch_id::text IN (${Prisma.join(branchIds)})
+             AND m.deleted_at IS NULL
+             AND m.is_available = true
+             AND COALESCE(m.category_id, s.category_id)
+                 = (SELECT c.id FROM categories c WHERE c.key = ${categoryKey})
+        ) ranked
+       WHERE rn <= ${CARD_DISH_SLIDER_LIMIT}
+    `;
+
+    const byBranch = new Map<string, CardDish[]>();
+    for (const row of rows) {
+      const list = byBranch.get(row.branch_id) ?? [];
+      list.push({
+        id: row.id,
+        // The one place the feed carries a dish name, so it resolves here —
+        // `list()` had a language parameter it never used until now.
+        name: localize(row.name_i18n as I18nField, language),
+        priceAmd: row.price_amd,
+        photoUrl: row.photo_url,
+        sectionId: row.section_id,
+      });
+      byBranch.set(row.branch_id, list);
+    }
+    return byBranch;
+  }
+
   private toListItem(
     row: BranchWithRestaurant,
     origin: { lat: number; lng: number } | null,
@@ -547,6 +726,18 @@ export class RestaurantsService {
     };
   }
 }
+
+/**
+ * Dishes in a platform category, **inheritance included**.
+ *
+ * A dish is in "Pizza" if it says so itself, or if it says nothing and the
+ * shelf it sits on says so. Written once and used by both readers — the branch
+ * filter on the feed and the menu narrowing on a restaurant page — because the
+ * two disagreeing would mean a card promising a dish its own menu then hides.
+ */
+const categoryMatch = (key: string): Prisma.MenuItemWhereInput => ({
+  OR: [{ category: { key } }, { categoryId: null, section: { category: { key } } }],
+});
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(value: string): boolean {

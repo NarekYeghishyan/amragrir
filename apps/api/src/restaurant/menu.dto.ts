@@ -17,13 +17,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import {
-  DietaryTag,
-  Language,
-  MenuTab,
-  RestaurantService,
-  SERVICE_ORDER,
-} from '@amragrir/shared';
+import { DietaryTag, Language, RestaurantService, SERVICE_ORDER } from '@amragrir/shared';
 
 /**
  * A localised text column.
@@ -97,12 +91,30 @@ export class CreateMenuItemDto {
   @IsUUID()
   branchId!: string;
 
+  /**
+   * The dish's own platform category, **overriding** its section's.
+   *
+   * Optional, and usually left out: a dish on a "Pizza" shelf is pizza without
+   * anybody saying so. Needed when the shelf maps to nothing — a "Сеты"
+   * heading, a chef's list — because a dish with no effective category is a
+   * dish no guest can reach from the home screen, and the service refuses to
+   * create one (see `MenuService.assertHasCategory`).
+   */
   @IsUUID()
   @IsOptional()
   categoryId?: string;
 
-  @IsIn(Object.values(MenuTab))
-  menuTab!: MenuTab;
+  /** Which of this branch's headings the dish goes under. Must belong to
+   *  `branchId` — checked, or a restaurant could file a dish on somebody
+   *  else's menu. */
+  @IsUUID()
+  sectionId!: string;
+
+  /** On the branch's "Popular" shelf. A property of the dish, not a place for
+   *  it: a bestseller keeps its section and its category. */
+  @IsBoolean()
+  @IsOptional()
+  isPopular?: boolean;
 
   @ValidateNested()
   @Type(() => I18nTextDto)
@@ -181,13 +193,20 @@ export class CreateMenuItemDto {
  * in. That is a different operation, not an edit.
  */
 export class UpdateMenuItemDto {
+  /** `null` hands the question back to the section, which is a real answer and
+   *  not "no category" — see `effectiveCategoryId`. */
   @IsUUID()
   @IsOptional()
   categoryId?: string | null;
 
-  @IsIn(Object.values(MenuTab))
+  /** Moves the dish to another heading of the **same** branch. */
+  @IsUUID()
   @IsOptional()
-  menuTab?: MenuTab;
+  sectionId?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isPopular?: boolean;
 
   @ValidateNested()
   @Type(() => I18nTextDto)
@@ -266,9 +285,72 @@ export class ListMenuItemsDto {
   @IsOptional()
   branchId?: string;
 
-  @IsIn(Object.values(MenuTab))
+  @IsUUID()
   @IsOptional()
-  menuTab?: MenuTab;
+  sectionId?: string;
+}
+
+/**
+ * A heading on one branch's menu.
+ *
+ * `categoryId` is the bridge to the platform's vocabulary: set it and every
+ * dish on the shelf becomes findable under that chip without anybody tagging
+ * dishes one by one. Left out, the section is presentation only — perfectly
+ * legitimate for "Сеты" or "От шефа", and then each dish has to name its own
+ * category or it cannot be created.
+ */
+export class CreateMenuSectionDto {
+  @IsUUID()
+  branchId!: string;
+
+  @IsUUID()
+  @IsOptional()
+  categoryId?: string;
+
+  @ValidateNested()
+  @Type(() => I18nTextDto)
+  nameI18n!: I18nTextDto;
+
+  /** Where it sits in the strip. Left out, it goes last. */
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  @Max(999)
+  @Type(() => Number)
+  sortOrder?: number;
+}
+
+export class UpdateMenuSectionDto {
+  /**
+   * A different platform category, or `null` to map onto none.
+   *
+   * The one edit here that changes what guests see rather than how the page
+   * looks: it moves every inheriting dish on the shelf from one chip to
+   * another. `null` can strand dishes that named no category of their own —
+   * refused for that reason, with the count, rather than silently removing a
+   * shelf-worth of food from the catalogue.
+   */
+  @IsUUID()
+  @IsOptional()
+  categoryId?: string | null;
+
+  @ValidateNested()
+  @Type(() => I18nTextDto)
+  @IsOptional()
+  nameI18n?: I18nTextDto;
+
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  @Max(999)
+  @Type(() => Number)
+  sortOrder?: number;
+}
+
+export class ListMenuSectionsDto {
+  @IsUUID()
+  @IsOptional()
+  branchId?: string;
 }
 
 /**

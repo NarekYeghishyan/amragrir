@@ -1,7 +1,6 @@
 import { CustomerOrderFilter, HANDOVER_CODE_MISMATCH, QueueFilter } from '@amragrir/shared';
 import type {
   AuditAction,
-  MenuTab,
   OrderActorType,
   OrderEventType,
   OrderStatus,
@@ -890,8 +889,14 @@ export const TEAM_PAGE_SIZE = 50;
 export interface StaffMenuItem {
   id: string;
   branchId: string;
+  /** What the dish says about itself. `null` means it inherits its section's —
+   *  the common case, and what the form leaves alone. */
   categoryId: string | null;
-  menuTab: MenuTab;
+  /** What the catalogue will actually index it under. `null` is the state the
+   *  panel warns about: a dish no chip on the home screen leads to. */
+  effectiveCategoryId: string | null;
+  sectionId: string;
+  isPopular: boolean;
   nameI18n: Record<string, string>;
   descI18n: Record<string, string> | null;
   priceAmd: number;
@@ -900,6 +905,53 @@ export interface StaffMenuItem {
   photoUrl: string | null;
   dietaryTags: string[];
   isAvailable: boolean;
+}
+
+/**
+ * One heading of one branch's menu.
+ *
+ * The branch's own vocabulary — as many as its menu names, in its own order.
+ * `categoryId` is the bridge to the platform's: set it and every dish on the
+ * shelf becomes findable under that chip without anybody tagging dishes one at
+ * a time.
+ */
+export interface StaffMenuSection {
+  id: string;
+  branchId: string;
+  categoryId: string | null;
+  nameI18n: Record<string, string>;
+  sortOrder: number;
+  /** Live dishes filed here — what the delete button checks before offering
+   *  itself, and what explains the refusal when it does not. */
+  itemCount: number;
+}
+
+/** A category as everything but the super admin's screen sees it: one resolved
+ *  name, and the emoji the rail draws. */
+export interface CategoryOption {
+  id: string;
+  key: string;
+  icon: string | null;
+  name: string;
+}
+
+/**
+ * A platform category as the super admin's screen edits it.
+ *
+ * `itemCount` and `sectionCount` are the two ways something can be riding on
+ * this row, and together they are why a delete is usually refused: a category
+ * cannot leave while menus point at it without taking their dishes out of every
+ * filter on the platform.
+ */
+export interface StaffCategory {
+  id: string;
+  key: string;
+  icon: string | null;
+  sortOrder: number | null;
+  nameI18n: Record<string, string>;
+  isActive: boolean;
+  itemCount: number;
+  sectionCount: number;
 }
 
 /**
@@ -916,7 +968,13 @@ export interface StaffMenuItem {
  * branches would change who owns it, which is not an edit.
  */
 export interface MenuItemPatch {
-  menuTab?: MenuTab;
+  /** Moves the dish to another heading of the same branch. */
+  sectionId?: string;
+  /** `null` hands the category question back to the section — refused by the
+   *  API when the section maps to none, since that would leave the dish
+   *  unfindable. */
+  categoryId?: string | null;
+  isPopular?: boolean;
   /** Whole, not merged: what is sent replaces the column, so a language left
    *  out of it is a language removed from the dish. */
   nameI18n?: Record<string, string>;
@@ -1586,7 +1644,14 @@ export const api = {
 
   createMenuItem: (item: {
     branchId: string;
-    menuTab: MenuTab;
+    /** Which of this branch's headings it goes under. Required — a dish that
+     *  belongs to no section is one nobody can find on the menu it is printed
+     *  on. */
+    sectionId: string;
+    /** Only when the section maps to no category, or to override the one it
+     *  does. Left out, the dish inherits. */
+    categoryId?: string;
+    isPopular?: boolean;
     nameI18n: Record<string, string>;
     priceAmd: number;
     /** Required by the API, so required here — a dish goes on the menu with a
@@ -1594,6 +1659,69 @@ export const api = {
     photoUrl: string;
     prepMin?: number;
   }) => request<StaffMenuItem>('/restaurant/menu-items', { method: 'POST', body: item }),
+
+  // ── the branch's own menu headings ────────────────────────────────────────
+
+  menuSections: (branchId: string) =>
+    request<{ items: StaffMenuSection[] }>('/restaurant/menu-sections', { query: { branchId } }),
+
+  createMenuSection: (section: {
+    branchId: string;
+    nameI18n: Record<string, string>;
+    /** The platform category every dish on the shelf inherits. Leaving it out
+     *  is legitimate — "Сеты", "От шефа" — and then each dish must name its
+     *  own or the API refuses it. */
+    categoryId?: string;
+    sortOrder?: number;
+  }) => request<StaffMenuSection>('/restaurant/menu-sections', { method: 'POST', body: section }),
+
+  updateMenuSection: (
+    id: string,
+    patch: { nameI18n?: Record<string, string>; categoryId?: string | null; sortOrder?: number },
+  ) =>
+    request<StaffMenuSection>(`/restaurant/menu-sections/${id}`, { method: 'PATCH', body: patch }),
+
+  /** 409 while live dishes sit under it, with the count in the message. */
+  deleteMenuSection: (id: string) =>
+    request<void>(`/restaurant/menu-sections/${id}`, { method: 'DELETE' }),
+
+  /**
+   * The live category rail, in the panel's language.
+   *
+   * The **public** endpoint, deliberately: a restaurant admin mapping a shelf
+   * needs to see the categories a guest would see, and holds none of
+   * `categories:write`. It also means the panel and the app cannot disagree
+   * about what is on the rail — retired categories are absent from both.
+   */
+  categories: () => request<{ items: CategoryOption[] }>('/categories'),
+
+  // ── the platform's category vocabulary (super admin) ──────────────────────
+
+  adminCategories: () => request<{ items: StaffCategory[] }>('/admin/categories'),
+
+  createCategory: (category: {
+    key: string;
+    nameI18n: Record<string, string>;
+    icon?: string;
+    sortOrder?: number;
+  }) => request<StaffCategory>('/admin/categories', { method: 'POST', body: category }),
+
+  /** `key` is absent on purpose: it is the value in `?category=` and in every
+   *  deep link, so it is fixed at creation. The display name is what changes. */
+  updateCategory: (
+    id: string,
+    patch: {
+      nameI18n?: Record<string, string>;
+      icon?: string | null;
+      sortOrder?: number;
+      isActive?: boolean;
+    },
+  ) => request<StaffCategory>(`/admin/categories/${id}`, { method: 'PATCH', body: patch }),
+
+  /** Only while nothing points at it; otherwise the API answers 422 and the
+   *  answer is to retire it instead. */
+  deleteCategory: (id: string) =>
+    request<void>(`/admin/categories/${id}`, { method: 'DELETE' }),
 
   updateMenuItem: (id: string, patch: MenuItemPatch) =>
     request<StaffMenuItem>(`/restaurant/menu-items/${id}`, { method: 'PATCH', body: patch }),

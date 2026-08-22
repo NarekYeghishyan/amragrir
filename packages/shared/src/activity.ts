@@ -34,6 +34,32 @@ export const AuditAction = {
    *  resolves and the dish can still be named. */
   MenuItemDelete: 'menu_item.delete',
 
+  /** A heading added to a branch's menu. */
+  MenuSectionCreate: 'menu_section.create',
+  /** Renamed, reordered, or pointed at a different platform category — the last
+   *  of which quietly moves every dish under it from one chip to another, which
+   *  is why the category is in `before`/`after` and not merely the name. */
+  MenuSectionUpdate: 'menu_section.update',
+  /** A heading removed. Hard-deleted, and only ever when empty: the dishes are
+   *  moved first or the delete is refused, so `before` is the only record of
+   *  what it was called. */
+  MenuSectionDelete: 'menu_section.delete',
+
+  /**
+   * The platform's category vocabulary — the chips every guest browses by.
+   *
+   * Filed here rather than left unrecorded because it is the rare edit with no
+   * restaurant to answer for it: one person changes what the whole catalogue is
+   * indexed by, and `categories:write` is held by exactly the seat that answers
+   * to nobody. The entry is the only thing that can say who.
+   */
+  CategoryCreate: 'category.create',
+  CategoryUpdate: 'category.update',
+  /** A category taken off the rail. `after.isActive: false` is a retirement —
+   *  the row and its dishes survive; a genuine delete is only possible while
+   *  nothing points at it, and then `before` is what it was. */
+  CategoryDelete: 'category.delete',
+
   /**
    * The ways a restaurant says it will feed people — pickup, the eat-in
    * sub-option under it, table service, table booking.
@@ -167,6 +193,11 @@ export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
  */
 export const AuditEntity = {
   MenuItem: 'menu_item',
+  /** A `branch_menu_sections` row — one heading of one branch's menu. */
+  MenuSection: 'menu_section',
+  /** A `categories` row. The only entity here that belongs to no restaurant:
+   *  the vocabulary is the platform's. */
+  Category: 'category',
   Restaurant: 'restaurant',
   Branch: 'branch',
   StaffUser: 'staff_user',
@@ -192,6 +223,12 @@ export const AUDIT_ACTION_ENTITY: Readonly<Record<AuditAction, AuditEntity>> = {
   [AuditAction.MenuItemUpdate]: AuditEntity.MenuItem,
   [AuditAction.MenuItemAvailability]: AuditEntity.MenuItem,
   [AuditAction.MenuItemDelete]: AuditEntity.MenuItem,
+  [AuditAction.MenuSectionCreate]: AuditEntity.MenuSection,
+  [AuditAction.MenuSectionUpdate]: AuditEntity.MenuSection,
+  [AuditAction.MenuSectionDelete]: AuditEntity.MenuSection,
+  [AuditAction.CategoryCreate]: AuditEntity.Category,
+  [AuditAction.CategoryUpdate]: AuditEntity.Category,
+  [AuditAction.CategoryDelete]: AuditEntity.Category,
   [AuditAction.RestaurantServices]: AuditEntity.Restaurant,
   [AuditAction.RestaurantCover]: AuditEntity.Restaurant,
   [AuditAction.BranchCreate]: AuditEntity.Branch,

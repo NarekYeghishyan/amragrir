@@ -32,8 +32,20 @@ describe('which tabs an account sees', () => {
       'People',
       'Dashboard',
       'Customers',
+      // `categories:write` is held by this role and no other, so this is the
+      // one tab that separates a super admin from a platform admin in the
+      // sidebar rather than only inside a screen.
+      'Categories',
       'Platform',
     ]);
+  });
+
+  it('hides Categories from a platform admin', () => {
+    // Support work, which this role is for, does not include changing what the
+    // whole catalogue is indexed by. Absent rather than present-and-refusing.
+    const tabs = visibleTabs(permissionsOf(StaffRole.PlatformAdmin));
+    expect(tabs).toContain('Customers');
+    expect(tabs).not.toContain('Categories');
   });
 
   it('shows nothing to an account holding no roles', () => {

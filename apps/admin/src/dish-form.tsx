@@ -1,6 +1,11 @@
 import { useState, type FormEvent } from 'react';
-import { MenuTab } from '@amragrir/shared';
-import { api, errorText, type StaffMenuItem } from './api';
+import {
+  api,
+  errorText,
+  type CategoryOption,
+  type StaffMenuItem,
+  type StaffMenuSection,
+} from './api';
 import {
   dishForm,
   dishFormValid,
@@ -13,6 +18,7 @@ import { PhotoField, usePhotoUpload, type PhotoUpload } from './photo';
 import { useLanguage, useT } from './i18n';
 import { pickLabel } from './format';
 import {
+  Banner,
   Button,
   Dialog,
   DialogBody,
@@ -20,6 +26,7 @@ import {
   DialogFooter,
   Field,
   Select,
+  Switch,
   TextInput,
   useToast,
 } from './ui';
@@ -46,6 +53,8 @@ export function DishFields({
   upload,
   photoHint,
   disabled,
+  sections,
+  categories,
 }: {
   form: DishForm;
   /** Whichever fields moved — the form is one object, so a change is a patch of
@@ -57,8 +66,20 @@ export function DishFields({
    *  already has the picture this would replace. */
   photoHint: string;
   disabled: boolean;
+  /** This branch's headings, in its own order. */
+  sections: StaffMenuSection[];
+  /** The live rail, for the override below and for naming what a section maps
+   *  onto. */
+  categories: CategoryOption[];
 }) {
-  const t = useT();
+  const { language, t } = useLanguage();
+  const section = sections.find((entry) => entry.id === form.sectionId) ?? null;
+  const inherited = categories.find((entry) => entry.id === section?.categoryId) ?? null;
+  // The state the API refuses, shown before it is reached rather than after:
+  // a dish whose shelf names no category and which names none of its own would
+  // be reachable from no chip on the home screen.
+  const uncategorised = inherited === null && form.categoryId === '';
+
   return (
     <>
       {/* These three are the dish's own languages, not the panel's — the names
@@ -133,17 +154,63 @@ export function DishFields({
         </Field>
       </div>
 
-      <Field label={t('newDishTab')}>
+      {/* Where the dish sits on this branch's page. The headings are the
+          branch's own, so this list is as long as its menu says. */}
+      <Field label={t('dishSection')} required hint={t('dishSectionHint')}>
         {(id) => (
           <Select
             id={id}
-            value={form.menuTab}
-            onValueChange={(menuTab) => onChange({ menuTab })}
-            disabled={disabled}
-            options={Object.values(MenuTab).map((value) => ({
-              value,
-              label: t(`menuTab_${value}`),
+            value={form.sectionId}
+            onValueChange={(sectionId) => onChange({ sectionId })}
+            disabled={disabled || sections.length === 0}
+            options={sections.map((entry) => ({
+              value: entry.id,
+              label: pickLabel(entry.nameI18n, language),
             }))}
+          />
+        )}
+      </Field>
+
+      {/* The other axis: what the city files this dish under. Almost always
+          inherited, which is why "inherit" is the first option and names what
+          it would inherit rather than saying "default". */}
+      <Field
+        label={t('dishCategory')}
+        hint={inherited ? t('dishCategoryInheritHint') : t('dishCategoryOwnHint')}
+      >
+        {(id) => (
+          <Select
+            id={id}
+            value={form.categoryId}
+            onValueChange={(categoryId) => onChange({ categoryId })}
+            disabled={disabled}
+            options={[
+              {
+                value: '',
+                label: inherited
+                  ? t('dishCategoryInherit', { category: inherited.name })
+                  : t('dishCategoryNone'),
+              },
+              ...categories.map((entry) => ({
+                value: entry.id,
+                label: entry.icon ? `${entry.icon} ${entry.name}` : entry.name,
+              })),
+            ]}
+          />
+        )}
+      </Field>
+
+      {uncategorised && <Banner tone="warn">{t('dishUncategorised')}</Banner>}
+
+      {/* A property of the dish, not a place for it: a bestseller keeps its
+          section and its category and appears on the Popular shelf as well. */}
+      <Field label={t('dishPopular')} hint={t('dishPopularHint')}>
+        {(id) => (
+          <Switch
+            id={id}
+            checked={form.isPopular}
+            onCheckedChange={(isPopular) => onChange({ isPopular })}
+            disabled={disabled}
           />
         )}
       </Field>
@@ -169,16 +236,25 @@ export function DishFields({
  */
 export function NewDish({
   branchId,
+  sections,
+  categories,
   open,
   onOpenChange,
   onCreated,
 }: {
   branchId: string;
+  sections: StaffMenuSection[];
+  categories: CategoryOption[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
 }) {
-  const [form, setForm] = useState<DishForm>(NO_DISH);
+  // Opens on the branch's first heading rather than on nothing: a dish has to
+  // go somewhere, and the top of the menu is the answer somebody would give.
+  const [form, setForm] = useState<DishForm>(() => ({
+    ...NO_DISH,
+    sectionId: sections[0]?.id ?? '',
+  }));
   const [busy, setBusy] = useState(false);
   const t = useT();
   const toast = useToast();
@@ -193,14 +269,20 @@ export function NewDish({
     try {
       await api.createMenuItem({
         branchId,
-        menuTab: form.menuTab,
+        sectionId: form.sectionId,
+        // Left out when the form says "inherit", which is what `''` means —
+        // sending an empty string would be a category id the API cannot find.
+        ...(form.categoryId === '' ? {} : { categoryId: form.categoryId }),
+        ...(form.isPopular ? { isPopular: true } : {}),
         nameI18n: dishNames(form),
         priceAmd: Number(form.priceAmd.trim()),
         photoUrl: form.photoUrl,
         ...(form.prepMin.trim() === '' ? {} : { prepMin: Number(form.prepMin.trim()) }),
       });
       toast.success(t('newDishAdded', { dish: form.hy.trim() }));
-      setForm(NO_DISH);
+      // Back to empty, but still pointed at a section: the next dish is
+      // usually another one on the same shelf.
+      setForm({ ...NO_DISH, sectionId: form.sectionId });
       // The file input keeps its selection independently of React state, so
       // without this the next dish opens on a form naming the previous one's
       // photograph and a submit button that will not enable.
@@ -228,6 +310,8 @@ export function NewDish({
             upload={upload}
             photoHint={t('newDishPhotoHint')}
             disabled={busy}
+            sections={sections}
+            categories={categories}
           />
         </DialogBody>
 
@@ -244,7 +328,15 @@ export function NewDish({
             // `photoUrl` holds the URL of a file that is already stored, so this
             // waits for the upload to land rather than for a field to be typed
             // into — a dish cannot be added while its picture is still going up.
-            disabled={!dishFormValid(form) || form.photoUrl === '' || upload.uploading}
+            //
+            // The section is here too: a branch with no headings yet has
+            // nowhere to put a dish, and the screen says so above this dialog.
+            disabled={
+              !dishFormValid(form) ||
+              form.sectionId === '' ||
+              form.photoUrl === '' ||
+              upload.uploading
+            }
           >
             {t('newDishSubmit')}
           </Button>
@@ -271,10 +363,14 @@ export function NewDish({
  */
 export function EditDish({
   item,
+  sections,
+  categories,
   onOpenChange,
   onSaved,
 }: {
   item: StaffMenuItem;
+  sections: StaffMenuSection[];
+  categories: CategoryOption[];
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
 }) {
@@ -327,6 +423,8 @@ export function EditDish({
             upload={upload}
             photoHint={t('editDishPhotoHint')}
             disabled={busy}
+            sections={sections}
+            categories={categories}
           />
         </DialogBody>
 

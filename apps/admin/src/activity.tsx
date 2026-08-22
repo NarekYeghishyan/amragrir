@@ -501,12 +501,47 @@ export function headline(t: Translate, entry: ActivityEntry, language: Language)
     case AuditAction.BookingPolicy:
       return t('activity_booking_policy');
 
+    // The shape of a menu, and the vocabulary every menu is indexed by. Named
+    // rather than left to the fallback below because both are edits nobody can
+    // see from a dish row: a heading remapped moves a shelf-worth of food from
+    // one chip to another, and a category retired empties one across the whole
+    // platform.
+    case AuditAction.MenuSectionCreate:
+      return t('activity_menu_section_create', { name: sectionName(t, after, language) });
+
+    case AuditAction.MenuSectionUpdate:
+      return t('activity_menu_section_update', { name: sectionName(t, before, language) });
+
+    case AuditAction.MenuSectionDelete:
+      return t('activity_menu_section_delete', { name: sectionName(t, before, language) });
+
+    case AuditAction.CategoryCreate:
+      return t('activity_category_create', { key: text(after.key) });
+
+    case AuditAction.CategoryUpdate:
+      return after.isActive === false
+        ? t('activity_category_retire', { key: text(before.key) })
+        : t('activity_category_update', { key: text(before.key) });
+
+    case AuditAction.CategoryDelete:
+      return t('activity_category_delete', { key: text(before.key) });
+
     default:
       // An action the API records and this build has no sentence for — a panel
       // deployed behind the API. Showing the raw verb is ugly and honest; the
       // alternative is an entry that silently disappears from an audit trail.
       return t('activityUnknown', { action: entry.action });
   }
+}
+
+/** The same for a menu heading, which is hard-deleted — so `before` is the only
+ *  record of what it was called. */
+function sectionName(t: Translate, fields: Record<string, unknown>, language: Language): string {
+  const raw = fields.nameI18n;
+  if (raw === null || typeof raw !== 'object') {
+    return t('activityUnnamedSection');
+  }
+  return pickLabel(raw as Record<string, string>, language) || t('activityUnnamedSection');
 }
 
 /** A dish's stored `*_i18n` name in the panel's language, or a placeholder — the

@@ -42,8 +42,15 @@ function branchRow(over: Record<string, unknown> = {}) {
   };
 }
 
-function build(rows: ReturnType<typeof branchRow>[], tables: unknown[] = []) {
+function build(
+  rows: ReturnType<typeof branchRow>[],
+  tables: unknown[] = [],
+  /** Rows the windowed dish query answers with — snake_case, since it is raw
+   *  SQL rather than a Prisma model. */
+  cardDishes: unknown[] = [],
+) {
   const findMany = jest.fn().mockResolvedValue(rows);
+  const queryRaw = jest.fn().mockResolvedValue(cardDishes);
   const count = jest.fn().mockResolvedValue(rows.length);
   const tableFindMany = jest.fn().mockResolvedValue(tables);
   // The grouped list counts restaurants, not branches.
@@ -54,7 +61,10 @@ function build(rows: ReturnType<typeof branchRow>[], tables: unknown[] = []) {
     restaurantBranch: { findMany, count, findFirst: jest.fn().mockResolvedValue(rows[0] ?? null) },
     restaurant: { count: restaurantCount },
     menuItem: { findMany: jest.fn().mockResolvedValue([]) },
+    // A menu now answers with the branch's headings as well as its dishes.
+    branchMenuSection: { findMany: jest.fn().mockResolvedValue([]) },
     table: { findMany: tableFindMany },
+    $queryRaw: queryRaw,
   } as unknown as PrismaService;
 
   // Only the price filter reaches the search service, and these fixtures do
@@ -69,6 +79,7 @@ function build(rows: ReturnType<typeof branchRow>[], tables: unknown[] = []) {
     count,
     restaurantCount,
     tableFindMany,
+    queryRaw,
     prisma,
     search,
   };
@@ -106,12 +117,11 @@ describe('RestaurantsService.list', () => {
   /**
    * A row carries both ids, and they are not interchangeable.
    *
-   * `id` is the branch — what a basket is opened against and what the card's
-   * link resolves. `restaurantId` is the business, and it is the one a heart
-   * sends to `POST /favorites`, because that is what a favourite is stored
-   * against (DATABASE.md §13). Asserted separately because the two were the
-   * same field for a long time and a card that favourited a *branch* would have
-   * looked right until a chain's second address appeared.
+   * `id` is the branch — what a basket is opened against, what the card's link
+   * resolves, and what the heart saves (DATABASE.md §13). `restaurantId` is the
+   * business the name, cuisine and rating belong to. Asserted separately
+   * because the two were the same field for a long time, and anything keyed on
+   * the wrong one looks right until a chain's second address appears.
    */
   it('names the branch and the business separately', async () => {
     const base = branchRow();
@@ -327,8 +337,72 @@ describe('RestaurantsService.list', () => {
         // `deletedAt: null` alongside them: a dish taken off the menu must not
         // be why a branch turns up under "vegan", or the search promises
         // something the menu no longer offers.
-        some: { category: { key: 'sushi' }, dietaryTags: { hasSome: ['vegan'] }, deletedAt: null },
+        //
+        // The category is an `OR` because a dish is in one two ways: it says so
+        // itself, or it says nothing and the section it sits under says so.
+        // Matching only the first would hide every restaurant that organised
+        // its menu by shelf instead of tagging dishes one at a time.
+        some: {
+          OR: [
+            { category: { key: 'sushi' } },
+            { categoryId: null, section: { category: { key: 'sushi' } } },
+          ],
+          dietaryTags: { hasSome: ['vegan'] },
+          deletedAt: null,
+        },
       });
+    });
+
+    it('hangs the matching dishes on the card under a category filter', async () => {
+      const { service } = build(
+        [branchRow()],
+        [],
+        [
+          {
+            id: 'dish-1',
+            branch_id: 'branch-1',
+            name_i18n: { hy: 'Ֆիլադելֆիա', ru: 'Филадельфия', en: 'Philadelphia' },
+            price_amd: 4900,
+            photo_url: 'https://cdn.amragrir.am/philadelphia.jpg',
+            section_id: 'section-1',
+          },
+        ],
+      );
+
+      const page = await service.list(query({ category: 'sushi' }), Language.Ru);
+
+      // Name resolved in the reader's language, price beside it, and the
+      // section travelling so the tap can land on the dish rather than on the
+      // top of a menu the guest then has to search.
+      expect(page.items[0]?.dishes).toEqual([
+        {
+          id: 'dish-1',
+          name: 'Филадельфия',
+          priceAmd: 4900,
+          photoUrl: 'https://cdn.amragrir.am/philadelphia.jpg',
+          sectionId: 'section-1',
+        },
+      ]);
+    });
+
+    it('leaves the dishes undefined when no category was asked for', async () => {
+      // The clients read the difference: undefined means "wear the cover",
+      // and an empty array means "the filter is on, everything matching is
+      // sold out tonight" — which is a card still worth showing.
+      const { service, queryRaw } = build([branchRow()]);
+
+      const page = await service.list(query(), Language.Hy);
+
+      expect(page.items[0]?.dishes).toBeUndefined();
+      expect(queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('sends an empty list for a branch whose matches are all sold out', async () => {
+      const { service } = build([branchRow()], [], []);
+
+      const page = await service.list(query({ category: 'sushi' }), Language.Hy);
+
+      expect(page.items[0]?.dishes).toEqual([]);
     });
 
     it('applies no filter when none is requested', async () => {

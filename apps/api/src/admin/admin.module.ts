@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { StaffModule } from '../staff/staff.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
+import { CategoriesAdminService } from './categories.service';
 import { MetricsService } from './metrics.service';
 
 /** StaffModule is imported for InvitesService — creating a restaurant invites
@@ -10,6 +11,6 @@ import { MetricsService } from './metrics.service';
 @Module({
   imports: [StaffModule],
   controllers: [AdminController],
-  providers: [AdminService, MetricsService],
+  providers: [AdminService, MetricsService, CategoriesAdminService],
 })
 export class AdminModule {}

@@ -1,4 +1,4 @@
-import type { Language } from '@amragrir/shared';
+import { CATEGORY_KEY_PATTERN, type Language } from '@amragrir/shared';
 import type { TranslationKey } from '@amragrir/i18n';
 import { homePath } from './site';
 
@@ -83,6 +83,16 @@ export interface FilterState {
   sort?: string;
   /** A subset of the service values, in chip order (so the URL is canonical). */
   services: string[];
+  /**
+   * A platform category key from the rail — `sushi`, `pizza`.
+   *
+   * Part of the filter state rather than a parameter of its own, so that every
+   * link the page builds carries it: pressing "Open now" under a lit category
+   * must not silently drop the category. It also decides what the cards look
+   * like — a filtered card wears the matching dishes instead of its cover
+   * (BUSINESS_LOGIC.md §6).
+   */
+  category?: string;
 }
 
 /** Next hands a param as `string | string[] | undefined`; take the first. */
@@ -101,16 +111,26 @@ export function parseFilters(
   const openNowRaw = first(searchParams.openNow);
   const sortRaw = first(searchParams.sort);
   const serviceRaw = first(searchParams.service);
+  const categoryRaw = first(searchParams.category);
 
   return {
     openNow: openNowRaw === '1' || openNowRaw === 'true',
     sort: sortRaw && SORT_VALUES.has(sortRaw) ? sortRaw : undefined,
     services: serviceRaw ? canonicalServices(serviceRaw.split(',').map((s) => s.trim())) : [],
+    // Not checked against the live rail here: this runs on every home render
+    // and the categories are a database read. A key that names nothing simply
+    // matches no dish, which is the same empty listing by a shorter route.
+    category: categoryRaw && CATEGORY_KEY_PATTERN.test(categoryRaw) ? categoryRaw : undefined,
   };
 }
 
 export function hasAnyFilter(state: FilterState): boolean {
-  return state.openNow || state.sort !== undefined || state.services.length > 0;
+  return (
+    state.openNow ||
+    state.sort !== undefined ||
+    state.services.length > 0 ||
+    state.category !== undefined
+  );
 }
 
 export function isActive(state: FilterState, chip: FilterChip): boolean {
@@ -149,6 +169,9 @@ function serialize(state: FilterState): string {
   if (state.services.length > 0) {
     params.set('service', state.services.join(','));
   }
+  if (state.category) {
+    params.set('category', state.category);
+  }
   return params.toString();
 }
 
@@ -182,5 +205,17 @@ export function toApiQuery(state: FilterState): Record<string, string | undefine
     openNow: state.openNow ? '1' : undefined,
     sort: state.sort,
     service: state.services.length > 0 ? state.services.join(',') : undefined,
+    category: state.category,
   };
+}
+
+/**
+ * The listing under a category, with the rest of the filters kept.
+ *
+ * Pressing the lit one clears it, the way every chip on this page behaves — a
+ * rail with no way back out is a filter somebody has to delete from the address
+ * bar.
+ */
+export function categoryHref(state: FilterState, key: string, language: Language): string {
+  return homeHref({ ...state, category: state.category === key ? undefined : key }, language);
 }

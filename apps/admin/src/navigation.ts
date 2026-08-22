@@ -96,6 +96,20 @@ export const TABS = [
     description: 'customersDesc',
   },
   {
+    // The platform's category vocabulary. Sits in the platform group and needs
+    // `categories:write`, which only `super_admin` holds — so for everybody
+    // else, including a platform admin doing support, the tab is not there
+    // rather than there and refusing.
+    name: 'Categories',
+    path: '/categories',
+    needs: Permission.CategoriesWrite,
+    group: 'platform',
+    icon: 'categories',
+    label: 'navCategories',
+    title: 'categoriesTitle',
+    description: 'categoriesDesc',
+  },
+  {
     name: 'Platform',
     path: '/platform',
     needs: Permission.RestaurantCreate,

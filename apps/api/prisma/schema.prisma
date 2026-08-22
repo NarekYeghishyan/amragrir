@@ -118,13 +118,6 @@ enum PaymentStatus {
   cancelled
 }
 
-enum MenuTab {
-  popular
-  mains
-  sides
-  drinks
-}
-
 enum NotificationType {
   order
   reservation
@@ -314,9 +307,11 @@ model RestaurantBranch {
 
   restaurant    Restaurant          @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   tables        Table[]
+  menuSections  BranchMenuSection[]
   menuItems     MenuItem[]
   orders        Order[]
   reservations  Reservation[]
+  favorites     Favorite[]
   assignments   StaffAssignment[]
   invites       StaffInvite[]
   auditEntries  AuditLog[]
@@ -450,23 +445,90 @@ model Table {
   @@map("tables")
 }
 
+/// The platform's own vocabulary of food — "Pizza", "Sushi", "Healthy".
+///
+/// **This is the city's index, not a restaurant's menu.** It is what the chip
+/// rail on the home screen offers, what `?category=` filters by and what a
+/// guest reasons in before they have picked a place. That is why the list is
+/// closed and platform-owned: only `categories:write` (super admin) may add to
+/// it, so it cannot fill up with "Пицца", "ПИЦЦА" and "Pizza 🍕" as three
+/// separate ways to find the same dinner. How a branch *lays out* its own menu
+/// is the other axis entirely — `branch_menu_sections`.
 model Category {
-  id        String  @id @default(uuid()) @db.Uuid
-  key       String  @unique @db.VarChar(40)
-  icon      String? @db.VarChar(8)
-  sortOrder Int?    @map("sort_order") @db.SmallInt
-  nameI18n  Json    @map("name_i18n")
+  id        String   @id @default(uuid()) @db.Uuid
+  /// The API contract and the deep link. Renaming a category never touches it:
+  /// `name_i18n` is the shop window, this is the address.
+  key       String   @unique @db.VarChar(40)
+  icon      String?  @db.VarChar(8)
+  sortOrder Int?     @map("sort_order") @db.SmallInt
+  nameI18n  Json     @map("name_i18n")
+  /// Off the rail without being deleted. A category that dishes point at cannot
+  /// be removed — deleting it would orphan them out of every filter — so
+  /// retiring one is this flag, and the dishes keep their category until their
+  /// restaurant moves them.
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   menuItems MenuItem[]
+  sections  BranchMenuSection[]
 
   @@map("categories")
+}
+
+/// One heading on one branch's menu page — "Mains", "Сеты", "Խորոված".
+///
+/// The branch's own vocabulary, which is why it is a table per branch and not
+/// an enum: `menu_tab` used to be one, fixed at four values, and a kitchen
+/// whose menu names five things had nowhere to put the fifth.
+///
+/// `category_id` is the bridge to the other axis. A section that answers "this
+/// whole shelf is pizza" gives every dish under it a platform category for
+/// free; a section like "Сеты" that answers nothing leaves each dish to name
+/// its own. Between the two, no dish ends up invisible to the city's filters —
+/// which is exactly what `menu_items.category_id` being optional and unset used
+/// to do, silently.
+model BranchMenuSection {
+  id         String   @id @default(uuid()) @db.Uuid
+  branchId   String   @map("branch_id") @db.Uuid
+  /// The platform category every dish here inherits, or NULL for a section that
+  /// does not map onto one. See `effectiveCategoryId` in `@amragrir/shared`.
+  categoryId String?  @map("category_id") @db.Uuid
+  nameI18n   Json     @map("name_i18n")
+  sortOrder  Int      @default(0) @map("sort_order") @db.SmallInt
+  /// Removed from the menu without leaving the database, for the same reason
+  /// `menu_items.deleted_at` exists: withdrawn dishes still point here, and
+  /// `order_items` still point at them. A heading emptied of live dishes can
+  /// always be retired; one still holding food is refused until it is moved.
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch   RestaurantBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  category Category?        @relation(fields: [categoryId], references: [id])
+  items    MenuItem[]
+
+  @@index([branchId, sortOrder])
+  @@index([categoryId])
+  @@map("branch_menu_sections")
 }
 
 model MenuItem {
   id           String    @id @default(uuid()) @db.Uuid
   branchId     String    @map("branch_id") @db.Uuid
+  /// The dish's own platform category, which **overrides** its section's. Left
+  /// NULL the dish inherits (the common case). Set, it is the escape hatch for
+  /// the salad on a grill house's "Мангал" shelf.
   categoryId   String?   @map("category_id") @db.Uuid
-  menuTab      MenuTab   @map("menu_tab")
+  /// Which heading on this branch's page the dish sits under. Required: a dish
+  /// that belongs to no section is a dish nobody can find on the menu it is
+  /// printed on.
+  sectionId    String    @map("section_id") @db.Uuid
+  /// On the "Popular" shelf, which is a *showcase* and not a section — a dish
+  /// is popular **as well as** being pizza, never instead of it. It was a fifth
+  /// value of the old `menu_tab` enum, which forced exactly that false choice
+  /// and hid every bestseller from the category it actually belongs to.
+  isPopular    Boolean   @default(false) @map("is_popular")
   nameI18n     Json      @map("name_i18n")
   descI18n     Json?     @map("desc_i18n")
   priceAmd     Int       @map("price_amd")
@@ -487,11 +549,16 @@ model MenuItem {
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  branch     RestaurantBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  category   Category?        @relation(fields: [categoryId], references: [id])
+  branch     RestaurantBranch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  category   Category?         @relation(fields: [categoryId], references: [id])
+  /// Restrict, not cascade: deleting a section must never delete the food. The
+  /// panel moves the dishes first, or the delete is refused.
+  section    BranchMenuSection @relation(fields: [sectionId], references: [id], onDelete: Restrict)
   orderItems OrderItem[]
+  favorites  FavoriteMenuItem[]
 
-  @@index([branchId, menuTab])
+  @@index([branchId, sectionId])
+  @@index([sectionId])
   @@index([categoryId])
   @@map("menu_items")
 }

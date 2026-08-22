@@ -78,6 +78,17 @@ export const Permission = {
   StaffImpersonate: 'staff:impersonate',
   /** Platform settings: fees, deposits, rates. */
   SettingsWrite: 'settings:write',
+  /**
+   * Edit the platform's category vocabulary — the chips on the home screen.
+   *
+   * Super admin only, and deliberately not part of `platform:metrics` or the
+   * support bundle. Every restaurant on the platform is indexed by this list;
+   * adding "Пицца" beside "Pizza" splits a chip's traffic in two and nothing in
+   * the product will report that it happened. It is a decision about the
+   * catalogue itself, which is why it sits up here with the other seats that
+   * answer to nobody rather than with `menu:write`.
+   */
+  CategoriesWrite: 'categories:write',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 
@@ -174,6 +185,7 @@ const SUPER_ADMIN: readonly Permission[] = [
   Permission.PlatformStaff,
   Permission.StaffImpersonate,
   Permission.SettingsWrite,
+  Permission.CategoriesWrite,
 ];
 
 export const ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly Permission[]>> = {

@@ -1,4 +1,4 @@
-import { Language, MenuTab } from '@amragrir/shared';
+import { Language } from '@amragrir/shared';
 import type { MenuItemPatch, StaffMenuItem } from './api';
 
 /**
@@ -26,20 +26,34 @@ export interface DishForm {
   priceAmd: string;
   /** `''` is "does not say", which is a real answer and not a missing one. */
   prepMin: string;
-  menuTab: MenuTab;
+  /** Which of the branch's headings the dish sits under. `''` only while the
+   *  form is open on a branch whose sections have not loaded yet. */
+  sectionId: string;
+  /**
+   * The dish's **own** category, overriding its section's. `''` is "inherit",
+   * which is what nearly every dish should say.
+   *
+   * Needed when the section maps to no category — the API refuses a dish that
+   * would end up in none, since no chip on the home screen would lead to it.
+   */
+  categoryId: string;
+  isPopular: boolean;
   /** The URL of a photograph **already stored** by the upload endpoint, or `''`
    *  for a dish that has none yet. */
   photoUrl: string;
 }
 
-/** An empty form — what "Add a dish" opens on. */
+/** An empty form — what "Add a dish" opens on. The section is filled in by the
+ *  screen, which knows which headings this branch has. */
 export const NO_DISH: DishForm = {
   hy: '',
   ru: '',
   en: '',
   priceAmd: '',
   prepMin: '',
-  menuTab: MenuTab.Mains,
+  sectionId: '',
+  categoryId: '',
+  isPopular: false,
   photoUrl: '',
 };
 
@@ -52,7 +66,9 @@ export function dishForm(item: StaffMenuItem): DishForm {
     en: item.nameI18n[Language.En] ?? '',
     priceAmd: String(item.priceAmd),
     prepMin: item.prepMin === null ? '' : String(item.prepMin),
-    menuTab: item.menuTab,
+    sectionId: item.sectionId,
+    categoryId: item.categoryId ?? '',
+    isPopular: item.isPopular,
     photoUrl: item.photoUrl ?? '',
   };
 }
@@ -140,8 +156,21 @@ export function dishPatch(item: StaffMenuItem, form: DishForm): MenuItemPatch | 
     patch.prepMin = prepMin;
   }
 
-  if (form.menuTab !== item.menuTab) {
-    patch.menuTab = form.menuTab;
+  if (form.sectionId !== '' && form.sectionId !== item.sectionId) {
+    patch.sectionId = form.sectionId;
+  }
+
+  // `''` in the form is "inherit from the section", which the API spells
+  // `null`. The two have to be distinguished here rather than conflated: the
+  // dish having no category of its own is a real state, and sending `undefined`
+  // would leave a stale override in place.
+  const categoryId = form.categoryId === '' ? null : form.categoryId;
+  if (categoryId !== item.categoryId) {
+    patch.categoryId = categoryId;
+  }
+
+  if (form.isPopular !== item.isPopular) {
+    patch.isPopular = form.isPopular;
   }
 
   // Never `''`, which is what the field holds while an upload is still running

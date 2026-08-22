@@ -2464,6 +2464,46 @@ p {
   display: grid;
   gap: var(--space-md);
 }
+.stack--tight {
+  gap: var(--space-sm);
+}
+
+/* One menu heading in the sections dialog: the two fields that define it on the
+   left, the count and the controls on the right. It wraps rather than shrinking
+   the selects — a category name squeezed to four characters is not a control
+   somebody can use. */
+.section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--line);
+}
+.section-row__main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex: 1;
+  min-width: 220px;
+}
+.section-row__main > * {
+  flex: 1;
+  min-width: 0;
+}
+.section-new {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--line);
+}
+
+/* An emoji field is one character wide whatever the layout around it says. */
+.input--emoji {
+  width: 4.5rem;
+  flex: none;
+  text-align: center;
+}
 .grow {
   flex: 1;
   min-width: 0;

@@ -132,6 +132,15 @@ export function menuScope(
   return branchChildScope(scopes, permission) as Prisma.MenuItemWhereInput;
 }
 
+/** The headings a menu is laid out in — same reach as the dishes under them,
+ *  since anyone who may edit a branch's menu may edit its shape. */
+export function menuSectionScope(
+  scopes: readonly StaffScope[],
+  permission: Permission,
+): Prisma.BranchMenuSectionWhereInput {
+  return branchChildScope(scopes, permission) as Prisma.BranchMenuSectionWhereInput;
+}
+
 /** Restaurants the caller may act on — for restaurant-level settings and for
  *  deciding where a new branch may be created. */
 export function restaurantScope(

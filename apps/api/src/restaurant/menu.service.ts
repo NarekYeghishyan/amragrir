@@ -6,14 +6,14 @@ import {
   RestaurantService,
   canonicalServices,
   checkServices,
+  effectiveCategoryId,
   resolveBranchOffering,
-  type MenuTab,
   type ServiceBreach,
 } from '@amragrir/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { changedFields } from '../audit/audit';
-import { LIVE_MENU_ITEM } from '../common/menu-visibility';
+import { LIVE_MENU_ITEM, LIVE_MENU_SECTION } from '../common/menu-visibility';
 import type { StaffJwtPayload } from '../staff/staff-token.service';
 import { branchScope, menuScope, restaurantScope } from '../staff/scope';
 import {
@@ -42,8 +42,21 @@ import {
 export interface StaffMenuItem {
   id: string;
   branchId: string;
+  /** What this dish says about itself — `null` means it inherits. The panel
+   *  edits this one. */
   categoryId: string | null;
-  menuTab: MenuTab;
+  /**
+   * What the catalogue will actually index it under: its own category, or its
+   * section's.
+   *
+   * Sent beside the raw field rather than instead of it, because the panel has
+   * to draw two different things — the value somebody may change, and the
+   * consequence of leaving it alone. `null` here is the state worth warning
+   * about: a dish no chip on the home screen leads to.
+   */
+  effectiveCategoryId: string | null;
+  sectionId: string;
+  isPopular: boolean;
   nameI18n: Record<string, string>;
   descI18n: Record<string, string> | null;
   priceAmd: number;
@@ -183,7 +196,9 @@ const MENU_AUDIT_SELECT = {
   id: true,
   branchId: true,
   categoryId: true,
-  menuTab: true,
+  sectionId: true,
+  isPopular: true,
+  section: { select: { categoryId: true } },
   nameI18n: true,
   descI18n: true,
   priceAmd: true,
@@ -673,13 +688,17 @@ export class MenuService {
       // Narrows the scope, never replaces it.
       where.branchId = query.branchId;
     }
-    if (query.menuTab) {
-      where.menuTab = query.menuTab;
+    if (query.sectionId) {
+      where.sectionId = query.sectionId;
     }
 
     const items = await this.prisma.menuItem.findMany({
       where,
-      orderBy: [{ menuTab: 'asc' }, { priceAmd: 'asc' }],
+      include: { section: { select: { categoryId: true } } },
+      // The branch's own order, so the panel's list reads down the page the way
+      // the menu does. Sections of different branches interleave under a
+      // shared `sort_order`, which is why the branch is the first key.
+      orderBy: [{ branchId: 'asc' }, { section: { sortOrder: 'asc' } }, { priceAmd: 'asc' }],
     });
 
     return { items: items.map(toStaffMenuItem) };
@@ -692,6 +711,8 @@ export class MenuService {
       Permission.MenuWrite,
     );
     await this.assertCategoryExists(dto.categoryId);
+    const section = await this.loadSectionOfBranch(dto.sectionId, dto.branchId);
+    this.assertHasCategory(dto.categoryId ?? null, section.categoryId);
 
     const { branchId, categoryId, nameI18n, descI18n, ...rest } = dto;
     const name = stripEmpty(nameI18n);
@@ -706,6 +727,7 @@ export class MenuService {
           descI18n: descI18n ? stripEmpty(descI18n) : Prisma.DbNull,
           dietaryTags: dto.dietaryTags ?? [],
         },
+        include: { section: { select: { categoryId: true } } },
       });
 
       // In the transaction that created it, like every other entry: a dish that
@@ -717,7 +739,7 @@ export class MenuService {
         scope: { restaurantId, branchId },
         // No `before` — there was no dish. `after` carries what the feed needs
         // to name it and the price it went on the menu at.
-        after: { nameI18n: name, priceAmd: created.priceAmd, menuTab: created.menuTab },
+        after: { nameI18n: name, priceAmd: created.priceAmd, sectionId: created.sectionId },
       });
 
       return created;
@@ -737,9 +759,25 @@ export class MenuService {
     const current = await this.load(staff, id, Permission.MenuWrite);
     await this.assertCategoryExists(dto.categoryId ?? undefined);
 
-    const { nameI18n, descI18n, categoryId, ...rest } = dto;
+    // Both halves of the inheritance are checked against what the dish will be
+    // *after* this PATCH, not what it is now: moving a pizza onto a "Сеты"
+    // shelf and clearing its own category are each harmless alone and leave it
+    // uncategorised together.
+    const section =
+      dto.sectionId !== undefined
+        ? await this.loadSectionOfBranch(dto.sectionId, current.branchId)
+        : current.section;
+    this.assertHasCategory(
+      dto.categoryId !== undefined ? dto.categoryId : current.categoryId,
+      section.categoryId,
+    );
+
+    const { nameI18n, descI18n, categoryId, sectionId, ...rest } = dto;
     const data: Prisma.MenuItemUpdateInput = { ...rest };
 
+    if (sectionId !== undefined) {
+      data.section = { connect: { id: sectionId } };
+    }
     if (nameI18n) {
       data.nameI18n = stripEmpty(nameI18n);
     }
@@ -758,7 +796,8 @@ export class MenuService {
     const changed = changedFields(
       {
         categoryId: current.categoryId,
-        menuTab: current.menuTab,
+        sectionId: current.sectionId,
+        isPopular: current.isPopular,
         nameI18n: current.nameI18n,
         descI18n: current.descI18n,
         priceAmd: current.priceAmd,
@@ -771,13 +810,18 @@ export class MenuService {
       {
         ...rest,
         ...(categoryId !== undefined ? { categoryId } : {}),
+        ...(sectionId !== undefined ? { sectionId } : {}),
         ...(nameI18n ? { nameI18n: stripEmpty(nameI18n) } : {}),
         ...(descI18n !== undefined ? { descI18n: stripEmpty(descI18n) } : {}),
       },
     );
 
     const item = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.menuItem.update({ where: { id }, data });
+      const updated = await tx.menuItem.update({
+        where: { id },
+        data,
+        include: { section: { select: { categoryId: true } } },
+      });
 
       if (changed) {
         await this.audit.record(tx, staff, {
@@ -815,7 +859,10 @@ export class MenuService {
     // and a shift tapping a stuck button four times should not fill somebody's
     // activity with four identical rows.
     if (current.isAvailable === dto.isAvailable) {
-      const unchanged = await this.prisma.menuItem.findUniqueOrThrow({ where: { id } });
+      const unchanged = await this.prisma.menuItem.findUniqueOrThrow({
+        where: { id },
+        include: { section: { select: { categoryId: true } } },
+      });
       return toStaffMenuItem(unchanged);
     }
 
@@ -823,6 +870,7 @@ export class MenuService {
       const updated = await tx.menuItem.update({
         where: { id },
         data: { isAvailable: dto.isAvailable },
+        include: { section: { select: { categoryId: true } } },
       });
 
       // Its own action rather than a `menu_item.update` carrying one field. A
@@ -998,6 +1046,44 @@ export class MenuService {
       throw new NotFoundException('Category not found');
     }
   }
+
+  /**
+   * The section, proven to belong to the branch the dish does.
+   *
+   * The pair is checked together rather than the id alone: section ids are
+   * uuids from a table every branch shares, so filing a dish under somebody
+   * else's heading is one copied id away, and the foreign key would happily
+   * accept it. It would then appear on that restaurant's menu.
+   */
+  private async loadSectionOfBranch(
+    sectionId: string,
+    branchId: string,
+  ): Promise<{ categoryId: string | null }> {
+    const section = await this.prisma.branchMenuSection.findFirst({
+      where: { id: sectionId, branchId, ...LIVE_MENU_SECTION },
+      select: { categoryId: true },
+    });
+    if (!section) {
+      throw new NotFoundException('Menu section not found');
+    }
+    return section;
+  }
+
+  /**
+   * A dish has to end up in some platform category, one way or the other.
+   *
+   * This is the rule the old schema had no way to state, and the reason a
+   * restaurant could type in a whole menu that no chip on the home screen led
+   * to — silently, with nothing to see in the panel and nothing to report. The
+   * cheapest fix is a shelf that names a category, so the message says so.
+   */
+  private assertHasCategory(own: string | null, sectionCategoryId: string | null): void {
+    if (effectiveCategoryId({ categoryId: own }, { categoryId: sectionCategoryId }) === null) {
+      throw new UnprocessableEntityException(
+        'This dish would belong to no category, so nobody browsing the app could find it — give it one, or map its menu section to a category',
+      );
+    }
+  }
 }
 
 /**
@@ -1100,7 +1186,9 @@ function toStaffMenuItem(item: {
   id: string;
   branchId: string;
   categoryId: string | null;
-  menuTab: string;
+  sectionId: string;
+  isPopular: boolean;
+  section: { categoryId: string | null };
   nameI18n: Prisma.JsonValue;
   descI18n: Prisma.JsonValue;
   priceAmd: number;
@@ -1114,7 +1202,9 @@ function toStaffMenuItem(item: {
     id: item.id,
     branchId: item.branchId,
     categoryId: item.categoryId,
-    menuTab: item.menuTab as MenuTab,
+    effectiveCategoryId: effectiveCategoryId(item, item.section),
+    sectionId: item.sectionId,
+    isPopular: item.isPopular,
     nameI18n: (item.nameI18n ?? {}) as Record<string, string>,
     descI18n: (item.descI18n ?? null) as Record<string, string> | null,
     priceAmd: item.priceAmd,

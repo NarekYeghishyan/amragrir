@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactNode } from 'react';
-import { Language, MenuTab, OrderStatus } from '@amragrir/shared';
+import { Language, OrderStatus } from '@amragrir/shared';
 import { LanguageProvider } from './i18n';
 import { createTranslator } from './language';
 import { ActAsButton } from './acting';
@@ -14,7 +14,14 @@ import { NotificationBell } from './notifications';
 import { OrderQrDialog, QrPlate } from './order-qr';
 import type { PhotoUpload } from './photo';
 import { Pagination, ToastProvider, TooltipProvider } from './ui';
-import type { StaffBranch, StaffMenuItem, StaffOrder, StaffReservation } from './api';
+import type {
+  CategoryOption,
+  StaffBranch,
+  StaffMenuItem,
+  StaffMenuSection,
+  StaffOrder,
+  StaffReservation,
+} from './api';
 import { BookingCard, Bookings } from './screens/Bookings';
 import { Orders } from './screens/Orders';
 import { Menu } from './screens/Menu';
@@ -234,7 +241,9 @@ describe('editing a dish', () => {
     id: 'd1',
     branchId: 'b1',
     categoryId: null,
-    menuTab: MenuTab.Mains,
+    effectiveCategoryId: 'cat-grill',
+    sectionId: 'sec-1',
+    isPopular: false,
     nameI18n: { hy: 'Խորոված', en: 'Barbecue' },
     descI18n: null,
     priceAmd: 5800,
@@ -254,6 +263,23 @@ describe('editing a dish', () => {
     choose: () => Promise.resolve(),
   };
 
+  /** The branch's one heading, mapped to a category — so the form's category
+   *  select opens on "inherit" rather than on the warning. */
+  const SECTIONS: StaffMenuSection[] = [
+    {
+      id: 'sec-1',
+      branchId: 'b1',
+      categoryId: 'cat-grill',
+      nameI18n: { hy: 'Խորոված', en: 'Grill' },
+      sortOrder: 0,
+      itemCount: 1,
+    },
+  ];
+
+  const CATEGORIES: CategoryOption[] = [
+    { id: 'cat-grill', key: 'grill', icon: '🔥', name: 'Grill' },
+  ];
+
   const fields = (item: StaffMenuItem = DISH): string =>
     render(
       <DishFields
@@ -262,6 +288,8 @@ describe('editing a dish', () => {
         upload={IDLE}
         photoHint="Replaces the picture customers see"
         disabled={false}
+        sections={SECTIONS}
+        categories={CATEGORIES}
       />,
     );
 
@@ -272,7 +300,15 @@ describe('editing a dish', () => {
     // a static render does not have, so an open dialog reaches the markup as
     // nothing at all. Hence the fields being rendered on their own below.
     expect(() =>
-      render(<EditDish item={DISH} onOpenChange={() => undefined} onSaved={() => undefined} />),
+      render(
+        <EditDish
+          item={DISH}
+          sections={SECTIONS}
+          categories={CATEGORIES}
+          onOpenChange={() => undefined}
+          onSaved={() => undefined}
+        />,
+      ),
     ).not.toThrow();
   });
 

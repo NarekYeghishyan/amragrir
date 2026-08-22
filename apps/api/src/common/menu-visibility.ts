@@ -21,3 +21,17 @@
  * to import from another's folder to ask a question this basic.
  */
 export const LIVE_MENU_ITEM = { deletedAt: null } as const;
+
+/**
+ * The same, for the headings the dishes sit under.
+ *
+ * `branch_menu_sections` is soft-deleted for the same reason and with the same
+ * consequence: a withdrawn dish still points at its section, so the row cannot
+ * leave, and every read that draws a menu has to say it wants the live ones.
+ *
+ * Note what this does **not** do: filtering sections does not filter the dishes
+ * under them. A retired section can only be retired once it holds no live dish
+ * (`MenuSectionsService.remove`), which is what keeps the two consistent
+ * without every menu query having to join.
+ */
+export const LIVE_MENU_SECTION = { deletedAt: null } as const;

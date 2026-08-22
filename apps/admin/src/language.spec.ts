@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Language, MenuTab, OrderStatus, PaymentStatus, StaffRole } from '@amragrir/shared';
+import { Language, OrderStatus, PaymentStatus, StaffRole } from '@amragrir/shared';
 import { adminDictionaries } from '@amragrir/i18n/admin';
 import { createTranslator } from './language';
 
@@ -67,13 +67,10 @@ describe('status labels', () => {
     }
   });
 
-  it('names every payment status, menu tab and staff role', () => {
+  it('names every payment status and staff role', () => {
     const t = createTranslator(Language.Ru);
     for (const status of Object.values(PaymentStatus)) {
       expect(t(`paymentStatus_${status}`)).not.toBe(`paymentStatus_${status}`);
-    }
-    for (const tab of Object.values(MenuTab)) {
-      expect(t(`menuTab_${tab}`)).not.toBe(`menuTab_${tab}`);
     }
     for (const role of Object.values(StaffRole)) {
       expect(t(`staffRole_${role}`)).not.toBe(`staffRole_${role}`);
