@@ -7,7 +7,17 @@ import type { Translate } from './language';
 import { routePath } from './navigation';
 import { watchNotifications } from './order-stream';
 import { Link } from './router';
-import { Badge, Banner, Dialog, DialogBody, EmptyState, Icon, Skeleton } from './ui';
+import { Badge, Banner, Dialog, DialogBody, EmptyState, Icon, Skeleton, Switch } from './ui';
+import {
+  alertState,
+  armChime,
+  chimeEnabled,
+  playChime,
+  raiseAlert,
+  requestAlerts,
+  setChimeEnabled,
+  type AlertState,
+} from './alerts';
 
 /**
  * The back office's bell.
@@ -134,12 +144,81 @@ export function unreadIds(items: readonly StaffNotification[]): string[] {
   return items.filter((item) => !item.read).map((item) => item.id);
 }
 
+/**
+ * The rows that arrived since the last read, and that nobody has seen.
+ *
+ * `read` is part of it, not an afterthought: the list is re-read on a timer and
+ * on every socket frame, and a row somebody has already opened the bell on must
+ * not chime again because a poll happened to return it. Extracted so the noise
+ * a kitchen hears can be reasoned about without a browser.
+ */
+export function freshNotifications(
+  seen: ReadonlySet<string>,
+  items: readonly StaffNotification[],
+): StaffNotification[] {
+  return items.filter((item) => !seen.has(item.id) && !item.read);
+}
+
 export function NotificationBell({ t }: { t: Translate }) {
   const { language } = useLanguage();
   const [items, setItems] = useState<StaffNotification[] | null>(null);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<AlertState>('unsupported');
+  const [sound, setSound] = useState(true);
+
+  // Read once, on the client: both answers come from the browser, and this
+  // panel is a Vite SPA whose first render is already in one.
+  useEffect(() => {
+    setAlerts(alertState());
+    setSound(chimeEnabled());
+  }, []);
+
+  // A tab can be signed into and then left alone, so the gesture that unlocks
+  // audio has to be whichever one comes first.
+  useEffect(() => armChime(), []);
+
+  /**
+   * The ids this reader has already been told about.
+   *
+   * Null until the first read, which is the baseline rather than news: opening
+   * the panel at the start of a shift must not sound a chime for every reminder
+   * of the last one. Replaced wholesale on each read, so it stays the size of
+   * the list rather than growing all shift.
+   */
+  const announced = useRef<ReadonlySet<string> | null>(null);
+
+  const announce = useCallback(
+    (rows: StaffNotification[]): void => {
+      const seen = announced.current;
+      announced.current = new Set(rows.map((row) => row.id));
+
+      if (seen === null) {
+        return;
+      }
+
+      const fresh = freshNotifications(seen, rows);
+      if (fresh.length === 0) {
+        return;
+      }
+
+      // One chime however many arrived at once — three reminders landing
+      // together are one thing to look up for.
+      playChime();
+
+      for (const item of fresh) {
+        raiseAlert({
+          title: notificationHeadline(t, item),
+          body: notificationDetail(t, item, language) ?? '',
+          // Per order, so a second reminder for one order replaces the first
+          // rather than stacking beside it.
+          tag: item.orderId ?? item.id,
+        });
+      }
+    },
+    [t, language],
+  );
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -147,11 +226,14 @@ export function NotificationBell({ t }: { t: Translate }) {
       setItems(result.items);
       setUnread(result.unread);
       setError(null);
+      // After the state, not before: what is announced is what a reader could
+      // now find on screen.
+      announce(result.items);
     } catch (err) {
       setItems((current) => current ?? []);
       setError(errorText(t, err, 'errorLoadNotifications'));
     }
-  }, [t]);
+  }, [t, announce]);
 
   useEffect(() => {
     void load();
@@ -220,6 +302,37 @@ export function NotificationBell({ t }: { t: Translate }) {
     >
       <DialogBody>
         {error !== null && <Banner>{error}</Banner>}
+
+        <div className="bells__alerts">
+          <label className="bells__sound" htmlFor="bell-sound">
+            <Switch
+              id="bell-sound"
+              checked={sound}
+              onCheckedChange={(next) => {
+                setSound(next);
+                setChimeEnabled(next);
+              }}
+              ariaLabel={t('notificationsSound')}
+            />
+            <span>{t('notificationsSound')}</span>
+          </label>
+
+          {/* Offered only where pressing it can do something. `denied` is
+              permanent from here — nothing this panel does can re-ask — and
+              `unsupported` is a browser without the API at all. */}
+          {alerts === 'default' && (
+            <button
+              type="button"
+              className="bells__allow"
+              onClick={() => void requestAlerts().then(setAlerts)}
+            >
+              {t('notificationsEnableAlerts')}
+            </button>
+          )}
+          {alerts === 'granted' && (
+            <span className="bells__allowed">{t('notificationsAlertsOn')}</span>
+          )}
+        </div>
 
         {items === null ? (
           <Skeleton count={3} height={56} />

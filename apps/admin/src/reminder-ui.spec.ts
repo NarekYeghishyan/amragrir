@@ -222,3 +222,60 @@ describe('the bell', () => {
     expect(unreadIds(items)).toEqual(['n1']);
   });
 });
+
+describe('a table waiting to be accepted', () => {
+  /**
+   * The booking half of the same rule the placed-order row states: a branch is
+   * interrupted for work with a person waiting on an answer.
+   */
+
+  const booking = (over: Partial<StaffNotification> = {}): StaffNotification => ({
+    id: 'n9',
+    type: StaffNotificationType.BookingPlaced,
+    branchId: 'b1',
+    orderId: null,
+    payload: {
+      reservationId: 'res-1',
+      reservedFor: '2026-08-23T19:00:00.000Z',
+      guests: 4,
+      serviceDate: '2026-08-23',
+    },
+    createdAt: '2026-08-22T11:00:00.000Z',
+    read: false,
+    ...over,
+  });
+
+  it('names the party rather than a reference', () => {
+    // A shift deciding whether to take a table is deciding about four people at
+    // eight, not about an id it would have to look up.
+    const headline = notificationHeadline(t, booking());
+
+    expect(headline).toContain('4');
+  });
+
+  it('falls back to the nameless line when the row records no party', () => {
+    const bare = booking({ payload: { reservationId: 'res-1' } });
+
+    expect(notificationHeadline(t, bare)).toBe('A table is waiting to be accepted');
+  });
+
+  it('links to the book on the evening the table belongs to', () => {
+    // The service date, not the calendar date of `reservedFor`: a table at 00:30
+    // belongs to the night still going on, and the calendar date would open
+    // tomorrow's empty page.
+    const href = notificationHref(booking());
+
+    expect(href).toContain('2026-08-23');
+    expect(href).toContain('b1');
+  });
+
+  it('links nowhere when the row records no evening', () => {
+    expect(notificationHref(booking({ payload: { reservationId: 'res-1' } }))).toBeNull();
+  });
+
+  it('says when the table is for', () => {
+    const detail = notificationDetail(t, booking(), Language.En);
+
+    expect(detail).not.toBeNull();
+  });
+});

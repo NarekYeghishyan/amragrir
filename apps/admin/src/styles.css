@@ -210,6 +210,40 @@ p {
 }
 
 /* One thing a branch has been told. */
+/* How this shift is reached when nobody is watching the panel: the row across
+   the top of the bell, above the list it governs. Sound is the control a
+   kitchen actually uses, so it sits first and needs no permission; the desktop
+   button appears only while pressing it can still do something. */
+.bells__alerts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--line);
+}
+.bells__sound {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--ink2);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.bells__allow {
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.bells__allow:hover {
+  text-decoration: underline;
+}
+.bells__allowed {
+  color: var(--ink3);
+  font-size: 12.5px;
+}
+
 .bells {
   display: grid;
   gap: var(--space-sm);
