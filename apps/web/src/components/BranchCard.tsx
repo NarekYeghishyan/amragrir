@@ -78,11 +78,11 @@ interface Props {
    * one press away from being the wrong one. So the same card draws a heart on
    * `/cart` and none on `/checkout`.
    *
-   * Carries `restaurantId` because a favourite is stored against the business
-   * while everything else on this card is per-branch (see above).
+   * Carries `branchId`, like everything else on this card: a favourite is one
+   * address (DATABASE.md §13), and this card is about one address.
    */
   favorite?: {
-    restaurantId: string;
+    branchId: string;
     isFavorite: boolean;
     /** Where the press returns to — and where sign-in comes back to. */
     returnTo: string;
@@ -143,7 +143,7 @@ export function BranchCard({ restaurant, language, href, prepMin, favorite }: Pr
       {favorite && (
         <form className="fav-form in-row" action={toggleFavorite}>
           <input type="hidden" name="lang" value={language} />
-          <input type="hidden" name="restaurantId" value={favorite.restaurantId} />
+          <input type="hidden" name="branchId" value={favorite.branchId} />
           <input type="hidden" name="favorited" value={favorite.isFavorite ? '1' : '0'} />
           <input type="hidden" name="returnTo" value={favorite.returnTo} />
           <button

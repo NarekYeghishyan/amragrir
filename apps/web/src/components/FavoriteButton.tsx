@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { toggleFavorite } from '@/app/[lang]/actions';
-import type { SavedAnswer } from '@/app/[lang]/saved/route';
+import { forgetSaved, readSaved } from '@/lib/saved-client';
 
 interface Props {
-  restaurantId: string;
+  /** The branch this page resolved to — a favourite is one address, and this
+   *  page is showing one address's menu and hours (DATABASE.md §13). */
+  branchId: string;
   language: string;
   /** Where a press returns to — and where sign-in comes back to. */
   returnTo: string;
@@ -40,7 +42,7 @@ interface Props {
  * waited for one would sit hollow for a round trip.
  */
 export function FavoriteButton({
-  restaurantId,
+  branchId,
   language,
   returnTo,
   endpoint,
@@ -50,21 +52,17 @@ export function FavoriteButton({
 }: Props) {
   const [favorited, setFavorited] = useState(false);
 
+  // One request for the whole page: the menu's rows each draw a heart of their
+  // own and read the same answer — see `readSaved`. A heart that could not read
+  // its state stays as it was drawn.
   useEffect(() => {
     let live = true;
 
-    fetch(endpoint, { cache: 'no-store' })
-      .then((response) => (response.ok ? (response.json() as Promise<SavedAnswer>) : null))
-      .then((data) => {
-        if (live && data) {
-          setFavorited(data.favorited);
-        }
-      })
-      .catch(() => {
-        // A heart that could not read its state stays as it was drawn. Nobody
-        // reading this page can do anything about it, and pressing it still
-        // works — the account is the authority, not this.
-      });
+    void readSaved(endpoint).then((saved) => {
+      if (live) {
+        setFavorited(saved.favorited);
+      }
+    });
 
     return () => {
       live = false;
@@ -75,10 +73,14 @@ export function FavoriteButton({
     <form
       className={className ? `fav-form ${className}` : 'fav-form'}
       action={toggleFavorite}
-      onSubmit={() => setFavorited((current) => !current)}
+      onSubmit={() => {
+        setFavorited((current) => !current);
+        // The cached answer describes the state this press has just changed.
+        forgetSaved(endpoint);
+      }}
     >
       <input type="hidden" name="lang" value={language} />
-      <input type="hidden" name="restaurantId" value={restaurantId} />
+      <input type="hidden" name="branchId" value={branchId} />
       <input type="hidden" name="favorited" value={favorited ? '1' : '0'} />
       <input type="hidden" name="returnTo" value={returnTo} />
       {/* Nothing this page renders depends on the answer — the heart's state is
