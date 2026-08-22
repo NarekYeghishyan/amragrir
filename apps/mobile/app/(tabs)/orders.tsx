@@ -8,6 +8,7 @@ import { useCart } from '../../src/cart';
 import { Photo } from '../../src/components/Photo';
 import { formatAmd, formatCountdown, formatTime } from '../../src/format';
 import { useTranslate } from '../../src/language';
+import { useSession } from '../../src/session';
 import { useTheme } from '../../src/theme/useTheme';
 
 /**
@@ -23,6 +24,8 @@ export default function OrdersScreen() {
   const router = useRouter();
 
   const cart = useCart();
+  const { user } = useSession();
+  const signedIn = user?.phoneVerified === true;
 
   const [active, setActive] = useState<OrderListItem[]>([]);
   const [past, setPast] = useState<OrderListItem[]>([]);
@@ -88,7 +91,25 @@ export default function OrdersScreen() {
     [cart, router, t],
   );
 
+  /**
+   * Emptied the moment the session ends, rather than on the next focus.
+   *
+   * This tab stays mounted behind the settings screen where logging out
+   * happens, and `GET /orders` is refused for a guest — so a refetch alone
+   * would leave the rows of the account that just left sitting on the screen.
+   */
+  useEffect(() => {
+    if (!signedIn) {
+      setActive([]);
+      setPast([]);
+      setLoading(false);
+    }
+  }, [signedIn]);
+
   const load = useCallback(() => {
+    if (!signedIn) {
+      return;
+    }
     let cancelled = false;
     Promise.all([ordersApi.list('active'), ordersApi.list('past')])
       .then(([activeResult, pastResult]) => {
@@ -110,7 +131,7 @@ export default function OrdersScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [signedIn]);
 
   useFocusEffect(load);
 

@@ -5,6 +5,7 @@ import {
   SPEND_FILTER_MAX_AMD,
   SPEND_FILTER_MIN_AMD,
 } from '@amragrir/shared';
+import type { TranslationKey } from '@amragrir/i18n';
 
 /**
  * What the filter sheet holds, and how it becomes a query.
@@ -31,6 +32,16 @@ export interface Filters {
   dietary: DietaryTag[];
   /** What the restaurant offers — pre-order, eating in, a booked table. */
   service: RestaurantService[];
+  /**
+   * Only branches serving right now.
+   *
+   * Set by the home screen's chip row, never by the sheet — the sheet leaves it
+   * out on purpose (see `FilterSheet`), because "serving right now" on a screen
+   * for ordering *ahead* answers a question nobody arrived with. As a chip it is
+   * a different offer: one press, next to the others, for the guest who did
+   * arrive with it.
+   */
+  openNow: boolean;
 }
 
 /**
@@ -47,7 +58,21 @@ export const NO_FILTERS: Filters = {
   minRating: null,
   dietary: [],
   service: [],
+  openNow: false,
 };
+
+/**
+ * Where the home feed starts: nothing narrowed, ordered by distance.
+ *
+ * The feed is a list of what is *near*, so it opens on `Nearest` — but as real
+ * state rather than as a rewrite applied on the way to the API. It used to be
+ * the latter, and that was invisible until the chip row arrived to read the
+ * same state: the feed came back sorted by distance while the "Near me" chip
+ * sat unlit, and pressing it twice changed nothing either time. Reset in the
+ * sheet still returns `NO_FILTERS`, which is the API's own `recommended` — the
+ * chip goes out and the order really does change.
+ */
+export const HOME_FILTERS: Filters = { ...NO_FILTERS, sort: RestaurantSort.Nearest };
 
 /** The rating chips the sheet offers. Whole and half stars from 3 up — below
  *  that a rating filter stops narrowing anything. */
@@ -69,6 +94,7 @@ export function activeFilterCount(filters: Filters): number {
     (filters.spendMaxAmd === null ? 0 : 1) +
     (filters.distMaxKm === null ? 0 : 1) +
     (filters.minRating === null ? 0 : 1) +
+    (filters.openNow ? 1 : 0) +
     filters.dietary.length +
     filters.service.length
   );
@@ -147,6 +173,7 @@ export function filterQuery(
   minRating?: number;
   dietary?: DietaryTag[];
   service?: RestaurantService[];
+  openNow?: boolean;
 } {
   return {
     sort: filters.sort,
@@ -155,5 +182,98 @@ export function filterQuery(
     ...(filters.minRating === null ? {} : { minRating: filters.minRating }),
     ...(filters.dietary.length === 0 ? {} : { dietary: filters.dietary }),
     ...(filters.service.length === 0 ? {} : { service: filters.service }),
+    // Sent only when on. `openNow=false` is not the same request as leaving it
+    // out — it would ask the API to include closed branches explicitly, which
+    // is a filter nobody set.
+    ...(filters.openNow ? { openNow: true } : {}),
   };
+}
+
+/**
+ * The home screen's quick-filter chips — the artifact's row above the feed.
+ *
+ * **Every chip maps to a real `/restaurants` parameter; none is decorative.**
+ * This is the same set the web draws (`apps/web/src/lib/filters.ts`), for the
+ * same reason: a chip that lights up and narrows nothing is worse than a chip
+ * that is not there. Three kinds:
+ *
+ *  - `bool`    → a flag (`openNow`);
+ *  - `sort`    → the single active sort, so these are mutually exclusive and
+ *                pressing the lit one puts the default order back;
+ *  - `service` → one of `restaurants.services`, OR-ed server-side, so several
+ *                may be on at once.
+ *
+ * **The artifact draws eight and this is seven.** Its "Special Offers" has no
+ * model behind it — there are no discounts in the schema to filter on — so it
+ * is left out rather than drawn dead. Its "Ready in 15 min" is the `fastest`
+ * sort rather than a hard cut at fifteen minutes: the API sorts by prep time
+ * and has no threshold, and a chip promising fifteen would be a promise the
+ * server never made. Its "Near Me" is `nearest`, the one chip that is not
+ * always offered — see `chipsFor`.
+ */
+export type ChipKind = 'bool' | 'sort' | 'service';
+
+export interface FilterChip {
+  /** Stable id, and the list key. */
+  id: string;
+  kind: ChipKind;
+  /** The API value for `sort`/`service` chips; unused for `bool`. */
+  value?: RestaurantSort | RestaurantService;
+  labelKey: TranslationKey;
+  /** The glyph the artifact puts before the label. Decorative — the label says
+   *  the same thing in words, so it is hidden from the screen reader. */
+  icon: string;
+}
+
+export const FILTER_CHIPS: readonly FilterChip[] = [
+  { id: 'nearest', kind: 'sort', value: RestaurantSort.Nearest, labelKey: 'filterNearest', icon: '📍' },
+  { id: 'openNow', kind: 'bool', labelKey: 'filterOpenNow', icon: '🟢' },
+  { id: 'topRated', kind: 'sort', value: RestaurantSort.TopRated, labelKey: 'filterTopRated', icon: '⭐' },
+  { id: 'fastest', kind: 'sort', value: RestaurantSort.Fastest, labelKey: 'filterFastest', icon: '⏱' },
+  { id: 'pickup', kind: 'service', value: RestaurantService.Pickup, labelKey: 'filterPickup', icon: '🥡' },
+  { id: 'reserve', kind: 'service', value: RestaurantService.Reserve, labelKey: 'filterReserve', icon: '🍽️' },
+  { id: 'dinein', kind: 'service', value: RestaurantService.DineIn, labelKey: 'filterDineIn', icon: '🍴' },
+];
+
+/**
+ * All seven are always offered here, unlike on the web, which hides `nearest`
+ * until a district is chosen. This app always has coordinates to sort by — the
+ * device's own once granted, Republic Square until then (`src/origin.ts`) — so
+ * the API can always honour the sort. It is then measured from the centre of
+ * Yerevan rather than from the reader, which is the same trade the distance
+ * filter already makes, and a floor rather than a lie.
+ */
+
+/** Whether a chip is lit for the current filters. */
+export function isChipActive(filters: Filters, chip: FilterChip): boolean {
+  switch (chip.kind) {
+    case 'bool':
+      return filters.openNow;
+    case 'sort':
+      return filters.sort === chip.value;
+    case 'service':
+      return filters.service.includes(chip.value as RestaurantService);
+  }
+}
+
+/**
+ * Pressing a chip.
+ *
+ * A lit chip always turns itself off, including the sorts: pressing the active
+ * sort returns the feed to `Recommended` rather than leaving it stuck on an
+ * order there is no other way out of.
+ */
+export function toggleChip(filters: Filters, chip: FilterChip): Filters {
+  switch (chip.kind) {
+    case 'bool':
+      return { ...filters, openNow: !filters.openNow };
+    case 'sort':
+      return {
+        ...filters,
+        sort:
+          filters.sort === chip.value ? NO_FILTERS.sort : (chip.value as RestaurantSort),
+      };
+    case 'service':
+      return toggleService(filters, chip.value as RestaurantService);
+  }
 }

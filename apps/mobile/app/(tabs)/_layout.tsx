@@ -46,10 +46,17 @@ export default function TabsLayout() {
           paddingTop: 10,
         },
         // `background:var(--glass); backdrop-filter:blur(18px) saturate(180%)`
-        // in the artifact. `tint` follows the theme so the bar stays readable
-        // over both a white card and a dark one scrolling beneath it.
+        // in the artifact — which is a tinted panel *and* a blur, not a blur
+        // alone. `colors.glass` is that panel; without it the bar was however
+        // much tint `intensity={18}` happened to produce, and a card scrolling
+        // under it read straight through. `tint` follows the theme so the bar
+        // stays readable over both a white card and a dark one.
         tabBarBackground: () => (
-          <BlurView intensity={18} tint="systemChromeMaterial" style={StyleSheet.absoluteFill} />
+          <BlurView
+            intensity={18}
+            tint="systemChromeMaterial"
+            style={[StyleSheet.absoluteFill, { backgroundColor: colors.glass }]}
+          />
         ),
       }}
     >

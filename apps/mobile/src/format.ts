@@ -66,6 +66,26 @@ export function yerevanDate(date: Date): string {
   }).format(date);
 }
 
+/**
+ * `Sat, 14 Aug` — the chosen day on the folded "Date & time" row.
+ *
+ * Built from the `YYYY-MM-DD` the picker works in, read as a plain calendar day
+ * in UTC rather than as an instant: the string already *is* Yerevan's day, and
+ * putting it through a zone a second time would move it by one either way.
+ */
+export function formatDayShort(date: string, language: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  if (!year || !month || !day) {
+    return date;
+  }
+  return new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : language, {
+    timeZone: 'UTC',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
 /** `August 2026`, for the heading over the booking calendar. */
 export function formatMonth(year: number, month: number, language: string): string {
   return new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : language, {

@@ -67,9 +67,9 @@ function Navigator() {
       <Stack.Screen name="referral" options={{ headerShown: false }} />
       {/* Draws its own back button and title, like settings and referral. */}
       <Stack.Screen name="notifications" options={{ headerShown: false }} />
-      {/* The booking trio, all self-headered: a table booked on its own, the
-          list of them, and one of them. */}
-      <Stack.Screen name="book/[branchId]" options={{ headerShown: false }} />
+      {/* The booking pair, both self-headered: the list of them, and one of
+          them. Booking a table *happens* on `preorder`, which does it with a
+          basket behind it and without. */}
       <Stack.Screen name="bookings" options={{ headerShown: false }} />
       <Stack.Screen name="booking/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="basket" options={{ title: t('basket') }} />

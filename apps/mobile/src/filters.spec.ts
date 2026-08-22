@@ -5,15 +5,20 @@ import {
   SPEND_FILTER_MAX_AMD,
 } from '@amragrir/shared';
 import {
+  FILTER_CHIPS,
+  HOME_FILTERS,
   NO_FILTERS,
   activeFilterCount,
   filterQuery,
   hasFilters,
+  isChipActive,
   isUncapped,
   sliderFromSpend,
   spendFromSlider,
+  toggleChip,
   toggleDietary,
   toggleService,
+  type FilterChip,
   type Filters,
 } from './filters';
 
@@ -133,5 +138,62 @@ describe('the query it makes', () => {
       dietary: [DietaryTag.Vegan],
       service: [RestaurantService.Reserve],
     });
+  });
+
+  it('sends openNow only when it is on', () => {
+    // `openNow=false` would ask the API to include closed branches explicitly —
+    // a filter nobody set, and not the same request as leaving it out.
+    expect('openNow' in filterQuery(some({ openNow: false }), true)).toBe(false);
+    expect(filterQuery(some({ openNow: true }), true).openNow).toBe(true);
+  });
+});
+
+describe('the quick-filter chips', () => {
+  const chip = (id: string): FilterChip => {
+    const found = FILTER_CHIPS.find((candidate) => candidate.id === id);
+    if (!found) {
+      throw new Error(`no chip ${id}`);
+    }
+    return found;
+  };
+
+  it('offers only chips the API can honour', () => {
+    // The artifact draws eight. "Special Offers" has no model behind it, so a
+    // chip for it could only light up and narrow nothing.
+    expect(FILTER_CHIPS).toHaveLength(7);
+    expect(FILTER_CHIPS.every((c) => c.kind === 'bool' || c.value !== undefined)).toBe(true);
+  });
+
+  it('lights the sort the feed is actually using', () => {
+    // The bug this replaced: the home feed rewrote an unset sort into `nearest`
+    // on the way to the API, so it came back ordered by distance with the chip
+    // sitting unlit.
+    expect(isChipActive(HOME_FILTERS, chip('nearest'))).toBe(true);
+    expect(isChipActive(NO_FILTERS, chip('nearest'))).toBe(false);
+  });
+
+  it('turns a lit sort back off rather than trapping the feed on it', () => {
+    const on = toggleChip(NO_FILTERS, chip('topRated'));
+    expect(on.sort).toBe(RestaurantSort.TopRated);
+    expect(toggleChip(on, chip('topRated')).sort).toBe(NO_FILTERS.sort);
+  });
+
+  it('keeps one sort at a time but several services at once', () => {
+    const sorted = toggleChip(toggleChip(NO_FILTERS, chip('fastest')), chip('topRated'));
+    expect(sorted.sort).toBe(RestaurantSort.TopRated);
+
+    const served = toggleChip(toggleChip(NO_FILTERS, chip('pickup')), chip('dinein'));
+    expect(served.service).toEqual([RestaurantService.Pickup, RestaurantService.DineIn]);
+  });
+
+  it('flips openNow, which the sheet never shows', () => {
+    expect(toggleChip(NO_FILTERS, chip('openNow')).openNow).toBe(true);
+    expect(toggleChip(some({ openNow: true }), chip('openNow')).openNow).toBe(false);
+  });
+
+  it('counts a lit chip in the badge, so the number explains a short list', () => {
+    expect(activeFilterCount(some({ openNow: true }))).toBe(1);
+    // The sort is still not counted: every list is sorted somehow.
+    expect(activeFilterCount(HOME_FILTERS)).toBe(0);
   });
 });

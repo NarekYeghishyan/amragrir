@@ -1,6 +1,7 @@
 import {
   formatAmd,
   formatCountdown,
+  formatDayShort,
   formatDistance,
   formatMonth,
   formatOrderStatus,
@@ -83,6 +84,23 @@ describe('weekdayHeads', () => {
 describe('formatMonth', () => {
   it('names the month and year for the calendar heading', () => {
     expect(formatMonth(2026, 7, 'en')).toBe('August 2026');
+  });
+});
+
+describe('formatDayShort', () => {
+  it('names the weekday and the day for the folded date row', () => {
+    expect(formatDayShort('2026-08-15', 'en')).toBe('Sat 15 Aug');
+  });
+
+  // The string is already Yerevan's calendar day, so it is read as a plain date
+  // rather than as an instant — putting it through a zone a second time would
+  // move it by one in either direction.
+  it('keeps the day it was given, whatever the phone is set to', () => {
+    expect(formatDayShort('2026-01-01', 'en')).toBe('Thu 1 Jan');
+  });
+
+  it('gives back anything that is not a date rather than "Invalid Date"', () => {
+    expect(formatDayShort('', 'en')).toBe('');
   });
 });
 
