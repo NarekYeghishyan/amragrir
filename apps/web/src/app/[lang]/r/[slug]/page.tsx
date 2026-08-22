@@ -5,7 +5,7 @@ import { Language, RestaurantService } from '@amragrir/shared';
 import { api } from '@/lib/api';
 import { LANGUAGES, parseLanguage, t } from '@/lib/language';
 import { formatAmd, formatPriceLevel, formatRating } from '@/lib/format';
-import { MENU_TAB_LABEL, TAB_ORDER, groupByTab, restaurantJsonLd } from '@/lib/jsonld';
+import { itemsUnder, menuTabs, restaurantJsonLd, tabOfItem } from '@/lib/jsonld';
 import {
   SITE_URL,
   basketApiPath,
@@ -17,10 +17,19 @@ import {
 } from '@/lib/site';
 import { OrderPanel } from '@/components/OrderPanel';
 import { AddDish } from '@/components/AddDish';
+import { DishHeart } from '@/components/DishHeart';
 import { FavoriteButton } from '@/components/FavoriteButton';
 
 interface Props {
   params: Promise<{ lang: string; slug: string }>;
+  /**
+   * `?item=<id>` — the dish a card's slider was tapped on.
+   *
+   * It decides two things this page could not otherwise know: which menu
+   * heading to open on, and which card to scroll to. Both are answered on the
+   * server, so the link lands correctly with JavaScript off.
+   */
+  searchParams: Promise<{ item?: string }>;
 }
 
 /**
@@ -92,8 +101,9 @@ export async function generateStaticParams() {
   return LANGUAGES.flatMap((lang) => [...slugs].map((slug) => ({ lang, slug })));
 }
 
-export default async function RestaurantPage({ params }: Props) {
+export default async function RestaurantPage({ params, searchParams }: Props) {
   const { lang, slug } = await params;
+  const { item: wantedItemId } = await searchParams;
   const language = parseLanguage(lang);
   if (!language) {
     notFound();
@@ -106,9 +116,14 @@ export default async function RestaurantPage({ params }: Props) {
   }
 
   const menu = await api.menu(slug, language);
-  const grouped = groupByTab(menu.items);
-  // A tab with nothing under it is a pill that empties the page when pressed.
-  const shownTabs = TAB_ORDER.filter((tab) => grouped[tab]?.length);
+  const tabs = menuTabs(menu.sections, menu.items);
+
+  // The heading a link asked to land on, or the first — which is what somebody
+  // arriving with no dish in mind should see. Resolved here rather than in the
+  // browser so a `?item=` link opens the right pill on a page with JavaScript
+  // switched off, and so a crawler following one sees a coherent page.
+  const wantedTab = wantedItemId === undefined ? null : tabOfItem(wantedItemId, menu.items);
+  const openTabId = tabs.some((tab) => tab.id === wantedTab) ? wantedTab : (tabs[0]?.id ?? null);
 
   return (
     <>
@@ -118,7 +133,28 @@ export default async function RestaurantPage({ params }: Props) {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify(restaurantJsonLd(restaurant, menu.items, language)),
+          __html: JSON.stringify(
+            restaurantJsonLd(restaurant, menu.sections, menu.items, language),
+          ),
+        }}
+      />
+
+      {/* The filtering rules, one per heading.
+          They cannot live in `globals.css`: the headings are the branch's own
+          and identified by uuid, so there is no fixed set of values a
+          stylesheet could enumerate. `globals.css` hides every section (behind
+          `@supports selector(:has(*))`, so a browser that cannot filter is
+          never left with a blank column); this is what shows the chosen one
+          back. Three to six declarations, rendered on the server — the tabs go
+          on working with JavaScript off. */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: tabs
+            .map(
+              (tab) =>
+                `@supports selector(:has(*)){.menu:has(input[value="${tab.id}"]:checked) .menu-section[data-tab="${tab.id}"]{display:block}}`,
+            )
+            .join(''),
         }}
       />
 
@@ -133,10 +169,10 @@ export default async function RestaurantPage({ params }: Props) {
             reason — see the component for what this page would give up if it
             filled the heart itself. */}
         <FavoriteButton
-          restaurantId={restaurant.restaurantId}
+          branchId={restaurant.branch.id}
           language={language}
           returnTo={restaurantPath(language, restaurant.slug)}
-          endpoint={savedApiPath(language, restaurant.restaurantId)}
+          endpoint={savedApiPath(language, restaurant.branch.id)}
           name={restaurant.name}
           labels={{ add: label('addFavorite'), remove: label('removeFavorite') }}
           className="on-banner"
@@ -194,42 +230,73 @@ export default async function RestaurantPage({ params }: Props) {
               and a reader without JavaScript nothing either. */}
           <div className="menu">
             <div className="menu-tabs" role="radiogroup" aria-label={label('menu')}>
-              {shownTabs.map((tab, index) => (
-                <label className="menu-tab" key={tab}>
+              {tabs.map((tab) => (
+                <label className="menu-tab" key={tab.id}>
                   {/* No `name` collision with the dish forms below: these sit
                       outside every one of them, so nothing here is posted. */}
                   <input
                     type="radio"
                     name="menu-tab"
-                    value={tab}
-                    defaultChecked={index === 0}
+                    value={tab.id}
+                    defaultChecked={tab.id === openTabId}
                   />
-                  {label(MENU_TAB_LABEL[tab])}
+                  {tab.translate ? label(tab.label as never) : tab.label}
                 </label>
               ))}
             </div>
 
-            {shownTabs.map((tab) => {
-              const items = grouped[tab]!;
+            {tabs.map((tab) => {
+              const items = itemsUnder(tab.id, menu.items);
+              const heading = tab.translate ? label(tab.label as never) : tab.label;
               return (
-                <section key={tab} className="menu-section" data-tab={tab}>
+                <section key={tab.id} className="menu-section" data-tab={tab.id}>
                   {/* The tab above says this word already, so the heading is not
                       drawn — but it stays, because a flat run of dish cards with
                       no headings at all is a menu with no structure for a crawler
                       or a screen reader to read. `globals.css` hides it, and only
                       where the filtering it belongs to actually works. */}
-                  <h3 id={tab}>{label(MENU_TAB_LABEL[tab])}</h3>
+                  <h3 id={tab.id}>{heading}</h3>
                   <div className="dishes">
                     {items.map((item) => (
+                      // Identified so a `?item=` link can be scrolled to, and
+                      // marked when it is the dish that link named — a menu is
+                      // twenty near-identical cards, and "it is on this page
+                      // somewhere" is not an answer to a link that knew which.
                       <div
                         key={item.id}
-                        className={item.isAvailable ? 'dish' : 'dish unavailable'}
+                        id={`dish-${item.id}`}
+                        className={[
+                          'dish',
+                          item.isAvailable ? '' : 'unavailable',
+                          item.id === wantedItemId ? 'found' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                        aria-current={item.id === wantedItemId ? true : undefined}
                       >
                         <div className={item.photoUrl ? 'media' : 'media ph'}>
                           {item.photoUrl && <img src={item.photoUrl} alt="" loading="lazy" />}
                         </div>
                         <div className="text">
-                          <div className="name">{item.name}</div>
+                          {/* The dish's name and its own heart. Drawn in the
+                              browser like the banner's, and for the same reason
+                              — this page is HTML on disk and may not read the
+                              session. The two share one request; see
+                              `readSaved`. */}
+                          <div className="dish-head">
+                            <div className="name">{item.name}</div>
+                            <DishHeart
+                              menuItemId={item.id}
+                              language={language}
+                              returnTo={restaurantPath(language, restaurant.slug)}
+                              endpoint={savedApiPath(language, restaurant.branch.id)}
+                              name={item.name}
+                              labels={{
+                                add: label('addFavoriteDish'),
+                                remove: label('removeFavoriteDish'),
+                              }}
+                            />
+                          </div>
                           {item.desc && <div className="desc">{item.desc}</div>}
                           <div className="facts">
                             {[

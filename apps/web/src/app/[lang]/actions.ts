@@ -707,9 +707,12 @@ export async function requestCode(formData: FormData): Promise<void> {
  * API would create a second account and everything collected while browsing
  * would belong to the first one.
  *
- * The name rides along from the sign-up tab. It is a *hint*, not an
- * instruction: the API fills it in only where there is none already, so
- * confirming an existing number cannot rename that account from a form.
+ * The name rides along from the sign-up tab, and **a name sent here replaces the
+ * one on the account** (2026-08-11) rather than only filling in a missing one:
+ * this is the single place in the product where somebody can correct their own
+ * name, and the code for that number is verified before the row is touched, so
+ * whoever is asking has already proved they hold the phone. The log-in tab sends
+ * none and whitespace does not count, so neither can blank what is stored.
  */
 export async function confirmCode(formData: FormData): Promise<void> {
   const language = languageOf(formData);
@@ -889,10 +892,11 @@ export async function reorder(formData: FormData): Promise<void> {
  * and a list a visitor cannot add to from the site that shows it is a dead end;
  * `/favorites` said so itself, in copy that told people to go and use the app.
  *
- * **The restaurant, not the branch.** A favourite is stored against the business
- * (DATABASE.md §13), so the card posts `restaurantId` — which is why the catalog
- * now sends one. Posting `id` would have saved whichever branch the row happened
- * to resolve to.
+ * **The branch, which is what a card is.** A favourite used to be stored against
+ * the business, so hearting one address of a chain filled the heart on every
+ * other address of it, and the favourites list could not say which kitchen it
+ * meant. Nobody orders from "the restaurant"; they order from the one on their
+ * street. So the card posts `branchId` — its own `id` (DATABASE.md §13).
  *
  * **No redirect, deliberately.** Every other write here ends in Post/Redirect/Get
  * so a reload cannot re-post the form. This one does not need it: both directions
@@ -907,7 +911,7 @@ export async function reorder(formData: FormData): Promise<void> {
  */
 export async function toggleFavorite(formData: FormData): Promise<void> {
   const language = languageOf(formData);
-  const restaurantId = String(formData.get('restaurantId') ?? '');
+  const branchId = String(formData.get('branchId') ?? '');
   const returnTo = safePath(formData.get('returnTo'), homePath(language));
 
   // Favourites belong to an account, so an unverified visitor signs in first and
@@ -920,9 +924,9 @@ export async function toggleFavorite(formData: FormData): Promise<void> {
 
   try {
     if (formData.get('favorited') === '1') {
-      await api.removeFavorite(restaurantId, session.accessToken, language);
+      await api.removeFavorite(branchId, session.accessToken, language);
     } else {
-      await api.addFavorite(restaurantId, session.accessToken, language);
+      await api.addFavorite(branchId, session.accessToken, language);
     }
   } catch (error) {
     if (!(error instanceof ApiError)) {
@@ -944,6 +948,62 @@ export async function toggleFavorite(formData: FormData): Promise<void> {
   }
   // The two screens that count favourites rather than listing the one that
   // changed; both are stale the moment a heart is pressed anywhere else.
+  revalidatePath(routePath(favoritesPath(language)));
+  revalidatePath(routePath(profilePath(language)));
+}
+
+/**
+ * Saves a **dish**, or gives it back — the heart over a plate.
+ *
+ * The other half of `toggleFavorite` above, and a separate action rather than a
+ * flag on it: they post different ids to different endpoints, and one form that
+ * carried either would be a branch id and a dish id in the same field with a
+ * discriminator deciding which the server is about.
+ *
+ * Where it is drawn is the point. A card answering a category filter wears the
+ * dishes that matched instead of its cover, and the heart over one of those
+ * photographs means *that dish* — it used to save the restaurant, which is not
+ * what somebody pressing the heart over a plate of khinkali is asking for. Every
+ * row of a menu draws one too. The branch keeps its own heart where the cover is
+ * what the heart sits on: the restaurant's page.
+ *
+ * Everything else follows the branch action exactly — sign-in and back for a
+ * visitor without an account, no redirect because both directions are idempotent,
+ * and a refusal corrected by the revalidation rather than reported.
+ */
+export async function toggleFavoriteDish(formData: FormData): Promise<void> {
+  const language = languageOf(formData);
+  const menuItemId = String(formData.get('menuItemId') ?? '');
+  const returnTo = safePath(formData.get('returnTo'), homePath(language));
+
+  const session = await readSession();
+  if (!session || !session.verified) {
+    redirect(signinPath(language, returnTo));
+  }
+
+  try {
+    if (formData.get('favorited') === '1') {
+      await api.removeFavoriteDish(menuItemId, session.accessToken, language);
+    } else {
+      await api.addFavoriteDish(menuItemId, session.accessToken, language);
+    }
+  } catch (error) {
+    if (!(error instanceof ApiError)) {
+      throw error;
+    }
+    if (error.status === 401) {
+      redirect(sessionPath(language, returnTo));
+    }
+    // Anything else falls through to the revalidation below.
+  }
+
+  // A restaurant page draws its dish hearts in the browser and is HTML on disk,
+  // so revalidating there would evict a pre-rendered page to change nothing on
+  // it — `DishHeart` says so with `revalidate=0`, exactly as `FavoriteButton`
+  // does for the branch.
+  if (formData.get('revalidate') !== '0') {
+    revalidatePath(routePath(returnTo));
+  }
   revalidatePath(routePath(favoritesPath(language)));
   revalidatePath(routePath(profilePath(language)));
 }

@@ -98,7 +98,7 @@ export default async function CartPage({ params, searchParams }: Props) {
   // answers with an empty set for a guest or a refusal.
   const [branch, menu, favorites] = await Promise.all([
     api.restaurant(cart.branchId, language).catch(() => null),
-    api.menu(cart.branchId, language).catch(() => ({ items: [] })),
+    api.menu(cart.branchId, language).catch(() => ({ sections: [], items: [] })),
     favoriteIds(language),
   ]);
 
@@ -135,8 +135,10 @@ export default async function CartPage({ params, searchParams }: Props) {
           prepMin={quote.prepMin}
           // The basket carries a heart; the checkout does not — see the prop.
           favorite={{
-            restaurantId: branch.restaurantId,
-            isFavorite: favorites.has(branch.restaurantId),
+            // The branch this basket is priced against — the same one the card
+            // above describes, and the only address this screen is about.
+            branchId: branch.branch.id,
+            isFavorite: favorites.has(branch.branch.id),
             returnTo: cartPath(language),
           }}
         />

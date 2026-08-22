@@ -33,6 +33,31 @@ not committed yet and are declared in the working tree so they land with it.
 
 Docs: `DATABASE.md` (§ restaurant_branches — the index is now written down).
 
+### 2026-08-22 — The one refusal that was still in English
+
+`POST /auth/send-code` answers a too-soon resend with a sentence, not a code:
+"Please wait 60s before requesting another code". The mobile client prints an
+`ApiError.message` verbatim — its own comment says the API localises its error
+messages from `Accept-Language` — so on an Armenian or Russian phone that
+sentence arrived in English, under three localised buttons.
+
+It is now written in the caller's language. The controller resolves
+`Accept-Language` the way every other localising endpoint does and hands the
+language down through `AuthService.sendCode` to `OtpService.send`, where a
+`Record<Language, (seconds: number) => string>` holds the three variants:
+adding a language will not compile until all three exist, which is the same
+guarantee the client dictionaries give. Seconds are abbreviated in `hy`/`ru`
+(`վայրկյան`, `с`) because the count is interpolated and a spelled-out unit
+would need Russian plural agreement a template string cannot do.
+
+The three remaining OTP failures — expired code, wrong code, too many attempts
+— are still English. Mobile shows them the same way, so they want the same
+treatment; they are left for a change that is about them rather than smuggled
+into this one. `apps/web` is unaffected either way: its sign-in action catches
+every `ApiError` from this call and redirects to its own localised
+`?error=phone` copy, so it never showed the server's sentence at all — which
+is its own inaccuracy, since a cooldown is not a bad number.
+
 ### 2026-08-22 — The reminder a booking was still missing
 
 The booking bell shipped earlier today without the one notification nobody
@@ -307,6 +332,1328 @@ port was already right — 3000 stays free for another project's server, so the
 API came up on `PORT=3007` as it did on 2026-08-17 and the address did not have
 to follow it this time. Metro restarted with `--clear`, since a plain restart
 keeps the old value baked into the bundle. Nothing about the app changed.
+
+### 2026-08-17 — A heart over a plate now saves the plate
+
+Favourites were addresses and only addresses. That was right for a card on the
+feed and wrong everywhere the app is actually showing food: a card wearing the
+dishes that matched a category filter, a row on a menu, a dish among the web's
+search results. Pressing the heart over a photograph of khinkali saved the
+restaurant — an answer to a question nobody had asked, and one that quietly
+threw away which dish somebody had come back for.
+
+A dish can be saved now, and the two are different things kept apart.
+
+**Schema.** New table `favorite_menu_items` — `(user_id, menu_item_id)`, unique
+on the pair, cascading on both. Its own table rather than two nullable columns on
+`favorites`: the lists are read, counted and removed separately, and one table
+where exactly one of two columns is filled is a check constraint standing in for
+a type. **The branch is not stored** — `menu_items.branch_id` already says which
+kitchen, so a saved dish is one address's dish by construction, the same rule
+`favorites` states since 2026-08-13, inherited rather than restated. Nothing
+about the dish is copied either: the menu is the authority on the name and the
+price, so a saved dish shows what the kitchen says today, a withdrawn one
+(`deleted_at`) is filtered out of the list rather than drawn as something nobody
+can order, and one that is merely sold out tonight is shown and marked.
+
+**API.** `GET /favorites/dishes` (localised, newest first, carrying the kitchen
+so one dish saved at two branches is two distinguishable rows), `GET
+/favorites/dishes/ids?branchId=` (one bit per dish, which is all a menu needs),
+`POST /favorites/dishes` (idempotent; 404 for a dish that is off the menu) and
+`DELETE /favorites/dishes/{menuItemId}` (idempotent, and deliberately *not*
+filtered by `deleted_at` — a dish that has left the menu is exactly the one
+somebody needs to unsave). Same verified-phone guard as the branch routes, for
+the same reason.
+
+**Where the heart is drawn.** On a filtered card the heart is now about the dish
+showing: in the app the card holds the slider's index for exactly that, on the web
+each slide carries its own because a form rendered on the server cannot know which
+slide is showing. The card's branch heart stands down while the plates are up —
+two hearts in one corner would be a card asking somebody to aim, and the address
+is still savable from its own page, where the cover is what the heart sits on.
+Every menu row has one too, beside the **name** rather than beside the `＋`: those
+two do different things, and a pair of controls side by side invites the wrong one
+to be pressed. The web's search results grew one as well.
+
+The web's pre-rendered menu draws twenty of these hearts, and twenty hearts
+asking `GET /[lang]/saved` separately would be twenty identical requests for one
+answer. That route now answers `{ favorited, dishes[] }` for the branch it was
+asked about, and `lib/saved-client.ts` shares one request between the banner's
+heart and every row's — dropped on submit, since the press has just changed the
+answer it holds.
+
+**The Favourites screen has two tabs**, Restaurants and Dishes, with a count on
+each: they are different cards leading to different places — a branch card opens a
+menu at the top, a dish card opens it *at the dish* (`?item=`), which is what
+having saved a dish was for. Both lists are read whichever tab is showing, so the
+counts are true before either is pressed, and each tab carries its own empty
+state. On the web the tab lives in the URL (`?tab=dishes`), so it works with
+JavaScript off, can be linked to, and survives the press of a heart.
+
+A guest's dish hearts fill like everyone else's and are kept on the phone in a
+second store beside the branch one, handed to the account at sign-in — the two
+handovers run independently, so a dish that has left the menu cannot take the
+restaurants' transfer down with it. Both are cleared on sign-out.
+
+The profile row is **"Favourites"** now, not "Favorite restaurants", and the
+web's count beside it counts both kinds: it leads to a screen with two tabs, and
+naming or counting one of them sends somebody looking for the other.
+
+Docs: `DATABASE.md` (§13a, ER, indexes), `API_DOCUMENTATION.md` (Favorites),
+`SCREENS.md` (§1, §3, §9, §10, §14, §14b), `COMPONENTS.md` (`RestaurantCard`,
+`DishSlider`, `DishCard`, `FavoriteDishRow`, `DishHeart`, `FavoriteDishCard`),
+`USER_FLOW.md` (§9), `ROLES_AND_PERMISSIONS.md` (§1, §2).
+
+### 2026-08-17 — The committed API address was wrong in both halves
+
+`app.json`'s `extra.apiUrl` was `192.168.27.8:3000`; the lease has moved to
+`.3` — the same trap as 2026-08-16 below — but this time the port was wrong
+too. An unrelated project's dev server was holding 3000, so the API came up on
+`PORT=3007` and the address had to follow it to `192.168.27.3:3007`. Metro
+restarted with `--clear`. `apps/mobile/README.md` treated the port as the one
+constant in that value and told you to health-check `:3000`; it now says the
+port tracks whatever the API bound, because a stale port fails identically to a
+stale IP. Nothing about the app changed.
+
+The dishes on a filtered card shipped twice before they were right. First as a
+bare `overflow-x` scroller of small tiles, which looked like a mistake: the
+third plate sliced off at the border with nothing to say more existed, and the
+heart floating over that plate's photograph because it was still positioned
+where a cover used to be. Then as the same tiles in a block with a head and
+dots, which was tidier and still the wrong shape — the plate is the thing being
+chosen, and at a third of a card's width it is a thumbnail beside two other
+thumbnails.
+
+It is a **carousel of one square slide per dish** now, on both clients, the full
+width of the card and therefore as tall as it is wide. The slide matched the
+cover's height for one revision, so that a card would be the same size filtered
+or not — and that was the wrong thing to optimise for. A cover is a room, which
+a letterbox suits; this is a plate, and a plate cropped to a third of its height
+is a photograph of a table edge. The card growing is the price of showing the
+food at the size somebody decides on it. The open/closed badge, the rating and
+the heart keep the corners they always had: they sit over the frame rather than
+inside a slide, so they hold still while the photographs move under them. The dish's name and price go over the foot of the
+picture on a gradient — under it they would be a second name/price pair stacked
+on the restaurant's own, which reads as one confused block. Dots underneath, one
+per dish, the current one widened rather than merely darkened; overlaid arrows on
+the web, which stay put and go dim and `disabled` at the ends rather than
+disappearing — an arrow that vanishes shifts the other one under the cursor
+between slides.
+
+Both measure rather than assume: the web finds the nearest slide by `offsetLeft`
+and the app pages on a width from `onLayout`. A slide is one card wide and that
+changes with the breakpoint — a hard-coded number drifts the moment the grid
+reflows, and then a slide comes to rest showing two halves.
+
+The web slider's controls are rendered **after mount** and nothing else is: every
+dish is a real `<a href>` in the server-rendered HTML, so a crawler and a visitor
+without JavaScript still get every slide and can swipe or scroll between them.
+What they do not get is a row of buttons that would answer nothing — the same
+rule the card's heart has followed since it was built.
+
+Docs: `SCREENS.md` (§1), `COMPONENTS.md` (`RestaurantCard`, `DishSlider`).
+
+### 2026-08-16 — A menu has two axes, and `menu_tab` was pretending to be both
+
+"Popular / Mains / Sides / Drinks" is how one kitchen lays out its own page.
+"Pizza / Sushi / Healthy" is how a city looks for dinner before it has picked a
+kitchen. The first was a **four-value enum every restaurant on the platform had
+to fit into**; the second lived in `categories`, was optional on a dish, and had
+no field anywhere in the back office — so every dish a real restaurant typed in
+carried no category, was reachable from no chip on the home screen, and nothing
+in the product said so. A kitchen whose menu names five things had nowhere to
+put the fifth; a Margherita in the Popular tab was in no other, and so vanished
+from the pizza section of the very place known for it.
+
+**The first axis is now `branch_menu_sections`** (DATABASE.md §5a) — a branch's
+own headings, as many as its menu names, in its own order, soft-deleted like a
+dish because withdrawn dishes still point at them. **The second stays
+`categories`**, closed and platform-owned, with `is_active` so one can be
+retired without orphaning the dishes filed under it. `menu_items.menu_tab` is
+gone; `section_id` (NOT NULL, `ON DELETE RESTRICT` — deleting a heading must
+never delete the food) and `is_popular` replace it.
+
+**A section may point at a category, and then its dishes inherit one.** That is
+the join between the axes and the reason the whole thing works: nobody enters a
+menu by tagging forty dishes one at a time. A dish may override, which is how
+the salad on a "Мангал" shelf is reachable under "Healthy". `effectiveCategoryId`
+in `@amragrir/shared` is the rule, `COALESCE(m.category_id, s.category_id)` is
+the same rule in SQL, and both readers use one of the two — the feed's branch
+filter and the menu's own narrowing cannot disagree, or a card would promise a
+dish the menu behind it then hides. **A dish that would end up in no category is
+refused** (422), which is the failure this whole change exists to make
+impossible.
+
+**"Popular" stopped being a place and became a property.** A bestseller is
+popular *and* pizza; as the enum's fifth value it was neither.
+
+**The migration** (`20260816090000_branch_menu_sections`) gives each branch the
+headings it actually used, flags its Popular dishes and files them under a shelf
+named from their own category — so no dish moves out of the category it already
+carried. It ran clean on the dev database: 306 sections, 383 dishes, none
+orphaned.
+
+**In the panel.** A new **Categories** screen — full CRUD on the platform's
+vocabulary, behind `categories:write`, which `super_admin` alone holds and which
+the sidebar draws for nobody else. The key is fixed at creation (it travels in
+`?category=`, in deep links and in the seed's filenames); the name is editable
+any day; a category in use can only be retired, and the refusal names how many
+dishes and sections are riding on it. On the Menu screen, a **Menu sections**
+dialog: add, rename, reorder, map to a category, delete — refused with a count
+while dishes are still on the shelf. The dish form finally has both fields, with
+*inherit* as the category's first option and a warning banner on the state the
+API refuses. `menu_items` edits are recorded as before, and the two new
+vocabularies write their own audit actions.
+
+**On the feed, a filtered card wears its dishes.** With a category chip lit,
+`GET /restaurants?category=` returns up to ten matching dishes per branch —
+picture, name, price, bestsellers first, one windowed query for the whole page —
+and both clients replace the cover with a strip of them. A guest who tapped
+"Sushi" is choosing between kitchens on the strength of the sushi, and a
+photograph of somebody's dining room does not help them do it. Tapping a plate
+opens that branch's menu **at that dish**: on the web `?item=` picks the heading
+on the server and `#dish-` scrolls to the row, so the link lands with JavaScript
+off; on the phone the same parameter picks the tab and the list scrolls. Empty
+and absent mean different things on the wire — a branch whose matches are all
+sold out tonight keeps its cover, and the card is still true.
+
+**The web's CSS-only menu tabs survive.** The ids are per branch now, so the
+restaurant page emits one `:has(input[value="…"]:checked)` rule per heading in
+an inline `<style>`; `globals.css` keeps the fixed half, still guarded by
+`@supports` so a browser that cannot filter is never left with a blank column.
+The JSON-LD improves as a side effect: `hasMenuSection` now carries the
+restaurant's real headings under its own names instead of four English words
+repeated across every restaurant on the platform.
+
+**Also fixed, found by re-seeding:** `seed-orders.ts` never set
+`orders.pickup_option`, so every pickup order violated
+`orders_pickup_option_matches_service_mode` and a seed run against an empty
+database failed at the first order. The constraint arrived after those rows did,
+and a re-run skips what is already there, so nobody had hit it.
+
+Docs: `BUSINESS_LOGIC.md` (§6 — "The two axes of a menu", "A card under a
+category filter"), `DATABASE.md` (§5, §5a, §6, indexes), `API_DOCUMENTATION.md`
+(menu, categories, `/restaurant/menu-sections`, `/admin/categories`),
+`ROLES_AND_PERMISSIONS.md` (`categories:write`), `SCREENS.md` (§1, §3),
+`COMPONENTS.md` (`RestaurantCard`, `MenuTabs`, `SectionsDialog`, the Categories
+screen, the dish form).
+
+### 2026-08-16 — The mobile app's committed API address had gone stale again
+
+`app.json`'s `extra.apiUrl` pointed at `192.168.27.9`; the dev machine's lease
+is now `.8`, so the phone and the web target both rendered their chrome and
+then failed every request. Updated to the current address and Metro restarted
+with `--clear`, per `apps/mobile/README.md`. Same lease-not-a-constant trap as
+2026-08-07 below — nothing about the app changed.
+
+### 2026-08-13 — A heart saves the branch you are looking at, not every branch of the chain
+
+Pressing the heart on a card saved the **restaurant**, so every other card of
+that business went red with it: hearting the Dolmama on this street filled the
+heart on the one three kilometres away, and neither could be given back on its
+own. The Favourites list had the same problem in reverse — one row per business,
+no address on it, and nothing to say which kitchen was saved. Nobody in this
+product acts on "the restaurant": a card on the feed is a branch, a basket is
+opened against a branch, a table is booked at a branch. Favourites were the one
+exception, and it showed.
+
+**`favorites.restaurant_id` becomes `favorites.branch_id`** (DATABASE.md §13),
+`UNIQUE(user_id, branch_id)`. The migration moves every saved restaurant onto
+its **oldest** branch — `created_at`, then `id`, the same tie-break
+`/restaurants/{slug}` and the grouped listing already use, so a row becomes the
+branch whose card was on screen when the heart was pressed. Favourites of a
+restaurant with no branches are dropped: there was no address in them to keep.
+
+**The endpoints take a branch.** `POST /favorites` takes `{ branchId }`,
+`DELETE /favorites/{branchId}`, and `GET /favorites` answers with `branchId`
+first plus `branchName`, `address` and `city` — because two branches of one
+chain otherwise return the same name, photograph and rating twice. `coverUrl`,
+`services`, `prepMin` and `isOpen` are that branch's resolved answers, exactly
+as on a catalog card.
+
+**Both clients heart the card's own `id`.** The phone's feed, its restaurant
+screen (the detail's `branch.id`, never the route's ambiguous `{id}`), the
+guest store on the device; the web's cards, the basket's `BranchCard` and the
+restaurant page's `FavoriteButton`, which now asks `/[lang]/saved?branch=`.
+
+**Two navigation fixes fall out of it**, and they are not incidental: a heart
+that saves a branch must not sit on a card that opens a different one.
+- The phone's feed pushes `/restaurant/{branchId}` rather than the slug. A slug
+  resolves to the oldest branch, so a card for one address opened another's
+  page — with, from today, a hollow heart on it. The basket and pre-order
+  screens already navigated by branch id.
+- The web's `/favorites` links `/r/{branchId}`, a URL the site already serves
+  with its canonical pointing back at the slug, and prints the address in each
+  card's meta line. The listings keep their slug links: those are the canonical
+  pages, and the grouped listing picks the branch a slug resolves to anyway.
+
+**A guest's local list is keyed by branch too**, and rows written before this
+are dropped on read rather than guessed at: they name a business and no address,
+and picking one on the phone with no catalogue to ask would silently save
+somebody the wrong kitchen. They are device-local bookmarks, never more than a
+few.
+
+- `apps/api/prisma/schema.prisma` + `migrations/20260813090000_favorite_a_branch/`
+- `apps/api/src/favorites/*` — `FavoriteBranch`, `add`/`remove`/`idsFor` by branch
+- `apps/mobile` — `api/{types,endpoints}.ts`, `guest-favorites.ts`, `(tabs)/index.tsx`,
+  `(tabs)/favorites.tsx` (address line, opens the branch), `restaurant/[id].tsx`
+- `apps/web` — `lib/{api,favorites,site}.ts`, `[lang]/actions.ts`, `[lang]/saved/route.ts`,
+  `components/{RestaurantCard,BranchCard,FavoriteButton}.tsx`, the pages that draw hearts
+- Docs: DATABASE.md §13, API_DOCUMENTATION.md (Favorites, `GET /restaurants` ids),
+  SCREENS.md §2/§3/§4/§9/§14b, COMPONENTS.md, USER_FLOW.md §9, PROJECT_OVERVIEW.md,
+  ROLES_AND_PERMISSIONS.md, apps/{api,web}/README.md
+
+### 2026-08-13 — "Ready at" appears on a table booking, as the answer rather than a question
+
+The phone hid the "Ready at" field entirely on a dine-in basket. The reasoning
+was sound: booking a table sets `readyAt` to the booked instant, and asking a
+second time would let somebody order food for 15:00 and hold a table for 19:30.
+The conclusion was not. Both artifacts keep the field in **both** modes and swap
+what it says — `asapMainLabel: isDine ? readyForTable : asap` — so dine-in reads
+**"In time for your table · Thu 13 Aug · 16:50"** over the booked day and hour.
+Hiding it left the one question every guest actually has, *when will my food be
+there*, answered nowhere on the screen that asks about time twice.
+
+So the field is drawn, and on dine-in **it is a statement**: the same row and
+glyph, no chevron, no sheet, nothing to pick. That keeps the rule the hiding was
+protecting — one time, the table's — while showing it. The hour appears as soon
+as a slot is chosen rather than waiting for the deposit, because booking only
+copies that same value into `readyAt`.
+
+**A table with no food behind it still gets no field** (`tableOnly`): there is
+no kitchen to ask about.
+
+This settles half of the question SCREENS.md had recorded as **Open** — the
+field belongs in both modes. The other half is not settled and is now the web's:
+whether a dine-in basket may *change* the hour. The phone answers no by making
+the field inert; the web still draws a picker there and will accept a table at
+19:30 with a `readyAt` of this afternoon.
+
+- `apps/mobile/app/preorder.tsx` — dine-in branch; the gate is `tableOnly`, not `wantsTable`
+- `packages/i18n/src/{en,hy,ru}.json` — `readyForTable`
+- Docs: SCREENS.md §5 (the rule and the "Open" note), USER_FLOW.md
+
+### 2026-08-12 — The time pickers open as sheets, so the wheel is the only thing scrolling
+
+Both pickers on "When & how" unfolded under their row, which put a vertical
+scroll inside the checkout's own vertical scroll. A drag that meant "turn the
+hour" was as likely to be taken for "scroll the page" — the difference between a
+wheel that works and one that fights back, and the reason the wheel still felt
+broken after the scroll events were fixed.
+
+Each row now raises **`PickerSheet`** (COMPONENTS.md): the app's existing bottom
+sheet — the same `Modal`, scrim, grabber and ✕ as `FilterSheet` and
+`LocationSheet` — carrying the picker as its only content, with **no outer
+scroll**, so the wheel is the only thing on screen that scrolls. `maxHeight` is
+92% rather than the filter sheet's 88%, to buy the month calendar the room.
+
+- **Both sheets start closed.** The booking calendar used to *start open* while
+  nothing was chosen, which was right for a panel unfolding in place — the row
+  and the CTA would otherwise both read "Choose time" with no calendar behind
+  either — but a sheet that threw itself over the screen on arrival would be
+  answering a question nobody had asked. The row carries the answer on the page
+  either way.
+- **The ✕ is not the "Done" button coming back.** Nothing is confirmed on the
+  sheet: the choice is reported as it is made and the row behind is already
+  showing it. It closes an overlay, which is the one thing an overlay always
+  needs and the inline panel never did. Tapping the scrim does the same.
+- **"As soon as possible" still closes the ready sheet**, being one press and
+  one answer; the wheel still does not, for the reason in the entry below.
+- **The calendar's day cells are the artifact's fixed 38px again**, not squares.
+  `aspectRatio: 1` tied a cell's height to the phone's width, which was near
+  enough inside a padded card and wrong on a full-width sheet: every cell became
+  62 tall and six rows of them pushed the wheel off the bottom of the screen.
+  The artifact gives the cell `height:38px;border-radius:11px;font-size:14px` on
+  every width, and now so does this.
+- New `close` string in all three languages, for the ✕ and the scrim.
+
+- `apps/mobile/src/components/PickerSheet.tsx` — new
+- `apps/mobile/src/components/BookingCalendar.tsx`, `apps/mobile/app/preorder.tsx` — panels moved onto it
+- `packages/i18n/src/{en,hy,ru}.json` — `close`
+- Docs: SCREENS.md §5, COMPONENTS.md
+
+### 2026-08-12 — Both hours on "When & how" are asked on the artifact's wheel
+
+"Ready at" and "Date & time" each drew a four-column grid of time chips on the
+phone. The artifact draws neither: it asks both with **one control** — two
+snapping columns, `HH` and `MM`, behind a `--card` lens in a 184px trough, with
+the ends faded into the trough's own colour. Confirmed against the rendered
+artifact rather than its markup, which still carries a dead grid variant: the
+live document draws two scroll-snap columns and no four-column grid anywhere.
+
+New `TimeWheel` (COMPONENTS.md), used by `BookingCalendar` under "Reservation
+time" and by the pre-order panel under **"Exact time"** — a new `exactTime`
+string in all three languages. The artifact's measurements throughout: 46px
+rows, a 69px lead-in so the first row can reach the middle, the lens inset 14 at
+top 69, 56px fades, a 10px `:` between the columns.
+
+**Where it deliberately departs from the artifact.** The artifact runs a free
+cross product — hours 11 to 22 against every five minutes — because it has no
+server to contradict it. Ours cannot: `POST /reservations` and `POST /orders`
+refuse a time outside the branch's hours, past the horizon, or on a table
+somebody already has, and a picker that offers a time the server refuses is a
+bug in the picker. So the hours are the hours that hold an offerable time, the
+minutes are the minutes free within the hour on screen, and **taken slots are
+dropped rather than dimmed** — a grid can grey a slot and refuse the tap, while
+a wheel that snaps onto one has already chosen it.
+
+**Two consequences worth naming.**
+- **The morning/afternoon/evening tabs are gone.** They were invented to divide
+  a list the grid could not show — ~70 starts in a day at
+  `RESERVATION_SLOT_MINUTES` — and a wheel scrolls, so seventy rows is a scroll
+  rather than a problem. The artifact never had them. They were **phone-only**:
+  the browser's `DateTimeField` has always drawn one flat grid. So
+  `slotsByPartOfDay`, `hasFreeSlot` and `partOfDay` in `@amragrir/shared` are
+  left with no caller outside `apps/web/src/lib/slots.spec.ts`, and the
+  `partMorning`/`partAfternoon`/`partEvening` strings with none at all. **Kept,
+  not removed** — deleting shared exports and translations is its own change,
+  and this one is about two fields on one screen.
+- **Choosing on the wheel no longer folds the panel**, reversing the rule set a
+  few entries below for the chip grid. A chip was one press and one answer, so
+  it folded on the tap; a wheel answers continuously, and a panel that shut on
+  the first hour scrolled under the lens would close before the wanted one got
+  there. The folded row above is the way in and out. "As soon as possible" is
+  still one press and one answer, so it still folds the ready panel.
+
+Nothing is highlighted until something is chosen — the artifact's own
+`wheelItem(!rdyAsap && …)` — so "as soon as possible" and "Choose time" keep
+reading as unanswered while the wheel rests on the earliest offer. The "Done"
+button under each panel stays uncopied.
+
+**Two react-native-web traps, both hit and both fixed the same day.** The wheel
+first read its position from `onMomentumScrollEnd` and `onScrollEndDrag`;
+react-native-web fires **neither**, so the columns scrolled with the numbers
+under the lens never changing — tapping a row worked and dragging did nothing.
+It reads `onScroll` now, on every event as the artifact does, with
+`scrollEventThrottle` set: without a throttle react-native-web sends no scroll
+events at all. And `snapToInterval` is native-only — on the web it leaves
+`scroll-snap-type: none` — so the snap is done by hand, 140ms after the last
+scroll event, which is a no-op on native where the wheel has already snapped.
+
+- `apps/mobile/src/components/TimeWheel.tsx` — new
+- `apps/mobile/src/components/BookingCalendar.tsx` — wheel in, tabs and grid out
+- `apps/mobile/app/preorder.tsx` — wheel in, ready-time grid out
+- `packages/i18n/src/{en,hy,ru}.json` — `exactTime`
+- Docs: SCREENS.md §5, COMPONENTS.md, DESIGN_SYSTEM.md §7 and §8
+
+### 2026-08-12 — The basket's restaurant card opens the restaurant on the phone
+
+The mobile Basket draws the restaurant it belongs to as a card — cover, rating
+on glass, name, `cuisine · $$ · N reviews`, prep and address — and pressing it
+did nothing. That was deliberate when the card was ported (2026-08-11): the
+screen already had a back button and "＋ Add more items" leading to the menu, and
+a third route hidden in a photograph looked like something that would only be
+found by accident. What that reasoning missed is that the card is a near-copy of
+the feed card that was pressed to *get* to the basket, so it gets pressed — and
+a card that looks like a link and answers with nothing is the worst of the three
+possible behaviours.
+
+It now opens the restaurant, as the web's `BranchCard` always has. Two details:
+
+- **It pushes, it does not go back.** A basket is not always arrived at from a
+  menu — the tab bar opens it, and so does "Reorder" — and `router.back()` on
+  those paths leads somewhere that is not the restaurant, or nowhere at all.
+- **It travels by branch id, not slug.** A slug always resolves to one branch of
+  a restaurant that may have several, and the branch this basket was priced
+  against is the only one whose menu and address are the right ones to open.
+
+The whole card is the target rather than the name, which would be the smallest
+thing on the screen, and a `›` beside the name says the card leads somewhere.
+The chevron is hidden from screen readers; the card announces itself as a button
+labelled "«Restaurant» · Menu".
+
+- `apps/mobile/app/basket.tsx` — `BranchBanner` takes an `onPress`, is a
+  `Pressable`, and gains the chevron
+- Docs: SCREENS.md §4, USER_FLOW.md §4
+
+### 2026-08-12 — The phone's ready-time field is called "Ready at", like everywhere else
+
+"When & how" headed its ready-time question **"Food ready at"** on the phone, and
+nothing else in the product called it that. Both design artifacts head the field
+"Ready at"; the web heads it "Ready at"; the checkout row is "Ready at"; and the
+summary six rows below the heading, on this very screen, reads "Ready at 15:50".
+The field was named one thing where it is asked and another everywhere it is
+answered — which is what somebody comparing the screen with the design sees as a
+missing field rather than a reworded one.
+
+The cause was two i18n keys for one field: `readyAtLabel`, used by the web
+heading, the mobile checkout row and the mobile summary line, and `foodReadyAt`,
+used by exactly one `<Text>` in the whole repo. The second is **deleted** in all
+three languages rather than reworded, so the heading now reads `readyAtLabel`
+with the other three and there is no second string left to drift. Armenian and
+Russian move with it: `Պատրաստ լինի` and `Готово к` in place of
+`Ուտեստը պատրաստ՝` and `Еда готова к`.
+
+Nothing else about the field moves. Its heading style already matched the
+artifact to the letter — 13px/700, uppercase, `.4` tracking, 26 above — the row,
+the panel and the grid were ported on 2026-08-11, and the "Done" button under
+the grid stays gone (the entry below).
+
+**Still open, and untouched here:** the artifact draws this field for a *dine-in*
+basket too (`showReadyAt: cartCount > 0`), and the web follows it. The phone
+hides it, because the booked slot already sets `readyAt` and asking twice lets
+somebody order food for 15:00 and hold a table for 19:30. That disagreement is
+recorded in SCREENS.md §5 and is a product decision, not an oversight.
+
+- `packages/i18n/src/{en,hy,ru}.json` — `foodReadyAt` removed
+- `apps/mobile/app/preorder.tsx` — heading reads `readyAtLabel`
+- Docs: SCREENS.md §5, BUSINESS_LOGIC.md, USER_FLOW.md, PROJECT_OVERVIEW.md
+
+### 2026-08-12 — Picking an hour folds the picker, and "Done" goes
+
+Both time panels on "When & how" carried a "Done" button under the grid, copied
+from the artifact. It confirmed nothing: the only reason either panel was open
+was to choose a time, and the row above each one already shows the choice the
+moment it is made. So the button asked for a second press to close something the
+first press had finished with.
+
+Choosing now folds the panel — a slot in the booking grid, a time in the ready
+grid, and "as soon as possible", which is a choice like any other. The button is
+gone from both, and its styles with it. Two things deliberately do **not** fold:
+picking a *date* in the calendar, because the hour has not been asked for yet,
+and pressing a stretch-of-day tab, which only narrows the grid. The summary rows
+stay the way back in, so nothing has become unreachable.
+
+Docs: `SCREENS.md` (§3), `COMPONENTS.md` (`BookingCalendar`).
+
+### 2026-08-12 — A chosen time is filled, not tinted
+
+Every pill that carries a *chosen* value on the phone was drawn with
+`accentSoft` behind accent-coloured text — a tint. The artifact fills them:
+`pill()` and `guestCircle()` both answer `background: var(--accent); color:
+#fff` for the selected state, and DESIGN_SYSTEM.md has listed "date, time" in
+that row all along. A tinted chip reads as hovered rather than chosen, and on
+the "when & how" screen it had to sit directly under "as soon as possible",
+which *was* filled — so the two controls answering the same question disagreed
+about what "picked" looks like.
+
+Filled now, in all three places the rule covers: the "ready at" grid, the
+booking time grid, and the guest quick-picks. Unchosen ready-at chips also move
+from `bg` to `card`, because the panel behind them is `card` — on the old pair
+the chip was a slightly darker hole in the panel instead of a bordered tile on
+it. The ready-at label goes 14 → 15px, the artifact's size.
+
+Unavailable booking slots keep their 0.35 opacity, and the morning/afternoon/
+evening tabs are left alone: they are a phone-only control with no counterpart
+in the artifact, and they are tabs rather than pills.
+
+Docs: none — `DESIGN_SYSTEM.md` already specified this; the phone had drifted
+from it.
+
+### 2026-08-12 — "Pickup type" returns on a take-away-only counter, and the chosen mode is filled again
+
+Two ways the phone's "When & how" still disagreed with documents that had been
+right about it for days.
+
+**The section required two endings to appear.** A counter that only hands food
+over — `pickupOptions` holding take-away alone — drew no heading and no row, so
+the screen went from the mode tiles straight to the clock and *what happens to
+this food* was answered nowhere. That is the exact cost SCREENS.md §3 has
+described since 2026-08-07, when the web stopped hiding it; the mobile screen
+never followed. The gate now asks whether there is anything to draw at all
+rather than whether there is a choice to make, so a lone take-away row is drawn
+and ticked — there is nothing else it could be — while a branch that declares
+neither pickup nor a dining room still draws none, because `pickupOptions` is
+then empty and there is no ending to name. That empty case is real
+(`service-offering.spec.ts`), and a heading with nothing under it would have
+been the worse bug of the two.
+
+**The chosen mode tile was tinted rather than filled.** It used `accentSoft`
+behind `ink` — which is the treatment the *ending rows* below it use, and the
+artifact's `modeCard` fills the chosen tile with the accent and writes it in
+white on purpose. DESIGN_SYSTEM.md has listed "pickup/dine mode" under the
+accent-background selected state all along. The two controls are drawn
+differently because the mode is the louder of the two questions; copying the
+rows' treatment upward left the chosen mode reading as a hover state. It now
+matches the "as soon as possible" chip further down the same screen. The tile
+gap goes 5 → 6, the artifact's value.
+
+The artifact's `box-shadow` on that tile is still not copied: the phone draws
+no shadows anywhere, which is a standing deviation rather than a gap here.
+
+Docs: `SCREENS.md` (§3).
+
+### 2026-08-12 — The restaurant and "When & how" screens, brought back to the artifact
+
+Both screens had drifted from `docs/design/Amragrir (mob).dc.html` in ways that
+cost more than looks.
+
+**Restaurant.**
+
+- **One sticky bar with both exits**, the table above the basket, each drawn
+  only where it has something to do. "🪑 Book a table" had been inside the
+  sheet, under the address and above the menu tabs, where it was scrolled past
+  rather than pressed. It is **filled while the basket is empty and outlined
+  once it is not** — the artifact's own rule, and the reason is that two solid
+  orange buttons name no first one.
+- **A dish already in the basket draws `−  2  ＋`** in place of the `＋`. Until
+  now the only way to change your mind about a dish was to open the basket, and
+  the menu went on offering "add" as though nothing had happened. The count is
+  the basket's, and it is not drawn at all where the basket belongs to another
+  restaurant.
+
+**When & how.**
+
+- **"Pickup type" is the artifact's full-width rows**, with the half-sentence
+  that tells the endings apart ("Collect it and go"), a ✓ disc on the one
+  chosen, and — on the dead "Eat at the Restaurant" — a "needs booking" pill and
+  an arrow disc. They were two small tiles with room for the names and not for
+  the sentences.
+- **Both time pickers fold.** The day and hour live on one row ("📅 Sat 15 Aug ·
+  19:30", "🕐 As soon as possible · ~15 min · 14:25") with the calendar or the
+  grid behind it and a "Done" button. This screen used to open a month, seventy
+  chips, a stepper, a deposit card and a second grid of times all at once. The
+  ready time starts folded, because an untouched basket already means "as soon
+  as possible" and the row says so; the calendar starts open while nothing is
+  chosen, or "Choose time" would be written on the row and on the button below
+  it with nothing behind either.
+- **A "Your order" card**, which the phone did not have: the lines, Subtotal,
+  Service, any discount, the deposit on a dine-in basket, and "You pay" /
+  "Total" — `dueNowAmd` or `totalAmd`, the same figure the button carries. The
+  basket was a screen behind and the checkout a screen ahead, and in between
+  somebody was choosing an hour for dishes they could not see. Every figure is
+  the quote's; nothing here is added up (`youPay` is the one new string, in all
+  three languages).
+
+Two things the artifact does were deliberately not copied. It offers a ready
+time on a dine-in basket as well, where the table's hour is already the food's
+hour — the rule against that stands (SCREENS.md §5). And its "View basket" bar
+prints a running total, which no screen in this app computes.
+
+`formatDayShort` joins `format.ts` for the folded date row, with tests.
+
+Docs: `SCREENS.md` (§3, §5), `COMPONENTS.md` (`BookingCalendar`).
+
+### 2026-08-12 — "Book a table" opens "When & how", and the phone loses a screen
+
+The restaurant page's "🪑 Book a table" had a screen of its own
+(`app/book/[branchId].tsx`, built 2026-08-10), while the basket's "Choose time"
+opened the pre-order screen. Two screens, one question — when are you coming and
+what does it cost — and two places that had to agree about the calendar, the
+party size, the deposit and what a mis-tap does with somebody's money.
+
+The reasoning for splitting them was recorded at the time: the pre-order screen
+is a *basket* screen, and a booking has no basket. That was true of the code and
+wrong for the guest. **The web had already made the same correction in the other
+direction**, folding its `/book/{slug}` page back into the checkout on
+2026-08-07, and its note in `USER_FLOW.md` §3a said why. The phone now does the
+same: `book/[branchId].tsx` is deleted and the press opens `/preorder` with the
+branch id and the restaurant's name, since an empty basket names no restaurant.
+
+**The quote is simply absent.** Everything that needed one goes with it — the
+lines, the "Food ready at" grid, the ready summary, the endings row, the
+checkout CTA. What is left is the title, the mode row, the calendar and "Book
+the table · deposit", which is what that separate screen was.
+
+- **Both mode tiles are still drawn**, as on the web. Table booking is ticked and
+  inert; **Pre-Order goes to the menu** rather than switching an empty basket to
+  pickup and leaving somebody on a screen with nothing to settle.
+- **A basket at another restaurant counts as none.** It is not priced under this
+  branch's name and nothing here moves it to dine-in — that basket is somebody's
+  dinner somewhere else.
+- **A basket at *this* branch is not the table-only shape at all.** The screen
+  opens in Table booking mode with the quote, the deposit and the checkout CTA:
+  booking a table for the food already collected, which is what it always meant.
+- **The horizon still differs by shape** — the full `RESERVATION_MAX_LEAD_DAYS`
+  where nothing is cooked, the shorter order horizon where the table carries
+  food, or the deposit would be taken for a meal the payment then refuses.
+- **Sign-in before the deposit, on both shapes now.** The booking press sends an
+  unverified account to Auth. The basket shape used to let the API's refusal come
+  back after the amount had been named.
+
+`BookingCalendar` keeps its reason to exist: one reading of one availability
+answer. It now has one caller instead of two.
+
+Docs: `SCREENS.md` (§5 and the mobile screen tables), `USER_FLOW.md` (§3b),
+`COMPONENTS.md` (`BookingCalendar`, "Book a table").
+
+### 2026-08-11 — The phone stops offering a table where none can be booked
+
+`/preorder` drew "Table booking" beside "Pre-Order" at every restaurant. At one
+that takes no bookings — no `reserve` declared, or declared and paused — the
+tile led nowhere but a red "This restaurant does not take bookings" notice, and
+an empty screen under it where a calendar should have been. A door painted on a
+wall, and the guest had to press it to learn there was nothing behind it.
+
+The web has drawn that tile conditionally since 2026-08-07, on
+`quote.reservationsEnabled`. The phone could not: its `Quote` type never carried
+the field, though the API has always sent it. It carries it now, and the tile,
+the dead "Eat at the Restaurant" door and the calendar behind them all open and
+close together. Both gates are on the quote rather than on `services`, because
+the pause switch is not in `services` and a client working the rule out for
+itself is a second copy to disagree with.
+
+A basket that is **already** dine-in keeps its tile even when the answer is no:
+bookings can be paused while somebody is mid-order, and hiding the mode they are
+standing in would leave them reading the refusal with nothing to press. That is
+now the only way to reach that notice. The lone "Pre-Order" tile stays a row —
+one tile is no longer a question but a label naming the kind of order being
+placed. And since the phone renders before its first quote, Table booking
+*arrives* when the answer does rather than being drawn on a guess and taken back
+out from under a finger.
+
+The restaurant screen's own "🪑 Book a table" button already checked both halves
+and is untouched.
+
+Docs: `SCREENS.md` (§5).
+
+### 2026-08-11 — The basket finally shows the restaurant it is from
+
+The phone's basket had never drawn the artifact's restaurant card. It said the
+name once, in 13.5px grey under the title, which is enough to recognise a
+restaurant and not enough to check one — nobody about to choose a collection
+time could see from this screen which address they would be collecting from.
+The web closed that gap in August with `BranchCard`; the client the mock was
+actually drawn for still had the hole.
+
+`BranchBanner` on `/basket` is the mock's own shape, not the web's row: a 140px
+cover with the rating on glass in its corner, then the name, `cuisine · $$ · N
+reviews`, and the tags. Two deliberate departures from the drawing, both
+already settled on the web — 📍 carries the **address** rather than a distance,
+which is measured from an origin a basket does not have and is reported by no
+endpoint here, and the prep tag carries the **quote's** minutes, which price the
+dishes actually collected rather than the branch's general figure.
+
+The restaurant is fetched by branch id, since a slug resolves to one kitchen of
+a restaurant that may be several and an address from the wrong one is worse than
+no address. The call is expendable: a basket must still show what was collected
+and what it costs when the catalogue is having a moment, so a failure leaves the
+banner undrawn and touches nothing else. The card is not pressable — the back
+button and "＋ Add more items" already go to the menu.
+
+Docs: `SCREENS.md` (§4).
+
+### 2026-08-11 — The menu tabs are a row, not a block
+
+"Popular / Mains / Sides / Drinks" wrapped. Four pills fit across a phone in
+English and do not in Armenian — `menuTabPopular` is "Հանրաճանաչ", most of a
+line on its own — so the last tab fell onto a second row and pushed the dish
+list down, on the screen that exists to show dishes. The same would happen to
+any restaurant whose menu ever names more than four categories.
+
+Both clients now scroll the strip sideways instead. On the phone it is a
+horizontal `ScrollView`, the same rail the home screen's categories and filters
+already are, pulled out to the sheet's edges with the padding moved inside so
+the first pill sits where it did. On the web it is `overflow-x: auto` with
+`flex: none` pills, so a strip wider than the column scrolls at full size rather
+than squeezing every label — and a strip that fits shows no scrollbar and looks
+unchanged. The web pill also became `position: relative`, because the radio
+inside it is what a keyboard scrolls into view, and measured from a further-out
+ancestor it would have arrowed to a tab and left it off screen.
+
+Docs: `SCREENS.md` (§3).
+
+### 2026-08-11 — The finger that leaves last is not choosing a place
+
+Zooming the picker's map moved the **chosen location**, which is the one thing
+the gesture must never touch. Reported as "whichever way I do it, one finger
+comes off slightly later, and that changes the point" — which is exactly the
+mechanism.
+
+Two fingers never leave the glass together. Things sit **above** the map's touch
+overlay — the address badge across the bottom, the ± keys, the credit — and when
+the finger that was holding the overlay lifts first, React Native decides no
+touch of its own is left and hands the gesture back. The finger still down then
+takes the overlay again on its next movement, as a *new* gesture: a few pixels
+long, released almost at once, which is the exact shape of a tap. So the map
+picked a point wherever the hand happened to be coming off the screen, and the
+badge and the feed followed it.
+
+`YandexMap` now counts the fingers a gesture has had (`fingers`) and forgets
+that count in only two places: when a finger lands on an empty screen, and when
+the last one leaves. Anything that has ever had two fingers can no longer become
+a tap or a pan, however many times the responder changes hands in between. The
+zoom itself is unaffected — it settles when the first finger goes, which is also
+when the reading is honest, before the lift-off drift. A gesture taken away
+mid-pinch (`onPanResponderTerminate`) now commits what the fingers had already
+asked for instead of discarding it.
+
+Verified in the running app with a staggered release — one finger lifted, the
+other left drifting on the glass before coming off: the map zooms a level and
+the chosen address is untouched. A deliberate tap straight after a zoom still
+picks normally.
+
+Docs: `COMPONENTS.md` (`YandexMap` mobile), `SCREENS.md` (§1).
+
+### 2026-08-11 — The pinch that scaled the map but never zoomed it
+
+The gesture added in the entry below ran, drew, and reported a zoom level of
+zero for every pinch a hand actually makes. Four things were wrong, and only the
+last one is a typo's worth of code.
+
+**A quarter larger is now a zoom level** (`zoomSteps`, `PINCH_STEP` in
+`@amragrir/shared/map-view`). `round(log₂(spread))` on its own answers zero
+until the fingers are `√2` — half as far again as they started — which on a map
+box the size of a phone's is most of the box. So the picture scaled while the
+fingers moved and sprang back unchanged when they lifted, which is exactly what
+"two-finger zoom does not work" looks like. Past `PINCH_STEP` the answer is
+never zero; rounding is left to decide between one level and several. Compared
+as a ratio rather than a logarithm, because `1.25` and `1/1.25` do not have
+logarithms of equal size in floating point and a gesture that worked one way and
+not the other would be a strange bug to find.
+
+**The scaling is anchored on the fingers, not on the middle of the box.**
+Whatever was being pinched used to slide away from the hand doing the pinching,
+and the frame then landed slightly off it. The pin outside the frame follows the
+same transform, so it stays on its street throughout.
+
+**The gesture's baseline is read when the second finger lands**
+(`onPanResponderStart`), not from the first `move` — by which point the hand has
+already travelled and about 5% of the pinch has been eaten. That is the
+difference between a 1.28× pinch reaching a level and just missing it.
+
+**And the picture may no longer shrink past its own bleed** (`shownScale`):
+below that the edges come into the box and the gesture becomes a rectangle of
+background with a small map in it.
+
+**A trackpad's pinch is a wheel, not a touch** — new `wheelZoom.web.ts`, a
+no-op on a device. It is why "two fingers" appeared to do nothing in the browser
+build long after it worked on a phone: `ctrl`+wheel is what the browser reports
+and no touch ever reaches the responder. It is handed to `YandexMap` in the same
+shape a pinch has, so nothing there knows the difference; a plain mouse wheel is
+a level a notch, and the pause after the last notch stands in for the fingers
+lifting — one reload per gesture rather than one per notch.
+
+6 new tests for `zoomSteps` (`apps/mobile/src/map-zoom.spec.ts`). Verified in
+the running app: a 1.28× pinch, a 0.75× pinch, `ctrl`+wheel and a plain wheel
+each move the widget's `z` by one level and re-centre on the point held; tap,
+drag and the geocoder are unchanged.
+
+Docs: `SCREENS.md` (§1), `COMPONENTS.md` (`YandexMap` mobile).
+
+### 2026-08-11 — A search answers in the alphabet it was asked in, and two fingers zoom
+
+Two corrections to the phone's location picker, both found by using it.
+
+**`GET /geocode`, new on the API** (`apps/api/src/geocode`) — a proxy for
+Yandex's geocoder, `q` in or `lat`/`lng` in, `{ items, failed?, available }`
+out. Public like the catalog (a guest chooses where they are before signing in)
+and throttled to 30/min per IP, tighter than the default 120, because unlike the
+rest of the catalog every call spends a metered quota. `YANDEX_GEOCODER_API_KEY`
+is optional and documented in `.env.example`; without it the endpoint answers
+`available: false` and the picker draws no search box.
+
+**Because the device's geocoder could not do the one thing that was asked of
+it.** The entry below chose `expo-location` over a proxy: no key, no endpoint,
+works on a plane. What it cannot do is take a **language** — SDK 57's
+`geocodeAsync` accepts an address and nothing else — so it answered in the
+language of the *operating system*. Typing `Մաշտոց` on a Russian phone returned
+`проспект Маштоца`, where the website has always answered in the alphabet the
+question was typed in. So the phone now asks the same kind of proxy the website
+does, `queryLang` and the rest of the Yandex-facing code moved to
+`@amragrir/shared` (`geocoder`), and the two clients build one request:
+`Մաշտոց` → Armenian, `Маштоц` → Russian, Latin → the app's own language,
+because both other alphabets are routinely transliterated into it and it is
+evidence of nothing. Verified against a real key: an Armenian query on the
+Russian app answers `Մաշտոցի պողոտա…`, Cyrillic on the Armenian app answers
+`проспект Маштоца`.
+
+**The point's name follows** — a tapped pin and the home row's "Yerevan ·
+Northern Ave" are now written in the language the app is being read in rather
+than the language of the phone. `expo-location` is left doing the one thing only
+it can: reporting where the device is.
+
+**Pinch to zoom** (`YandexMap`). The responder knew one finger, so a two-finger
+gesture was read as a drag and the map slid sideways instead of zooming. The
+widget cannot be asked to zoom, so a pinch now scales the picture live and
+becomes a zoom level when the fingers lift — `round(log₂(spread))`, about the
+point pinched, clamped to the range where the map is still a city. A pinch too
+small to reach a whole level leaves the map alone, and a finger lifted mid-pinch
+does not become a pan. One reload per gesture, the trade `BLEED` already makes
+for panning.
+
+9 new API tests (the alphabet rule, a refused key, a timeout, the key never
+leaving the process) and the phone's picker tests rewritten around the endpoint.
+
+Docs: `API_DOCUMENTATION.md` (new section), `SCREENS.md` (§1),
+`COMPONENTS.md` (`LocationSheet`, `YandexMap` mobile), `DEVELOPMENT_GUIDE.md`,
+`apps/api/.env.example`.
+
+### 2026-08-11 — The phone can say where it wants to be, not only where it is
+
+The home screen's location row named the device's position and, unless the
+permission had been refused, could not be pressed. So the one question the
+website has answered since its header grew a pin — *show me what is near
+somewhere else* — had no answer on the phone: somebody planning to collect an
+order near the office had to be standing there for the distances and the
+"Nearest" order to mean anything.
+
+The row now opens **the artifact's `LOCATION PICKER`**
+(`apps/mobile/src/components/LocationSheet.tsx`), and it is the web's dialog
+feature for feature: **the map** with any point tappable, **address search**,
+**recently chosen places**, **the device's own position**, and **the ✕ on the
+badge** that gives the choice back. Nothing is stored until Confirm, so a point
+tried and abandoned costs nothing and the feed refetches once per visit to the
+sheet rather than once per point. What is stored is a point — `lat`, `lng` and
+the name to show for it — in `AsyncStorage` (`src/place.ts`), and it is what
+`GET /restaurants` is asked from then on.
+
+**The map is Yandex's public widget in a `WebView`** (`components/YandexMap.tsx`,
+`react-native-webview`), not a native map. `react-native-maps` would have meant
+Google's tiles, a Cloud project and an Android key in `app.json` — for a control
+whose whole job is pointing at a street. The widget takes no key at all, and it
+is the same map the website shows. As there, **the frame is never asked what
+happened inside it**: it is another origin, so a tap and a pan in there are
+invisible out here. It is wrapped `pointerEvents="none"` — the `inert` of the
+web version — and the app owns the viewport: the pin is drawn in
+`react-native-svg`, the pan is a transform on a `PanResponder`, and a drag
+slides tiles inside a `BLEED` margin so that looking around costs no reload.
+
+**No geocoder key, and no new endpoint** — the phone named points with
+`expo-location`, which needs neither. **Reversed the same day**: see the entry
+above. A device geocoder takes no language and so answers in the language of the
+OS, which is the one thing this feature could not accept. What survived the
+reversal is the sentence a broken search says — "Search is temporarily
+unavailable" rather than "Nothing found", the distinction the web's route draws
+with `failed`.
+
+**Clearing the choice means something different here, deliberately.** On the web
+it is the whole city, because a browser that has not been asked has no position
+at all. A phone has one, so `null` hands the feed back to the GPS and the badge
+reads "Near you"; `useOrigin` and its Republic Square fallback are unchanged and
+now apply only while nothing is chosen.
+
+**The two pickers now share their core** (`@amragrir/shared`): `places` — the
+`Place` shape, coordinate precision, `metresBetween`, the recents rule (five,
+120m apart), the six districts and `nearestAreaPoint` — and `map-view`, the
+ellipsoidal-Mercator projection (EPSG:3395), the widget and site URLs and
+`yandexLang`. The web's `lib/map-frame.ts` is now a re-export and
+`lib/locations.ts` keeps only what a browser has: the cookie and the drawing's
+pin coordinates. Two implementations of "which point did that tap land on" would
+eventually have put the pin on different streets on the two clients.
+
+**The frame is the one platform-specific piece** (`MapFrame` /
+`MapFrame.web.tsx`): a `WebView` on a device, an `<iframe>` in the web build,
+where `react-native-webview` has no implementation and renders a line of red
+text saying so. Same widget, same URL, same viewport logic above it — so
+`expo start --web` shows the real map too. **A drawn placeholder was tried there
+first and removed the same day**: this control exists to point at a street, and
+a hand-drawn city that is not Yerevan cannot be pointed at.
+
+Driving that build also turned up something a typecheck cannot: the **search box
+is not drawn where nothing can answer it** (`CAN_GEOCODE`). The geocoder here is
+the *device's*, and Expo's web implementation answers `geocodeAsync` with an
+empty list rather than refusing — so the sheet reported "Nothing found" for a
+search no geocoder had heard. That is the website's own rule for a deployment
+with no geocoder key.
+
+New dependency: `react-native-webview@13.16.1` (the SDK 57 build; it ships in
+Expo Go, so nothing about how this app is run changes). 26 new tests cover the
+store, the recents rule, naming a point and the two shapes a search can fail in;
+the web's 369 pass unchanged, which is what the shared extraction had to prove.
+
+Docs: `SCREENS.md` (§1), `COMPONENTS.md` (`LocationSheet`, `YandexMap` mobile,
+`YandexMap` web), `USER_FLOW.md`, `DEVELOPMENT_GUIDE.md`,
+`apps/mobile/README.md`.
+
+### 2026-08-11 — "Edit profile" edits something
+
+The Settings row had a chevron and no handler: it looked pressable and answered
+nothing, which is the one thing this app's own component notes say a control must
+never do. It mattered more than an ordinary dead row, because sign-up now demands
+a name — so the product asked for something it gave nobody any way to correct
+except by going back to the sign-up tab and re-verifying a phone number.
+
+Pressing it now opens a **bottom sheet with one field**
+(`apps/mobile/app/settings.tsx`), seeded with the current name, on the country
+picker's measurements so the app has one bottom sheet rather than two that nearly
+match. Cancel, or Save → `PATCH /me`, which has existed and taken a name the
+whole time and had no caller on this client.
+
+**Only the name**, as asked, and there is nothing else honest to put there: no
+screen in this app collects an email, and there is no avatar upload — a fuller
+form would be three fields, two of which lead nowhere. One input is also why this
+is a sheet rather than a route, where a back gesture would sit in place of
+Cancel.
+
+**Saving is deliberately not optimistic.** The switches above it are one bit that
+can be put back; this is text somebody typed and would have to retype. The sheet
+holds still under a spinner and closes on the answer, then writes **the name the
+server returned** into the session — `AuthUser` is fixed for a token's life, so
+without that the profile header and the home greeting would go on showing the old
+name until the app restarted. That is the new `updateUser` on the session
+context: not a write, a record of one the API already accepted.
+
+The two-character floor is the sign-up screen's, now shared rather than copied
+(`apps/mobile/src/name.ts` — `MIN_NAME`, `normalizeName`, `isValidName`), so the
+two screens that ask for a name cannot drift apart. **`PATCH /me` now trims it
+and refuses to blank it** (`apps/api/src/users/users.service.ts`): whitespace is
+not a name, and a settings screen able to empty a field that sign-up requires
+would undo that rule with one keystroke. The row is absent for a guest, whose
+account is this device and has no name to carry.
+
+New keys `save` and `nameRequired` in all three dictionaries. 11 new tests (the
+shared rule, and `updateProfile`, which had no spec at all): 125 mobile and 1190
+API tests pass; `tsc --noEmit` clean on both and on `@amragrir/i18n`.
+
+Docs: SCREENS.md §12, API_DOCUMENTATION.md (`PATCH /me`).
+
+### 2026-08-11 — Signing up on a number you already hold now corrects the name
+
+`POST /auth/verify-code` took the name and filled it in **only where none was
+stored**. Paired with the required field below, that turned the sign-up tab into
+a trap: somebody whose account carried a wrong name — a typo, an old spelling,
+a name entered by whoever set the phone up — typed the right one, was signed in,
+and found the old one still on their profile, on their orders and in front of
+the restaurant. Nothing else in this product renames an account, so there was no
+second place to go and fix it.
+
+A name sent to `verify-code` now **replaces** the stored one
+(`apps/api/src/auth/auth.service.ts`). The authority for that is the call itself:
+the OTP for that number is verified before the row is touched, so whoever is
+asking has proved they hold the phone the account is keyed on — the same proof
+that lets them sign in and read every order on it. Renaming your own account is
+strictly less than what the surrounding request already grants.
+
+Two things it cannot do. It **cannot blank a name**: the value is trimmed
+server-side and an empty result is treated as absent, so whitespace changes
+nothing and the log-in tab — which sends no name at all — never touches the
+field. And it **cannot rename somebody else**: without the right code for that
+number there is no request to begin with.
+
+The web's sign-up tab inherits this, being the same call with the same field.
+The API's contract is unchanged (`name` stays optional, the column stays
+nullable); only what it does with a name that arrives has changed. The spec that
+asserted the old rule is replaced by five covering the new one — replace, fill,
+whitespace, absent, and whitespace on a fresh account. 1184 API tests pass;
+`tsc --noEmit` clean.
+
+Docs: API_DOCUMENTATION.md (`POST /auth/verify-code`), SCREENS.md §0.
+
+### 2026-08-11 — Sign-up on the phone will not proceed without a name
+
+The sign-up tab drew a "Full name" field and then let Continue through with it
+empty. That is a form asking a question it does not mean — and the cost is not
+cosmetic: nothing in this product renames an account afterwards, so an account
+opened that way is identified by its phone number to the customer, to the
+restaurant and on every order, permanently.
+
+The field is now required on that tab (`apps/mobile/app/auth.tsx`): at least two
+characters after trimming — one is an initial — capped at the API's 120 as
+before. Continue stays disabled until there is a name, which is the bargain the
+number field already makes rather than a refusal fetched from the server, and the
+label carries the screen's only asterisk. The hint under the field waits the way
+`PhoneField`'s does: silent while the field is untouched, spoken once it is left
+**or** once the number is whole — that being the moment Continue would otherwise
+be lit, where a dead button with nothing explaining it is worse than an early
+word. New key `authNameRequired` in all three dictionaries.
+
+Two limits worth stating, since this is a rule about a form rather than about
+accounts. **The API's contract is unchanged**: `verify-code` still declares
+`name` optional and the column stays nullable, so accounts without one keep
+working and are identified by the number they verified. **The web is
+unchanged**: its sign-up still submits without a name, so the two clients
+diverge here until that is settled either way.
+
+A third limit was stated here and has since been removed rather than lived with:
+a name typed on this tab used to be discarded when the number already had an
+account. That made a required field into a trap, and is fixed in the entry
+above.
+
+114 mobile tests pass; `tsc --noEmit` clean on the app and on `@amragrir/i18n`.
+
+Docs: SCREENS.md §0, USER_FLOW.md §1, COMPONENTS.md.
+
+### 2026-08-11 — A guest may save a restaurant, and keeps it after signing in
+
+Pressing the heart as a guest opened the sign-in screen. The rule behind that is
+sound on the server and stays exactly as it is — `POST /favorites` requires a
+verified phone, because a `favorites` row written against a per-device guest
+session belongs to a token nobody can ever produce again. What was wrong was the
+**client's** reading of it. Saving a restaurant is not an account operation to a
+customer; it is a bookmark. The app was asking somebody to open an account before
+letting them express the one preference that would give them a reason to, and
+answering a tap on a heart with a phone-number form.
+
+A guest's favourites are now kept on the phone
+(`apps/mobile/src/guest-favorites.ts`, AsyncStorage) and **handed to the account
+at sign-in**, so the hearts survive verification rather than being the price of
+it. The feed, the restaurant screen and the Favorites tab all read the phone's
+list when there is no verified account behind the session and the API's when
+there is; nothing about a signed-in session changes.
+
+The store keeps whole `FavoriteItem` rows, not ids: a guest has no
+`GET /favorites` to redraw a card from, and the row copied off the pressed card
+carries the same fields the endpoint would have returned. That snapshot is
+allowed to go stale — a restaurant that renames itself keeps its old name on that
+phone until sign-in replaces the local list with the server's — which is the
+price of a tab that works with no account behind it. Reads are defensive about
+their own format, since storage outlives the version of the app that wrote it: a
+half-written row is dropped or defaulted, never rendered as a crash.
+
+The handover (`adoptGuestFavorites`) runs after the session is installed and
+before the home screen appears, so nobody watches their hearts reappear a
+repaint late. `POST /favorites` is idempotent, so it is a blind replay rather
+than a merge. Only what the server accepted leaves the phone: a restaurant
+deleted in the meantime (404/400) is dropped, since retrying it forever means
+never being rid of it, while anything that merely failed to send — an offline
+sign-in — stays and goes again next time. Tokens do not survive a restart yet,
+so those hearts are still that guest's when the app comes back.
+
+**Sign-out deletes the device's copy**, the same bargain the basket makes: the
+list is normally already empty by then, but a transfer that failed must not leave
+one person's saved restaurants filling the hearts of whoever picks up the phone
+next.
+
+17 new tests cover the store — parsing junk, ordering, the handover and what it
+keeps. 114 mobile tests pass; `tsc --noEmit` clean.
+
+Docs: SCREENS.md §5 and §9, ROLES_AND_PERMISSIONS.md §1, USER_FLOW.md §9.
+
+### 2026-08-11 — A guest's profile offers the account, not the five things an account has
+
+The phone's profile drew its whole menu to everybody. Somebody who had not
+verified a number was offered **Payment methods, Order history, My bookings,
+Rewards & coupons and Settings** — five rows that each name a record only an
+account has. Every one of them led somewhere that had to refuse: an empty list,
+a 401 swallowed into a blank state, or a sign-in wall behind a chevron. The
+screen already knew better one section higher up, where the three counters stay
+away from a guest because "0 orders" is a statement about somebody and there is
+nobody yet; the menu was making the opposite promise directly underneath it.
+
+For a guest those five rows are now absent (`apps/mobile/app/(tabs)/profile.tsx`).
+What is left is what a guest actually has: the **Favorites** row — kept because
+it is already a tab, so hiding it here hides nothing, and its empty state offers
+browsing rather than a wall — the language switch, which belongs to the device
+and not to the account, the referral card, which is an offer rather than a
+record and whose screen already renders the terms without a link for a guest,
+and the **Sign in** button. The rows come back whole on verification; nothing
+about a signed-in profile changes.
+
+One knock-on worth naming: `/settings` is reachable on the phone **only** from
+this menu, so a guest now has no route to the dark-mode toggle. The theme is a
+device preference — the settings screen keeps it for guests deliberately, unlike
+the two account switches — so this is a gap, not a rule. Closing it means either
+a theme control beside the language switch on the profile, or a guest-visible
+Settings row; that is a product call and is left open rather than guessed.
+
+**And the way out is now named twice.** What the profile did offer a guest was a
+single button reading "Sign in" — a door for people who already have an account,
+put in front of exactly the people who do not. Registering existed on the screen
+behind it, as a tab, which meant the one act this product needs from a guest was
+reachable only by pressing the wrong word first and then noticing a second one.
+Sign in and **Sign up** now sit as equal halves of one row, the second filled
+with the accent because it is what a guest is usually here for, and it opens the
+gate at `?mode=register` so it lands on the tab it named
+(`apps/mobile/app/auth.tsx` reads the parameter). That address is the web's own
+for the same tab, so the two clients do not each invent one. Nothing behind the
+gate changes: the tabs still choose a field and not an endpoint, `verify-code`
+is still the single call, and the parameter only seeds the tab — whoever arrives
+on the wrong one can switch, as before.
+
+97 mobile tests pass; `tsc --noEmit` clean.
+
+Docs: SCREENS.md §0 and §10, USER_FLOW.md §8 and §10.
+
+### 2026-08-11 — Sign up on the phone, and a referral code that is real
+
+Two of the artifact's screens were reading as finished while missing the thing
+they were for.
+
+**The phone had no Sign up tab.** The artifact draws a Login / Sign up switch
+over the number field and a "Full name" field behind the second tab; the web has
+had both since §14c; the phone drew neither, so the one screen in the product
+that says *create an account* said only "sign in", and the name every other
+client offers to take at the door could not be given from the app at all. The
+switch is built (`apps/mobile/app/auth.tsx`) on the web's terms, because they
+are the artifact's too: **the tabs choose a field, not an endpoint.**
+`verify-code` takes an optional name and upgrades the guest in place whether the
+number is new or returning, so one call sits behind both tabs, and neither
+client can tell a returning number from a new one before the code is confirmed —
+the API decides.
+
+The name sits on the **first** step, never blocks Continue, and is trimmed and
+capped at 120 characters exactly as the web sends it. It stays a hint rather
+than an instruction: confirming a number that already has an account cannot
+rename that account from this form, and an account that gives no name is still
+identified by the number it verified. This does not undo 2026-08-10 below — the
+*code* step still asks for the code and nothing else, which was the point; the
+tabs are drawn on the phone step only, since switching them under a live OTP
+would offer a name field for a code already sent without one.
+
+**Every referral link the app has ever shared was worth nothing.** The referral
+screen built its link out of the first six characters of the account id — a
+string that reads like a code and is not one. No `referrals` row carries it, so
+`attribute()` looked it up on the invited account's first sign-in, found
+nothing, and returned without crediting anybody. Both sides lost the 2%, in
+silence, and the sharer had no way to notice. The screen now calls
+`GET /referrals/me` (`apps/mobile/src/api/endpoints.ts`), which is the only
+source there is: the code is **minted by that first read**, which is exactly why
+a client cannot derive it. No client had ever called the endpoint.
+
+The same answer fills the artifact's two stat tiles — friends joined, discount
+earned — which the phone had never drawn, with the API's numbers rather than its
+hardcoded 3 and 6%, so a new account honestly reads 0 and 0%. When the call
+fails (a guest, who has no account to credit, or an API that is down) the offer
+and the three steps still render and the link block does not: a referral screen
+with no link is honest, one with a link that credits nobody is not.
+
+`POST /referrals/share` (SCREENS.md §11) does not exist and is not needed —
+sharing is the OS sheet, and the API learns about it when the invited account
+signs up.
+
+90 mobile tests pass; `tsc --noEmit` clean.
+
+Docs: SCREENS.md §0 and §11.
+
+### 2026-08-11 — Every glass surface on the phone was a blur with no glass in it
+
+The favourite heart on a restaurant's cover was hard to see, and so was the back
+button next to it. Both were built: the artifact's 42px disc, in the right
+corner, with its exact heart path. What was missing was the surface under them.
+
+**`--glass` is a tinted panel *and* a blur.** In the artifact every one of these
+is `background: var(--glass); backdrop-filter: blur(N)` — 78% opaque in light,
+72% in dark, with the blur behind it. On the phone all five were built as the
+blur alone: a `BlurView` with no `backgroundColor`. `colors.glass` has been in
+`packages/ui` the whole time, in both themes, **used by nothing** — the same
+signature as `locNorthern` in yesterday's entry. `intensity` sets how far a blur
+reaches; it never says what colour the surface is, so each disc was worth
+whatever tint `intensity={8}` happened to produce, which over a photograph is
+close to nothing. The dark `ink` stroke of the heart then sat directly on the
+cover image, and read against it or did not depending on the photo.
+
+Fixed in all five places at once: the restaurant card's status badge and its
+heart, the restaurant cover's back and favourite discs, and the tab bar — whose
+comment already quoted `background:var(--glass); backdrop-filter:blur(18px)`
+from the artifact while the code below it set `backgroundColor: 'transparent'`.
+Content scrolling under the bar read straight through it.
+
+97 mobile tests pass; `tsc --noEmit` clean.
+
+Docs: DESIGN_SYSTEM.md (`--glass` is now recorded as panel + blur, with "a
+`BlurView` with no `colors.glass` under it is the bug" stated outright).
+
+### 2026-08-11 — The home feed gets the artifact's location line and chip row
+
+Two more of the artifact's controls that the phone had never drawn.
+
+**The location line** (§1) names the place every distance below it is measured
+from. The artifact prints a fixed `Yerevan · Northern Ave` — and `locNorthern`
+has sat in all three dictionaries since, translated, used by nothing. The phone
+reverse-geocodes the fix it has already taken and prints what came back, falling
+through `city · street`, district and region rather than printing a separator
+with nothing beside it. One call per fix, after the coordinates are already in
+use: Expo's own docs call geocoding resource-consuming, and neither the
+distances nor the order wait on a round trip for a string. Before the answer it
+reads "Near you"; refused, it reads "Turn on location" and is a button — asking
+again where the OS still prompts, opening app settings where it will not
+(`canAskAgain`, because iOS stops prompting after the first no). This is
+deliberately not the web's district picker: this app has a real sensor, and a
+list of six districts is what the browser has instead of one.
+
+**The quick-filter chips** (§1) are the artifact's row, and **seven of its eight
+are real**. Near me, Open now, Top rated, Ready soonest, Pre-Order, Reserve a
+table, Eat at the Restaurant — each maps to a `/restaurants` parameter the API
+already takes, and every label was already in `packages/i18n`, drawn by the web's
+own chip row. The eighth, "Special Offers", has no discount model behind it and
+is left out rather than drawn dead. "Ready in 15 min" is built as `sort=fastest`:
+the API orders by prep time and has no threshold, so a chip promising fifteen
+minutes would promise what the server never said.
+
+The chips and the filter sheet edit **one** `Filters`, so a chip lit on the feed
+is lit inside the sheet and Reset puts every chip out. `openNow` joins that
+state and the sheet still does not draw it — the reasoning in §13 has not
+changed, but it is a fair thing to offer in one press to somebody who did arrive
+asking it.
+
+**A sort the feed was applying behind its own back is now state.** The screen
+rewrote an unset sort into `nearest` on the way to the API. Harmless while
+nothing read it — and wrong the moment a chip did: the list came back ordered by
+distance while "Near me" sat unlit, and pressing it twice changed nothing either
+time. `HOME_FILTERS` now starts the feed on `nearest` outright. Reset in the
+sheet returns the API's own `recommended`, so the chip goes out and the order
+really does change, where before Reset silently re-applied distance.
+
+New keys `locNearYou` and `locEnable` in all three dictionaries (363 each, at
+parity). 97 mobile tests pass — seven new ones over the chip logic, which is
+where "this control lies about itself" is cheap to catch and expensive to see.
+`tsc --noEmit` clean on mobile, web and admin.
+
+Docs: SCREENS.md §1 and §13, COMPONENTS.md (`ChipRail`, `useOrigin`, `FilterSheet`).
+
+### 2026-08-10 — The phone's code step asks for the code and nothing else
+
+The mobile sign-in put a **"Full name" field under the SMS code**, on the
+reasoning that the code step is the moment the account becomes real. What it did
+in practice was stand between somebody holding a live OTP — 120 seconds,
+single-use, burned after five wrong attempts — and the field that consumes it.
+The field is gone (`apps/mobile/app/auth.tsx`), and `verify-code` is called with
+the number and the code only.
+
+**Nothing is lost by not asking.** The name has been optional on `verify-code`
+since it existed: the API writes it only where there is none already, so it was
+never an instruction, and an account that gives none keeps `name: null` — which
+`PublicUser` and the schema have always allowed. The web is unchanged and keeps
+its own name field, which sits on the **first** step behind a Sign up tab: asked
+before the code is sent, in the way of nothing.
+
+**So the profile stopped calling nameless accounts "Continue as guest."** Its
+header fell back to `t('authGuest')` — a button's label, and nobody's name —
+whenever `name` was null. Tolerable while sign-in collected one; wrong the
+moment it stopped, because that is now every new account. It reads the way the
+web profile always has: the name, else the number the account verified, else
+"Profile", with the number moving under the title only when it is not already
+the title, and the avatar disc taking the number's first **digit** rather than
+the `+` of its country code. The home greeting already handled the empty case.
+
+There is now no way to set a name from the phone — the settings screen's "Edit
+profile" row has never gone anywhere — and that is the right place for it when
+somebody builds it, not the code step. `authName` / `authNamePlaceholder` stay
+in the dictionaries; the web still draws them.
+
+90 mobile tests pass; `tsc --noEmit` clean.
+
+Docs: SCREENS.md §0 and §10, USER_FLOW.md §1.
+
+### 2026-08-10 — Log out, on the phone, actually logs out
+
+The settings screen's **"Log out" button had no `onPress`**. It was drawn in the
+artifact's destructive red, it pressed and released, and it did nothing —
+`apps/mobile/app/settings.tsx` rendered a bare `<Pressable>` around the label.
+Nothing else in the app could have made it work either: `SessionProvider` had no
+`signOut`, `api/endpoints.ts` had no `logout`, and the **refresh token was
+thrown away** at sign-in — `signIn(user, accessToken)` took the two fields it
+wanted out of `AuthResult` and dropped the one that ends a session.
+
+**The session now keeps the refresh token and revokes it.** `POST /auth/logout`
+has been implemented and public since Phase 1 and the web has called it since
+its own sign-out was built; the phone is the last client to. Dropping the bearer
+alone would have been the wrong fix and looks identical from the screen: the
+access token expires in 15 minutes, but the refresh token stays good for **30
+days** to anyone who has copied it. The call is best-effort, and the screen is
+cleared before it goes out — a token the server has already forgotten still has
+to disappear from this phone, so an unreachable API must not leave somebody
+signed in. Verified against the running API: logout answers 204, the same
+refresh token then answers **401 `Refresh token has been revoked`**, and logging
+out again with it is still 204, as API_DOCUMENTATION.md says.
+
+**A fresh guest session follows.** This app has no signed-out state — the
+catalog is public, but the basket, the quote and the whole checkout want a
+bearer — so signing out returns to exactly where a first launch starts. The
+handshakes are now generation-guarded: a slow guest reply that lands after
+somebody has signed in used to be able to install its token over theirs.
+
+**The basket goes with the session,** as it does on the web: it can name a table
+booked by the account that is leaving, and the next person to pick up the phone
+should inherit neither. **The orders and favourites tabs empty too** — both stay
+mounted behind the settings screen, and `GET /orders` and `GET /favorites` are
+refused for a guest, so a refetch alone would have left the previous account's
+rows on screen. The bell already tore its socket down when `phoneVerified` went
+false.
+
+**A guest is no longer shown the button.** They have nothing to end, which is
+the same reason the two account switches above it are already hidden for them.
+For everybody else it confirms first — destructive, like cancelling an order or
+replacing a basket — because undoing a mis-tap costs an SMS round trip. Then to
+the auth gate, replacing the settings screen rather than pushing over it
+(USER_FLOW.md §10, "Settings → Auth").
+
+New strings: `logoutConfirm` and a generic `cancel`, in all three dictionaries.
+90 mobile tests pass; `tsc --noEmit` clean for the app and for the web, which
+shares the dictionaries.
+
+Docs: SCREENS.md §12.
 
 ### 2026-08-10 — `dev` clears its own port before Nest binds it
 

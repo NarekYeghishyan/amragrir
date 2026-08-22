@@ -25,7 +25,13 @@ value in `app.json` overrides it and is what actually gets used.
 **That address is committed, and DHCP moves it.** When the app renders its
 chrome but every screen says "Cannot reach the server", check this first — the
 IP in `app.json` is probably the machine's *old* one. `curl http://<that
-ip>:3000/v1/health` from the dev machine settles it in a second.
+ip>:<that port>/v1/health` from the dev machine settles it in a second.
+
+The **port** in that value is no more fixed than the IP: it has to be whatever
+the API actually bound. 3000 is only the default, and another project on the
+machine can already be holding it — then the API goes up on `PORT=3007` and
+this value has to follow it, or every screen fails exactly as it does for a
+stale IP.
 
 **Changing it needs `--clear`.** Metro bakes the resolved config into the
 bundle and caches the result, so editing `app.json` and restarting is not
@@ -62,9 +68,13 @@ src/
 ├── api/                 # client (error envelope → ApiError), typed endpoints
 ├── cart.tsx             # the basket — client-side by design (see below)
 ├── order-stream.ts      # WebSocket status updates with reconnect
-├── components/          # RestaurantCard
+├── components/          # RestaurantCard, LocationSheet + YandexMap, …
 ├── theme/               # tokens from DESIGN_SYSTEM.md + useTheme (light/dark)
 ├── session.tsx          # guest session on launch, sign-in upgrades it
+├── origin.ts            # where "near me" is measured from when nothing is chosen
+├── place.ts             # the chosen place + recents, and naming a point
+├── guest-favorites.ts   # a guest's hearts, on the device until sign-in takes them
+├── name.ts              # what counts as a name — shared by sign-up and Settings
 └── format.ts            # money/distance/countdown display only
 ```
 

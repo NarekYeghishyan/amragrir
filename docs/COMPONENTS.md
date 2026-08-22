@@ -82,17 +82,41 @@ Surface wrapper.
 >   intercepting route and the layout's `@modal` slot were all removed and the
 >   markup lives in `checkout/page.tsx`.
 > - `FavoriteButton` — the heart on a **pre-rendered** page's banner. **Props:**
->   `restaurantId`, `language`, `returnTo`, `endpoint`, `labels`, `name`,
->   `className`. `RestaurantCard`'s heart is server-rendered in the state the
+>   `branchId`, `language`, `returnTo`, `endpoint`, `labels`, `name`,
+>   `className`. It takes the **branch** the page resolved to, since 2026-08-13:
+>   a favourite is one address (DATABASE.md §13), and one address is what this
+>   page is showing. `RestaurantCard`'s heart is server-rendered in the state the
 >   account is in, because every screen that draws a card already renders per
 >   request; a restaurant page is HTML on disk in three languages, so this one
->   ships hollow and asks `GET /[lang]/saved?restaurant=` what it should be once
+>   ships hollow and asks `GET /[lang]/saved?branch=` what it should be once
 >   it mounts — the same trade `OrderPanel` makes, for the same page. It is
 >   still a `<form>` posting `toggleFavorite`, so a scriptless visitor can save
 >   from here; un-saving is the one thing a page that cannot know the state
 >   cannot offer, and `/favorites` is where it exists for them. It posts
 >   `revalidate=0`, because revalidating would throw away a pre-rendered page to
->   change nothing on it.
+>   change nothing on it. **Since 2026-08-17 it reads through `lib/saved-client`**
+>   rather than fetching directly, because the menu's rows now ask the same
+>   question — see `DishHeart`.
+> - `DishHeart` — the heart on one row of a **pre-rendered** menu (2026-08-17).
+>   **Props:** `menuItemId`, `language`, `returnTo`, `endpoint`, `labels`, `name`.
+>   It saves the **dish** (DATABASE.md §13a), not the restaurant the banner's
+>   heart saves, and it makes the same trade `FavoriteButton` does for the same
+>   page: hollow in the HTML, its state read in the browser, still a `<form>`
+>   posting `toggleFavoriteDish` so a scriptless visitor can save from here.
+>   **Every heart on the page shares one request** — twenty rows asking separately
+>   would be twenty identical requests for one answer — through the module-level
+>   promise cache in `lib/saved-client.ts`, which is dropped on submit because the
+>   press has just changed the answer it holds. Module-level rather than context:
+>   the hearts sit in markup the *server* renders, so there is no client component
+>   high enough to hold the state without making the whole menu one.
+> - `FavoriteDishCard` — a saved dish on `/favorites` (2026-08-17). **Props:**
+>   `dish` (a `FavoriteDish`), `language`, `href`, `returnTo`. Built from the
+>   menu's own parts — the media placeholder, `.name`, `.desc`, `.price` — so a
+>   dish reads here as it did where it was saved, plus the one thing the menu did
+>   not have to say: which kitchen, since a dish saved at two branches is two rows
+>   with the same name. The heart is always filled and always removes. `href` is
+>   the caller's, and is `/r/{branchId}?item=…#dish-…`: the menu **at** the dish,
+>   because that is what having saved a dish was for.
 > - `BasketButton` — the header's basket. **Props:** `href`, `endpoint`,
 >   `label`. The artifact draws a solid accent pill carrying a cart glyph, the
 >   **running total** and a count badge, always present; it is the one control in
@@ -164,8 +188,8 @@ Surface wrapper.
 >   from — the card is the way back to the menu — and saving the place you are
 >   ordering from belongs there; the checkout is where money is committed, and a
 >   control that writes to the account one press from the button that charges the
->   card does not. It carries `restaurantId`, since a favourite is stored against
->   the business while everything else on this card is per-branch. The heart is an
+>   card does not. It carries `branchId` — a favourite is one address
+>   (DATABASE.md §13), and so is everything else on this card. The heart is an
 >   ordinary flex item between the rating and the chevron rather than a disc on
 >   glass, and wears `--chip`: this card is a row, not a photograph, so there is
 >   nothing under it to blur. Adding it meant the same restructure
@@ -365,8 +389,10 @@ Surface wrapper.
 >   inside a cross-origin frame can be read: a tap and a pan in there are both
 >   invisible out here. So the frame is made `inert` and this component owns the
 >   viewport instead — the pin is drawn on top, the pan is a CSS transform, and
->   `lib/map-frame.ts` projects between pixels and coordinates in **ellipsoidal**
->   Mercator (EPSG:3395), which is what Yandex's tiles use.
+>   the projection between pixels and coordinates is **ellipsoidal** Mercator
+>   (EPSG:3395), which is what Yandex's tiles use. That arithmetic moved to
+>   `@amragrir/shared` (`map-view`) on 2026-08-11 when the phone grew the same
+>   picker; `lib/map-frame.ts` is the web's name for it and adds nothing.
 >
 >   Tapping picks the point under the finger; dragging looks around and chooses
 >   nothing. Neither reloads: the frame is drawn `BLEED` pixels larger than its
@@ -523,35 +549,193 @@ The sign-in screen's country-and-number field (`apps/mobile/src/components/Phone
   the row therefore leads with the flag and the dial code, which are derived
   from the code itself and always render.
 
+### Name field (mobile sign-up)
+Not a component — a `TextInput` inside `app/auth.tsx`, listed here because it
+borrows this field's rules and must keep matching them.
+- **States:** empty / typing / left-and-empty. The label carries the screen's
+  only `*`; the invalid state is `colors.danger` on the border plus a hint under
+  it, exactly as above, so the two fields of one form scold in one voice.
+- **Required on the sign-up tab since 2026-08-11**, at two characters or more
+  after trimming, capped at the API's 120. Continue is disabled until then — the
+  same bargain the number makes, rather than a refusal fetched from the server.
+- **The hint waits, then insists.** Silent while the field is untouched; it
+  speaks once the field is left *or* once the number is whole, which is the
+  moment Continue would otherwise be lit and a dead button would have nothing
+  explaining it.
+- **The rule is not written here.** `MIN_NAME`, `normalizeName` and
+  `isValidName` live in `apps/mobile/src/name.ts` (tested), because the sheet
+  below asks for the same field and the two must not drift — the same reason
+  `PhoneField` reads its rules from `@amragrir/shared`.
+
+### NameSheet (mobile settings)
+The one field behind Settings → "Edit profile" (`app/settings.tsx`, 2026-08-11).
+- **Props:** `visible`, `value`, `error`, `saving`, `onChange`, `onCancel`,
+  `onSave`.
+- A bottom sheet on `PhoneField`'s picker measurements — one input and two
+  buttons is not a page, and a route would put a back gesture where Cancel
+  belongs. Seeded with the current name: this is an edit, not a new answer.
+- **Save is disabled until the name is valid** by the shared rule above, and
+  **not optimistic** — a switch is one bit that can be put back, this is text
+  somebody would have to retype. Spinner in the button, sheet closes on the
+  answer, and the caller writes the name the *server returned* into the session.
+- One hint line carries both the requirement and the API's refusal: they answer
+  the same button, and two lines under one field would be one too many.
+
 ### RestaurantCard
 Large Home / See all feed card.
-- **Props:** `image`, `name`, `rating`, `reviewsCount`, `cuisine`, `priceLevel`, `distanceKm`, `prepMin`, `isOpen`, `services: string[]`, `isFavorite`, `onPress`, `onToggleFavorite`.
-- **The heart sends `restaurantId`, not the row's `id`.** A card is a *branch*;
-  a favourite is stored against the *restaurant* (DATABASE.md §13). `GET
-  /restaurants` returns both fields for this reason.
+- **Props:** `image`, `name`, `rating`, `reviewsCount`, `cuisine`, `priceLevel`, `distanceKm`, `prepMin`, `isOpen`, `services: string[]`, `dishes?`, `isFavorite`, `onPress`, `onPressDish?`, `onToggleFavorite`, `isDishFavorite?`, `onToggleDishFavorite?` (web: `savedDishes?: string[]`).
+- **Under a category filter the card wears its dishes instead of its cover**
+  (2026-08-16). `dishes` arrives on the row from `GET /restaurants?category=` —
+  up to `CARD_DISH_SLIDER_LIMIT` (10) matching dishes with picture, name and
+  price, bestsellers first — and the cover gives way to a horizontal strip of
+  them. A guest who tapped "Sushi" is choosing between kitchens on the strength
+  of the sushi; a photograph of the dining room does not help. The open/closed
+  badge, which normally floats on the cover, moves into the card's tags.
+  `onPressDish` opens the branch at that dish (SCREENS.md §3); a screen that
+  cannot route to a dish passes neither prop and the card is unchanged.
+  **Absent and empty differ**: no filter (cover), versus a filter whose every
+  match is sold out tonight (cover, and the card is still true).
+- **The slide is square**, and so as tall as the card is wide. It matched the
+  cover's height first, to keep a card the same size filtered or not — and that
+  was the wrong thing to optimise for: a cover is a room, which a letterbox
+  suits, and this is a plate. A plate cropped to a third of its height is a
+  photograph of a table edge. The open/closed badge, the rating and the heart
+  keep the corners they always occupied; they sit over the *frame* rather than
+  inside a slide, so they hold still while the photographs move under them.
+- On the **web** the strip sits *outside* the card's own `<Link>`: each plate is
+  a link of its own, nested anchors are invalid, and the browser would drop one
+  of them. Its href carries both `?item=` (which heading to open, resolved on
+  the server) and `#dish-` (which row to scroll to), so a tap lands on the dish
+  with no JavaScript at all.
+- **The heart sends the row's `id`, which is the branch** (2026-08-13). A card
+  *is* one address — its distance, its opening state and its prep time all
+  belong to that address — and so is a favourite (DATABASE.md §13). It sent
+  `restaurantId` until then, so a chain's cards all went red together and none
+  of them could be given back on its own. `restaurantId` is still returned by
+  `GET /restaurants`, for the name and rating that do belong to the business.
+- **The card opens that branch too**, by id rather than by slug: a slug resolves
+  to the oldest branch, so the heart on a card and the heart on the page behind
+  it would otherwise disagree about the same press.
+- **While the card is wearing dishes, the heart saves the dish** (2026-08-17,
+  DATABASE.md §13a). The card is not showing a dining room then, and a heart over
+  a photograph of khinkali that saved the address was answering a question nobody
+  asked. In the app the card has one heart and it acts on the slide showing — the
+  slider's index is held by the card for exactly that, clamped on read so a
+  narrowed `dishes` cannot leave it pointing past the end. On the web each slide
+  carries its own instead, because a `<form>` rendered on the server cannot know
+  which slide is showing; the card's branch heart is then not drawn at all, since
+  two hearts in one corner would be a card asking somebody to aim. Both fall back
+  to the branch heart when the screen passes no dish props — a control that looks
+  pressable and answers nothing is worse than one fewer control.
 - `onToggleFavorite` is optional in the app: where a screen cannot act on a
   favourite the heart is **not drawn**, rather than drawn dead. It was drawn
   dead until 2026-08-09 — a control that looked pressable and answered nothing.
 - The app fills the heart **before** the request lands and puts it back on a
   refusal; the web has no such state to keep, and its revalidation redraws the
   heart the way the server actually has it.
-- A guest has no favourites (ROLES_AND_PERMISSIONS.md §1), so their hearts are
-  hollow and a press routes to sign-in and back.
+- **On the phone a guest's heart works** (2026-08-11): it fills like anyone
+  else's, and the list is kept on the device until sign-in hands it to the
+  account (SCREENS.md §5). It used to route to sign-in and back, which answered
+  a tap on a heart with a phone-number form. The card itself is unchanged — the
+  screen decides where the write goes. On the **web** a guest still goes to
+  sign-in: a server-rendered heart has no device store behind it.
+
+### DishSlider (`apps/web/src/components/DishSlider.tsx`) / `DishStrip` (in the app's card)
+The matching dishes on a filtered card — **one dish per slide, the card's full
+width**.
+- **Props (web):** `dishes: CardDish[]`, `href`, `labels: {prev,next,goTo}`,
+  `favorite?: {language, returnTo, saved: string[], labels: {add,remove}}` — given,
+  every slide draws a heart that saves **that dish**; omitted, none does.
+  **Props (app `DishStrip`):** `dishes`, `onPressDish?`, `at`, `onAt` — the index
+  is the card's, since the card's heart acts on the dish it points at.
+- **One plate per slide, not a row of tiles.** It shipped as small tiles first
+  and they were the wrong shape: the plate is the thing being chosen, and at a
+  third of a card's width it is a thumbnail beside two other thumbnails with the
+  third sliced off at the border — which reads as a layout bug rather than as an
+  invitation to swipe. One square photograph the width of the card shows the
+  food at the size somebody decides on it.
+- **The name and price sit over the foot of the photograph**, on a gradient. Not
+  under it: the card already carries a name and a price lower down — the
+  restaurant's — and two stacked name/price pairs read as one confused block.
+- **Dots under the picture**, one per dish, the current one widened rather than
+  merely darkened, because a six-pixel colour change is not a difference
+  anybody notices in passing. They go below rather than on the photo: the
+  caption already occupies its foot, and dots over a gradient over a photograph
+  is three layers of contrast to get right for one control.
+- **The controls appear only once mounted** (web). Every dish is a real
+  `<a href>` in the server-rendered HTML, so a crawler and a scriptless visitor
+  get every slide and can still swipe or scroll between them — what they do not
+  get is a row of buttons that would answer nothing. The same rule the heart
+  follows.
+- **Arrows are overlaid on the photograph and stay put**, dimmed and `disabled`
+  at the ends rather than removed: an arrow that disappears shifts the other one
+  under the cursor between slides, and a control that comes and goes is one
+  somebody has to look for. `disabled` rather than a class, so it is genuinely
+  unpressable and announced as unavailable instead of merely painted that way.
+  This is a different question from the mount gate above — a button with no
+  JavaScript behind it can never work, while one at the end of the list works
+  again the moment you go back.
+- **Both measure rather than assume.** A slide is one card wide and that changes
+  with the breakpoint, so the web reads the nearest slide's `offsetLeft` and the
+  app pages on a width taken from `onLayout`. A hard-coded number drifts the
+  moment the grid reflows, and then a slide comes to rest showing two halves.
 
 ### RestaurantListItem
 Horizontal row (Favorites / search results).
-- **Props:** `image`, `name`, `meta`, `prepMin`, `rating`, `onPress`, `onRemoveFavorite`.
+- **Props:** `image`, `name`, `meta`, `where`, `prepMin`, `rating`, `onPress`, `onRemoveFavorite`.
 - On the Favorites screen the heart is always filled, and its one job is to give
-  the restaurant back — the row leaves the list on the press, and returns if the
+  the branch back — the row leaves the list on the press, and returns if the
   call is refused.
+- **`where` is the branch's address** (2026-08-13), drawn as `📍 …` under the
+  meta line, with the branch's own name and then its city standing in. A row is
+  one address now, so two branches of a chain are two rows — identical but for
+  this line, which is also why it goes into the remove button's label.
+
+### FavoriteDishRow
+Horizontal row on the Favorites screen's **Dishes** tab (2026-08-17).
+- **Props (app, inline in `favorites.tsx`):** the `FavoriteDish` row — photo, dish
+  name, `restaurant · address`, price, a "sold out"/"closed" note where either is
+  true, and a filled heart. The web equivalent is `FavoriteDishCard` above.
+- **It names the kitchen, not just the dish.** A dish saved at two branches is two
+  rows with the same name and the same photograph; the restaurant and its street
+  are what tell them apart, and they go into the remove button's label for the
+  same reason the branch row's address does.
+- **Sold out and closed are two different absences** and are said differently.
+  Neither drops the row: it is still saved, and a list that hid a dish because
+  the kitchen shut for the night would flicker with opening hours.
+- **The row opens the menu at the dish** — `?item=` on the phone's route and
+  `?item=…#dish-…` on the web — because coming back to that dish is what saving
+  it was for.
 
 ### DishCard
 Menu item.
-- **Props:** `image`, `name`, `description`, `caloriesKcal`, `prepMin`, `priceLabel`, `onAdd`.
+- **Props:** `image`, `name`, `description`, `caloriesKcal`, `prepMin`, `priceLabel`, `onAdd`, `isFavorite`, `onToggleFavorite`.
+- **The heart sits beside the name, not beside the `＋`** (2026-08-17). They do
+  different things — one saves the dish for later, the other orders it now — and a
+  pair of controls side by side invites the wrong one to be pressed. The name is
+  also where the eye already is, on the thing being saved. The label names the
+  action, the dish and the state, because a menu is twenty near-identical
+  controls. On the web this row is a plain `<div>`, so the heart's `<form>` sits
+  inside it (`.dish-head`); see `DishHeart` for how a pre-rendered page fills it.
 
 ### MenuTabs
-Popular/Mains/Sides/Drinks tabs.
-- **Props:** `tabs: string[]`, `active`, `onChange`.
+The branch's own menu headings, with a "Popular" pill in front where it has
+bestsellers (2026-08-16). It was four fixed values until then — see
+BUSINESS_LOGIC.md §6 for why the branch owns this axis and the platform owns the
+category one.
+- **Props:** `tabs: {id,label}[]`, `active`, `onChange`.
+- The pills come from the menu response's `sections`, in the branch's order and
+  the reader's language, with the empty ones dropped — a pill that empties the
+  list when pressed is worse than one fewer division.
+- **Popular is not a section**: its pill is prepended, its id is
+  `POPULAR_SECTION_ID` (never a uuid, so it cannot collide), and it draws from
+  the whole menu on `isPopular`.
+- On the **web** the filtering is still CSS with no JavaScript, but the rules
+  can no longer live in `globals.css`: the ids are per branch, so the restaurant
+  page emits one `:has(input[value="…"]:checked)` rule per heading in an inline
+  `<style>`. `globals.css` keeps the half that is fixed — hiding every section,
+  guarded by `@supports selector(:has(*))` so a browser that cannot filter is
+  never left with a blank column.
 
 ### CategoryRail
 Horizontal cuisine category rail.
@@ -570,6 +754,146 @@ Modal filter sheet.
 
 ### LocationSelector
 - **Props:** `label`, `onPress`.
+
+> **Built on mobile (2026-08-11)** as the home screen's location row plus the
+> two components below. The row is the selector: it prints the chosen place, or
+> what the device reverse-geocoded to, or "Near you" / "Turn on location", and
+> it always opens the sheet — it was only pressable when the permission had been
+> refused before.
+
+### LocationSheet (mobile)
+The artifact's `LOCATION PICKER`, and the phone's half of a feature the website
+has had since its header grew a pin.
+- **Props:** `open`, `chosen: Place | null`, `onClose`, `onConfirm(place | null)`.
+
+> The same five ways to answer "where are you" as the web's `LocationPicker`:
+> the map (any point, by tapping), address search, recently chosen places, the
+> device's own position, and the ✕ on the badge that gives the choice back.
+> **Nothing is stored until Confirm** — one refetch of the feed per visit to the
+> sheet rather than one per point tried — and confirming also files the point in
+> the recents (`src/place.ts`, AsyncStorage, `withRecent` from
+> `@amragrir/shared`, so both clients agree that two points 120m apart are the
+> same corner).
+>
+> **Clearing means something different here than on the web, deliberately.**
+> There a cleared choice is the whole city, because a browser that has not been
+> asked has no position at all. A phone has one, so `null` hands the feed back
+> to the GPS (`useOrigin`) rather than to the centre of Yerevan — which is why
+> the badge reads "Near you" with nothing chosen.
+>
+> **Addresses come from `GET /geocode`** — the API's proxy, holding the Yandex
+> key, exactly as the website has its own route holding its own copy. So a
+> search answers **in the alphabet it was typed in** (`queryLang`), five results
+> at a time, and a tapped point is named in the app's language.
+>
+> It used the **device's** geocoder for a day (`expo-location`: no key, works
+> offline, three results because each name cost a second round trip) and that
+> was the mistake. SDK 57's `geocodeAsync` takes an address and nothing else —
+> no locale — so it answered in the language of the *operating system*, and an
+> Armenian query on a Russian phone came back in Russian. A search that cannot
+> answer in the alphabet it was asked in is the moment a search box stops
+> feeling like it understood you.
+>
+> **The search box is not drawn where nothing can answer it.** `canGeocode`
+> asks the API once per session (`GET /geocode` with no parameters, which
+> answers `available`) and the box appears only for a deployment that has a key
+> — the same rule the website follows, for the same reason: a box that can
+> answer nothing is worse than no box. A refused or broken search says "Search
+> is temporarily unavailable" rather than "Nothing found".
+
+### YandexMap (mobile)
+The same map as the web's, in a `WebView` instead of an `<iframe>`.
+- **Props:** `value: Place | null`, `onPick(lat, lng)`, `labels`
+  (`map`, `credit`, `zoomIn`, `zoomOut`).
+- **`MapFrame` / `MapFrame.web`** — the frame alone. **Props:** `url`, `title`,
+  `background`. It is a picture and nothing more; everything that makes it a
+  control is `YandexMap`.
+- **`useWheelZoom` / `useWheelZoom.web`** — the browser build's half of the zoom
+  gesture. **Takes:** the canvas ref and `(spread, centre, settled)`. Nothing on
+  a device.
+
+> **Why the widget and not `react-native-maps`.** A native map would mean
+> Google's tiles, a Google Cloud project and a key in `app.json` for the Android
+> build — for a map whose whole job is to let somebody point at a street. The
+> widget embed needs no key, no quota and no account, and it is the same map the
+> website already shows.
+>
+> **The WebView is never asked what happened inside it**, because it cannot
+> answer: everything in there is another origin. It is wrapped in a
+> `pointerEvents="none"` view — the `inert` of the web version — and this
+> component owns the viewport: the pin is drawn here with `react-native-svg`,
+> the pan is a transform driven by a `PanResponder`, and the projection is
+> `@amragrir/shared`'s, shared with the web so a tap cannot land on a different
+> street on the two clients. Tapping picks the point under the finger, dragging
+> looks around and chooses nothing, and only a zoom or a pan that has spent
+> `BLEED × 0.6` of the margin re-points the URL.
+>
+> **Two fingers zoom** (2026-08-11) — the gesture a map on a phone owes its
+> reader. The widget cannot be *asked* to zoom, so a pinch scales the picture
+> under the fingers and becomes a zoom level when they lift, about the point
+> pinched rather than the middle of the box, clamped to `MIN_ZOOM`/`MAX_ZOOM`.
+> A gesture too small to reach a level leaves the map alone rather than snapping
+> it, and a finger lifted mid-pinch does not turn the gesture into a pan. Before
+> this the responder knew only one finger, so a pinch slid the map sideways.
+>
+> **It took three goes to make that gesture feel like one** (2026-08-11), and
+> each failure is worth keeping, because none of them is visible in a test that
+> only asks whether the code runs.
+>
+> - **The threshold was a rounded logarithm** — `round(log₂(spread))` — which
+>   means nothing at all happens until the fingers are `√2` apart, half as far
+>   again as they started. On a box the size of a phone's that is most of the
+>   box: people pinched, watched the picture grow and spring back unchanged, and
+>   reported that pinching does not work. `zoomSteps` in `@amragrir/shared` now
+>   answers a whole level past `PINCH_STEP` (a quarter larger) and rounds only
+>   to decide between one level and several — compared as a ratio, so that in
+>   and out are equally hard.
+> - **The scaling was anchored on the middle of the box**, so whatever was under
+>   the fingers slid away from them as the map grew. It is anchored on the
+>   fingers now (`pivot`), which is also what lets the frame land on the point
+>   that was pinched without having to undo the scaling.
+> - **The baseline was read from the first `move`**, by which time the hand had
+>   already travelled. `onPanResponderStart` fires for the *second* finger
+>   landing, which is the one moment the fingers are exactly as far apart as the
+>   gesture began — worth ~5% of every pinch, which is the difference between
+>   1.28× reaching a level and just missing it.
+>
+> Two smaller rules: the picture may not shrink past the point where the bleed
+> stops covering the box (`shownScale`), or the gesture becomes a rectangle of
+> background with a map in it; and page coordinates with one measured origin are
+> used for the centroid rather than each touch's `locationX`, which is measured
+> from whatever that finger happened to land on — the zoom keys, say.
+>
+> **The finger that leaves last is not choosing a place** (2026-08-11). Fingers
+> never come off the glass together, and the leftover one used to *pick a
+> location*: the badge, the ± keys and the credit all sit above the touch
+> overlay, so when the finger holding the overlay lifted first React Native saw
+> no touch of its own left and handed the gesture back — and the finger still
+> down took it again through `onMoveShouldSetPanResponder`, as a new gesture a
+> few pixels long, which is a tap. `fingers` counts what a gesture has had and
+> is forgotten in only two places: a finger landing on an empty screen, and the
+> last one leaving. Anything that has ever had two fingers cannot become a tap
+> or a pan, however often the responder changes hands. A tap made deliberately
+> after a zoom still works, because by then the glass has been clear.
+>
+> **A trackpad's pinch is not a touch.** In the browser build it arrives as a
+> `wheel` event with `ctrlKey` set and never reaches the `PanResponder` at all,
+> which is why "two fingers" appeared to do nothing there long after it worked
+> on a device. `useWheelZoom` (`wheelZoom.web.ts`, a no-op on a device) hears
+> wheels and reports them in the same shape a pinch has — this much larger,
+> about this point, and whether it has stopped — so `YandexMap` cannot tell the
+> two apart. An ordinary mouse wheel is a level a notch. The pause after the
+> last notch stands in for the fingers lifting: one reload per gesture, not one
+> per notch.
+>
+> **The frame is the only platform-specific part** (`MapFrame`): a `WebView` on
+> a device, an `<iframe>` — the website's own element — in the web build, where
+> `react-native-webview` has none and renders a line of red text saying so. Both
+> are the same widget at the same URL, so `expo start --web` shows the real map
+> rather than a stand-in, and the viewport logic above them is one file for both.
+> A drawn placeholder was tried on the web build first and removed on
+> 2026-08-11: this control exists to point at a street, and a hand-drawn city
+> that is not Yerevan cannot be pointed at.
 
 ### BasketLine
 Cart item row.
@@ -1029,20 +1353,42 @@ The browser's half of the bell, kept out of the component that runs it.
 
 ### BookingCalendar (`apps/mobile/src/components/BookingCalendar.tsx`)
 Choosing a day, a time and a party size — one calendar, two screens.
-- **Props:** `availability`, `date`, `month`, `guests`, `today`, `horizonDays`, `selected`, `busy`, and four callbacks (`onDate`, `onMonth`, `onGuests`, `onSelect`). Controlled apart from which stretch of the day is open, which is where the eye is rather than anything about the booking.
+- **Props:** `availability`, `date`, `month`, `guests`, `today`, `horizonDays`, `selected`, `busy`, and four callbacks (`onDate`, `onMonth`, `onGuests`, `onSelect`). Fully controlled since 2026-08-12 — the one piece of local state left is whether the panel is folded; the open *stretch of the day* went with the tabs.
 - **It reports a chosen time; it does not book one.** `onSelect` used to be `onSlot` and the screens posted a reservation from it, which made every mis-tap in a grid of seventy chips a held table and an authorised deposit — and left no such thing as a *chosen* time, only a booked one. The screen's own footer button commits now, as the browser and the design have always done.
-- **The grid draws what is left of the day, one stretch at a time.** At `RESERVATION_SLOT_MINUTES` a branch answers with ~70 starts; drawn whole that was twenty rows, seventeen of them greyed because they had already happened. `upcomingSlots` drops what has gone and `slotsByPartOfDay` splits the rest — both in `@amragrir/shared`, so the phone and the browser keep exactly the same times. The tabs appear only when the day has more than one stretch, and the one opened is the first with a free table unless a stretch has been picked or holds the chosen time.
-- **`busy` covers booking *and* refetching.** The screens leave the previous day's times on screen while the next answer is in flight rather than blanking to a spinner, so the chips must stop taking taps — see `apps/mobile/app/book/[branchId].tsx` for why blanking cost the open stretch its state and made the screen jump on every tap.
-- **It exists because there are now two ways to book.** A table comes with food from the pre-order flow, and on its own from a restaurant's page. Drawn twice, those would be two readings of one availability answer, and the way that fails is silent — a screen offering a slot the API then refuses.
-- **The horizon is a prop, not a constant.** Pre-order shortens it to the *order* horizon because there the table always carries food, and offering a day the kitchen will not cook on takes a deposit for a meal that is then refused at the payment. A table booked alone is bound only by `RESERVATION_MAX_LEAD_DAYS`.
+- **It opens on a sheet (2026-08-12).** The artifact keeps the chosen day and hour on one row — "📅 Sat 15 Aug · 19:30" — with the month and the hour picker in a card behind it and a "Done" button that folds it away. Here the row raises a `PickerSheet` instead, and the button is still not copied: it confirms nothing the row does not already show. That row is also where the choice is *shown*: a highlighted row inside the trough is off screen by the time the guest stepper is reached. **It starts closed** — it used to start open whenever nothing was chosen, which was right for a panel unfolding in place but wrong for an overlay that would then throw itself over the screen on arrival. **Choosing does not close it either**, which reverses the rule the grid was under: a chip was one press and one answer, a wheel answers continuously, and a sheet that shut on the first hour under the lens would close before the wanted one arrived. The guest count and the deposit card stay on the page, as in the artifact: they are answers, not a picker.
+- **The hour is asked on a `TimeWheel`** (2026-08-12, below) rather than a chip grid. At `RESERVATION_SLOT_MINUTES` a branch answers with ~70 starts; as a grid that was twenty rows, which is why this component grew morning/afternoon/evening tabs. The wheel scrolls, so the tabs went with the grid that needed them — the artifact never drew them, and they were phone-only, so `slotsByPartOfDay` now has no caller outside its own spec. `upcomingSlots` (in `@amragrir/shared`) still drops what has already gone, so the phone and the browser keep the same times. **Taken slots are then filtered out entirely**, because a wheel comes to rest on whatever is under the lens and a dead row in it would be a choice nobody made.
+- **`busy` covers booking *and* refetching.** The screens leave the previous day's times on screen while the next answer is in flight rather than blanking to a spinner, so the wheel must stop scrolling — blanking made the screen jump on every tap.
+- **It exists because there are two ways to book.** A table comes with food, and on its own from a restaurant's page. Since 2026-08-12 both are shapes of one screen (`preorder.tsx`) rather than two screens, but the component still earns its keep: it is one reading of one availability answer, and the way a second reading fails is silent — a screen offering a slot the API then refuses.
+- **The horizon is a prop, not a constant.** A table carrying food is capped at the *order* horizon, because offering a day the kitchen will not cook on takes a deposit for a meal that is then refused at the payment. A table booked alone is bound only by `RESERVATION_MAX_LEAD_DAYS`. Both are passed by the same screen now, one shape each.
 - **Every bound comes off `availability`** — the party cap is `min(maxGuests, maxSeats)`, the branch talking about itself, so a branch running a hall counts past twelve.
 
-### Book a table (`apps/mobile/app/book/[branchId].tsx`)
+### PickerSheet (`apps/mobile/src/components/PickerSheet.tsx`)
+The bottom sheet the two time pickers on "When & how" open into, built 2026-08-12.
+- **Props:** `open`, `title`, `onClose`, `children`.
+- **It exists because a wheel cannot share a screen with a scrolling page.** Both pickers unfolded in place, which put a vertical scroll inside a vertical scroll: a drag that meant "turn the hour" was as likely to be read as "scroll the checkout". Lifted onto a fixed sheet, the wheel is the only thing that scrolls and every drag over it means what it looks like.
+- **It is the app's existing sheet**, not a second kind of overlay: the same `Modal visible transparent animationType="slide"`, scrim, grabber, title row and ✕ as `FilterSheet` and `LocationSheet`, and the same measurements.
+- **The body is deliberately not a `ScrollView`.** An outer scroll here would put back the exact nesting the sheet exists to remove, so everything a picker asks is meant to fit; `maxHeight` is 92% rather than the filter sheet's 88% to buy the calendar the room.
+- **The ✕ is not "Done" in disguise.** Nothing is confirmed on the sheet — the choice was reported as it was made, and the row behind is already showing it. It closes an overlay, which is the one thing an overlay always needs and the inline panel never did.
+
+### TimeWheel (`apps/mobile/src/components/TimeWheel.tsx`)
+The artifact's `HH`:`MM` wheel — two snapping columns behind a lens — built 2026-08-12.
+- **Props:** `times` (the offerable instants, each `{ at, time }` with `time` already formatted `HH:MM` in Yerevan), `value` (the chosen instant or `null`), `onChange`, `disabled`.
+- **It exists because "When & how" asks the same question twice.** The booking's "Reservation time" and the pre-order's "Exact time" are one picker over different instants, and the artifact draws them from one set of measurements. Two copies would be two chances to disagree about how an hour is chosen.
+- **The measurements are the artifact's:** 46px rows, a 184px trough on `chip`, a `card` lens inset 14 at `(184−46)/2 = 69`, 69px of padding at each end so the first and last rows can reach the middle, a 56px fade over each end, and a 10px `:` between the columns. A settled row is `accent` at 20/800; the rest are `ink3` at 16/600.
+- **The columns are the branch's answer, not a clock.** The artifact runs a free cross product of 11–22 against every five minutes because it has no server to contradict it. Here the hours are the hours that hold an offerable time and the minutes are the minutes free within the hour on screen, so the wheel cannot rest on a time `POST /reservations` or `POST /orders` would refuse. **Callers must drop what the server would refuse before passing it in** — a grid can grey a slot out, a wheel that snaps onto one has already chosen it.
+- **Changing the hour keeps the minute where it can** and falls to that hour's first offer where it cannot: 19:40 exists and 20:40 may not.
+- **Nothing is highlighted while `value` is `null`.** The wheel rests on the first offer without claiming it, which is the artifact's own `wheelItem(!rdyAsap && …)`, so "as soon as possible" and "Choose time" still read as unanswered.
+- **The row under the lens is read on every scroll event**, not on an ending, which is how the artifact reads its wheels too. It was wired to `onMomentumScrollEnd` + `onScrollEndDrag` for one afternoon and that was a bug: **react-native-web delivers neither**, so the column scrolled with the numbers under it never changing. `onScroll` needs `scrollEventThrottle` — without it react-native-web sends no scroll events at all. Reported even when the row has not moved, because coming to rest on the row the wheel opened on is still an answer, and while nothing is chosen it is the only way that first row is ever picked.
+- **Snapping is done by hand, because `snapToInterval` is native-only.** On the web it leaves `scroll-snap-type: none`, so a column would rest wherever the finger let go with the row a few pixels out of the lens. 140ms of quiet after the last scroll event stands in for the snap; on native the wheel has already snapped by then and the correction finds nothing to do.
+- **The fades are SVG.** They have to be real gradients and this app carries no gradient view; `react-native-svg` is already a dependency.
+
+### Book a table (the table-only shape of `apps/mobile/app/preorder.tsx`)
 A table with nothing in the basket — the one thing the phone could not do that the browser could.
 - **Booking used to exist only inside the pre-order funnel**, so a guest who wanted Saturday and had not decided what to eat had to put food in a basket to ask for one. `POST /reservations` has never wanted an order; the web dropped that requirement in August and this is the same door on the phone.
-- **Sign-in is asked before the deposit, not after.** A table belongs to a verified account, so a guest is sent to Auth on the slot press rather than by a 403 after the money.
-- **`replace`, not `push`, on success.** Swiping back to a calendar that has already taken a deposit would offer to take a second one.
-- **One idempotency key per slot**, held across retries and rotated when the slot changes — the same bargain the pre-order flow makes, for the same reason.
+- **It was `app/book/[branchId].tsx` from 2026-08-10 to 2026-08-12**, and is now a shape of the pre-order screen instead — the same correction the web made when it folded `/book/{slug}` back into the checkout. The screen is told which branch by the press (`?branchId=&name=`), since an empty basket names no restaurant; `tableOnly` is what decides, and a basket at *another* restaurant counts as none.
+- **Sign-in is asked before the deposit, not after.** A table belongs to a verified account, so a guest is sent to Auth on the booking press rather than by a 403 after the money. Since the merge this holds for the basket shape as well, which used to let the refusal come back from the API.
+- **`replace`, not `push`, on success.** Swiping back to a calendar that has already taken a deposit would offer to take a second one. Only this shape navigates: a basket's booking stays on the screen, because the food still has to be paid for.
+- **One idempotency key per slot**, held across retries and rotated when the slot changes — one bargain for both shapes now, which is the point of them sharing a screen.
 
 ### My bookings (`apps/mobile/app/bookings.tsx`, `apps/mobile/app/booking/[id].tsx`)
 The list of this account's tables, and one of them with the button that gives it back.
@@ -1058,8 +1404,23 @@ The last screen of the mobile design artifact, built 2026-08-10 — see BUSINESS
 - **It reopens on what the feed is showing**, never on an abandoned draft — which would tell somebody the feed is narrowed in ways it is not.
 - **Stepped price chips rather than a slider.** React Native ships no `Slider`; a row of taps is the same choice on a phone and says the numbers out loud.
 - **The distance section is hidden without coordinates**, because the API ignores `distMax` without a `lat`/`lng` pair and offering it would be the sheet claiming to narrow something it does not.
-- **`openNow` is deliberately not offered** although the DTO has it: the artifact does not draw it, and "serving right now" on a screen whose purpose is ordering *ahead* answers a question nobody arrived with.
+- **`openNow` is deliberately not offered here** although the DTO has it: the artifact does not draw it in the sheet, and "serving right now" on a screen whose purpose is ordering *ahead* answers a question nobody arrived with. Since 2026-08-11 it is a **chip on the feed** instead — one press for the guest who did arrive with that question — and the sheet still leaves it out. Both edit one `Filters`, so the flag survives an Apply that never showed it and Reset clears it with the rest.
 - The arithmetic — what counts as set, what gets sent — is in `filters.ts` with a spec, for the reason the cart's is: those decisions are wrong in ways a type check never catches, and testing them through a bottom sheet would mean mounting one.
+
+### ChipRail + `FILTER_CHIPS` (`apps/mobile/app/(tabs)/index.tsx`, `apps/mobile/src/filters.ts`)
+The artifact's quick-filter row above the home feed, built 2026-08-11 — the same seven chips the web has, in the same order, so the two clients narrow the feed by the same things.
+- **No chip is decorative.** Each maps to a real `/restaurants` parameter: `bool` → `openNow`, `sort` → the single active sort, `service` → one of `restaurants.services`, OR-ed server-side so several may be on at once.
+- **The artifact's eight are seven.** "Special Offers" has no discount model behind it, and a chip that lights up while narrowing nothing is worse than one that is not there. Its "Ready in 15 min" is built as `fastest`: the API sorts by prep time and has no threshold, so fifteen would be a promise the server never made.
+- **A lit sort turns itself off**, back to the API's `recommended`, rather than leaving the feed stuck on an order with no other way out.
+- **All seven always show**, unlike the web, which hides `nearest` until a district is chosen. This app always has coordinates — the device's own, or Republic Square (`src/origin.ts`) — so the API can always honour the sort.
+- **`HOME_FILTERS` starts the feed on `nearest` as real state.** The screen used to rewrite an unset sort into `nearest` on the way to the API, which was invisible until a chip read the same state: the list came back ordered by distance under an unlit chip, and pressing it twice changed nothing either time.
+
+### useOrigin (`apps/mobile/src/origin.ts`)
+Where "near me" is measured from, and — since 2026-08-11 — what that place is called.
+- **Returns `{ origin, label, denied, retry }`.** `origin`'s identity changes only when the position does: the feed refetches on it, and folding the label in would reload the whole list to put a street name on screen.
+- **The label is reverse-geocoded once per fix**, after the coordinates are already in use. Expo's docs call geocoding "resource consuming" and warn against many requests at a time; distances and ordering never wait on it.
+- **It falls through what the geocoder actually returned** — `city · street`, then district, then region — rather than printing a separator with nothing on one side. A fix it cannot name has no label, and the row says "Near you", which is still true.
+- **`retry` asks again where the OS still prompts and opens app settings where it will not**, read from `canAskAgain`. iOS stops prompting after the first refusal, so a second dialog would be a button that does nothing.
 
 ### monthGrid / monthHasBookableDay (`apps/mobile/src/booking-calendar.ts`)
 The month behind the pre-order calendar, pulled out of the screen and given a spec of its own.
@@ -1190,13 +1551,51 @@ The code as SVG path data — `{ size, path }` in module units, quiet zone inclu
 
 ### NewDish / EditDish / DishFields (`apps/admin/src/dish-form.tsx`)
 The two forms a dish is written in — the one that adds it, and the one behind each row's pencil.
-- **NewDish props:** `branchId: string`, `open: boolean`, `onOpenChange`, `onCreated: () => void`.
-- **EditDish props:** `item: StaffMenuItem`, `onOpenChange`, `onSaved: () => void`. It has no `open`: the screen mounts it only while a dish is being edited, keyed by that dish, so a second dish is a second form rather than the first one holding somebody else's price.
-- **One `DishFields` for both.** They ask for exactly the same things — the three names, price, tab, prep estimate, photograph — and the moment that is written twice is the moment a field lands in one of them only. The forms differ in their title, their footer, and the one hint under the photo field: a dish being added has no picture yet, one being edited already has the picture this would replace.
+- **NewDish props:** `branchId: string`, `sections: StaffMenuSection[]`, `categories: CategoryOption[]`, `open: boolean`, `onOpenChange`, `onCreated: () => void`.
+- **EditDish props:** `item: StaffMenuItem`, `sections`, `categories`, `onOpenChange`, `onSaved: () => void`. It has no `open`: the screen mounts it only while a dish is being edited, keyed by that dish, so a second dish is a second form rather than the first one holding somebody else's price.
+- **The two axes are two fields** (2026-08-16). **Section** is where the dish
+  sits on this branch's page, from the branch's own headings. **Category** is
+  what the city files it under, and its first option is *inherit*, naming the
+  category the section supplies — because that is what nearly every dish should
+  say and tagging forty dishes one at a time is not how a menu gets entered. A
+  dish whose section maps to nothing and which names nothing itself draws a
+  warning banner, since the API refuses it: such a dish is reachable from no
+  chip in the app. A **Popular** switch sits under them; it is a property, not a
+  place, so the dish keeps its section and category.
+- **One `DishFields` for both.** They ask for exactly the same things — the three names, price, section, category, prep estimate, photograph — and the moment that is written twice is the moment a field lands in one of them only. The forms differ in their title, their footer, and the one hint under the photo field: a dish being added has no picture yet, one being edited already has the picture this would replace.
 - **The edit opens on what the dish is now**, which is what makes the photograph replaceable at all rather than merely settable once.
 - **Only the fields that moved are sent** (`dishPatch`), and **Save is disabled until one has** — a PATCH that changes nothing writes no history entry at the API either, so reporting success for one would be a lie in the direction people check.
 - **Neither form submits while an upload is running.** A dish saved mid-upload keeps the photograph somebody was in the middle of replacing.
 - **The price and the sold-out switch are deliberately not here.** They stay in the row: they are what somebody changes mid-shift, and a form is the wrong shape for one number.
+
+### SectionsDialog (`apps/admin/src/menu-sections.tsx`)
+The shape of one branch's menu — its headings, their order, and what each maps
+onto in the platform's categories.
+- **Props:** `branchId`, `sections: StaffMenuSection[]`, `categories: CategoryOption[]`, `open`, `onOpenChange`, `onChanged: () => void`.
+- **A dialog rather than a screen**: whoever opens it is already looking at the
+  dishes it arranges, and a second sidebar entry would split two decisions that
+  are always made together ("add a Сеты shelf" / "put the sets on it").
+- **The category select is the important control**, not the name: a mapped shelf
+  gives every dish under it a category for free.
+- **Delete is offered only on an empty shelf.** The API refuses the rest with a
+  409 and the count; not offering it is how somebody learns the rule without an
+  error message.
+- Renaming replaces **only the language the panel is set to** — the other two
+  are carried through, or a rename in Russian would strip the Armenian name off
+  a heading every Armenian phone reads.
+
+### Categories screen (`apps/admin/src/screens/Categories.tsx`)
+The platform's category vocabulary, behind `categories:write` — which only
+`super_admin` holds, so the sidebar draws the tab for nobody else.
+- **The key is shown as code and cannot be edited**: it travels in
+  `?category=`, in both clients' deep links and in the seed's placeholder
+  filenames. The display name is what changes.
+- **Retire, don't delete.** The switch flips `isActive` — the chip leaves the
+  rail and the filters, every dish filed under it keeps its row, and the same
+  switch puts it back. The trash button is disabled while any dish or menu
+  section points at the row, which is the state the API refuses anyway.
+- Each row carries **what is riding on it**: live dishes with this as their own
+  category, and live menu sections mapped to it.
 
 ### dishForm / dishNames / dishFormValid / dishPatch (`apps/admin/src/dish.ts`)
 The form's rules with no React in them, tested directly (`dish.spec.ts`) — these decide whether somebody's price reaches the API.

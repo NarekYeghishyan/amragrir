@@ -42,8 +42,22 @@ in place rather than creating a second account.
 - ✅ Change language/theme.
 - ❌ Place an order / pay (phone verification required).
 - ❌ Book a table.
-- ❌ Favorites, history, rewards, referrals — they belong to an account rather
-  than a device, and a guest session would lose them.
+- ❌ History, rewards, referrals — they belong to an account rather than a
+  device, and a guest session would lose them.
+- ⚠️ **Favorites: same server rule, different client behaviour.**
+  `POST /favorites` still requires a verified phone, for the reason above. But
+  the mobile app no longer sends a guest to the auth gate for pressing a heart:
+  it saves the list **on the device** and hands it to the account at sign-in
+  (SCREENS.md §5, `apps/mobile/src/guest-favorites.ts`). Saving a place is
+  a bookmark to a customer, and demanding an account before one can be made is
+  asking for the commitment before the reason. Nothing about the endpoint's
+  guard changes — a guest token still cannot write a `favorites` row, and the
+  device's copy is deleted on sign-out so it cannot outlive the person who made
+  it. The web has no such store and sends guests to sign-in as before.
+  **Saved dishes work exactly the same way** (2026-08-17): `POST
+  /favorites/dishes` needs the same verified phone, the phone keeps a second
+  store beside the first, and both are handed over at sign-in and cleared on
+  sign-out (DATABASE.md §13a).
 - Transition: on attempting to order → auth-gate (verification).
 
 ### 2. Customer — the app's primary role
@@ -55,7 +69,7 @@ in place rather than creating a second account.
 - ✅ Cancel an order **they have not paid for yet**; after that, nobody can.
 - ✅ Track an order (live status, pickup code).
 - ✅ Order history, reorder.
-- ✅ Favorites.
+- ✅ Favorites — saved branches **and saved dishes**.
 - ✅ Profile: points, coupons, referral program.
 - ✅ Reviews for their own completed orders.
 - ✅ Settings: language, theme, notifications, promo, account.
@@ -100,7 +114,7 @@ screens from the same map the API enforces.
 | `branch:read` / `branch:hours` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `branch:write` (address, phone, tables, booking policy) | ❌ | ✅ | ✅ | ✅ | ✅ |
 | `tables:write` | ❌ | ✅ | ✅ | ✅ | ✅ |
-| `menu:write` (prices, dishes) | ❌ | ❌ | ✅ | ✅ | ✅ |
+| `menu:write` (prices, dishes, menu sections) | ❌ | ❌ | ✅ | ✅ | ✅ |
 | `branch:create` | ❌ | ❌ | ✅ | ✅ | ✅ |
 | `restaurant:write` (services) | ❌ | ❌ | ✅ | ✅ | ✅ |
 | `analytics:read` | ❌ | ❌ | ✅ | ✅ | ✅ |
@@ -112,8 +126,9 @@ screens from the same map the API enforces.
 | `platform:staff` | ❌ | ❌ | ❌ | ❌ | ✅ |
 | `staff:impersonate` | ❌ | ❌ | ❌ | ❌ | ✅ |
 | `settings:write` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `categories:write` (the app's category rail) | ❌ | ❌ | ❌ | ❌ | ✅ |
 
-Four splits are deliberate:
+Five splits are deliberate:
 
 - **A shift may flip a dish sold out but not price it.** Availability says what
   is true right now and reverses in a tap; a price outlives the shift that set
@@ -121,6 +136,12 @@ Four splits are deliberate:
 - **A manager runs a branch but does not hire or see revenue.** Prices, staff
   and money belong to whoever owns the business. Widening this is one line in
   `ROLE_PERMISSIONS` if a real restaurant disagrees.
+- **The category vocabulary is `super_admin`'s alone, and is not support work.**
+  Every restaurant on the platform is indexed by that list; adding "Пицца"
+  beside "Pizza" splits a chip's traffic in two and nothing in the product
+  reports it. What a restaurant may do instead is name **its own** menu headings
+  and point them at rows from the list — `menu:write`, the same permission that
+  already prices a dish. The two axes are BUSINESS_LOGIC.md §6.
 - **`platform_admin` cannot appoint platform staff or change pricing.** An
   account that can appoint platform staff can appoint itself anything.
 - **`staff:activity` is separate from `staff:read`.** Knowing who works here is

@@ -158,6 +158,11 @@ in API_DOCUMENTATION.md.
     `hreflang`. Armenian is the default and is **unprefixed** — it lives at the
     bare domain (`/`, `/r/sunny-table`), with only `/ru` and `/en` carrying a
     segment.
+- **An error `message` a client shows verbatim is localised too.** Same header,
+  same `hy` fallback — see `COOLDOWN_MESSAGE` in `auth/otp.service.ts` for the
+  shape: a `Record<Language, …>`, so adding a language is a compile error until
+  all three are written. Most messages are for developers and stay English; the
+  test is whether a screen prints the string as-is.
 - **Never return internals.** No stack traces, driver errors, or connection
   strings in responses — the exception filter collapses unknown errors to a
   generic 500.
@@ -238,6 +243,17 @@ and pre-rendered, and it has no client data layer at all:
   be domain-restricted — so the picker calls `GET /[lang]/geocode` on this app
   and that route holds it. It is optional, and `apps/web/.env.example` says what
   the app does without it.
+
+  **The phone's picker (2026-08-11) holds no key either.** It shows the same
+  widget in a `react-native-webview` — no key — and it names points through
+  **`GET /geocode` on the API**, which holds `YANDEX_GEOCODER_API_KEY` exactly
+  as this app's route holds its own copy. It briefly used the *device's*
+  geocoder instead (`expo-location`, no key, works offline) and that was wrong
+  for one reason: it takes no language, so it answered in the language of the
+  OS, where a search must answer in the alphabet it was asked in. Both clients
+  project between pixels and coordinates with `@amragrir/shared`'s `map-view`
+  and build geocoder requests with its `geocoder`, so a tap picks the same
+  street and a query answers in the same alphabet on either.
 - **Tokens and the basket live in httpOnly cookies**, never in `localStorage`
   and never in the page. A token in reach of a script is a token an injected
   script can take, and a basket in reach of the page is a basket the customer

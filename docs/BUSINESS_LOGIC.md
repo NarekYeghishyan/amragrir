@@ -372,7 +372,7 @@ See the deposit table in §3.
 - An order is tied to **one restaurant** (basket does not mix restaurants). **[from design]**
   Enforced by scoping the menu lookup to the branch: a dish belonging elsewhere
   is simply "not on this menu".
-- **Food ready at** — user chooses the ready time; the kitchen synchronizes prep. **[from design]**
+- **Ready at** — user chooses the ready time; the kitchen synchronizes prep. **[from design]**
 - Each dish has a **prep time** (min) and calories — used for estimation and planning. **[from design]**
 - **Prep estimate = the slowest dish, not the sum** of the dishes: a kitchen
   cooks in parallel, so ten dishes are not ten times slower. Falls back to the
@@ -679,8 +679,7 @@ not.
 
 ## 6. Catalog and search
 
-- **Cuisine categories [from design]:** Pizza, Burgers, Healthy, Sushi, Grill, Asian, Breakfast, Lunch, Pasta, Drinks, Desserts.
-- **Dish menu tabs [from design]:** Popular, Mains, Sides, Drinks.
+- **Cuisine categories [from design]:** Pizza, Burgers, Healthy, Sushi, Grill, Asian, Breakfast, Lunch, Pasta, Drinks, Desserts. The list is now editable — see "The two axes of a menu" below.
 - **Restaurant status:** `open` / `closed` (affects ability to order). **[from design]**
 - **Sort [from design]:** Recommended, Nearest, Fastest (by prep), Top rated.
 - **Filters [from design, built 2026-08-10]:** price/person, max distance, min
@@ -710,6 +709,78 @@ not.
   matches **any language**, so typing "Burger" on a Russian phone still finds
   «Бургер».
 - **Quick filters on Home [from design]:** Near Me, Ready in 15 min, Open Now, Reserve Table, Pickup, Dine In, Special Offers, Highest Rated.
+
+### The two axes of a menu
+
+"Popular / Mains / Sides / Drinks" and "Pizza / Sushi / Healthy" look like the
+same kind of thing and are not. They answer different questions, they belong to
+different people, and the schema keeps them apart (DATABASE.md §5, §5a).
+
+| | **Menu section** (`branch_menu_sections`) | **Category** (`categories`) |
+|---|---|---|
+| Whose | the branch's | the platform's |
+| Question | "where is this dish on *this* page" | "what kind of food is this, across the city" |
+| Vocabulary | as many as the menu names | closed; `categories:write` (super admin) alone may add to it |
+| Seen on | the restaurant's page | the home rail, the filters, search |
+
+The rules that follow from that:
+
+- **A branch names its own headings**, in its own order, and maps each to a
+  platform category or to none. "Mains" was one of four values every restaurant
+  on the platform had to fit into; a kitchen whose menu names five things had
+  nowhere to put the fifth.
+- **Only platform categories filter.** A branch inventing "Сеты" does not add a
+  chip to the home screen — otherwise the rail becomes a landfill of spellings
+  within a month, and no screen in the product would report that it happened.
+- **A category is carried by a dish, not by a restaurant.** A grill house sells
+  salads, and a guest tapping "Healthy" wants that salad. So the feed's filter
+  selects branches with **at least one live matching dish**, and the dish is
+  what the card then shows.
+- **Effective category = the dish's own, or its section's.** Set it on the shelf
+  and every dish under it inherits, which is how a real menu is entered — nobody
+  tags forty dishes one at a time. Set it on the dish to override, which is how
+  the salad on a "Мангал" shelf is reachable under "Healthy". The rule lives in
+  `effectiveCategoryId` (`@amragrir/shared`) and in SQL as
+  `COALESCE(m.category_id, s.category_id)`; the two have to agree, or a card
+  would promise a dish the menu behind it then hides.
+- **A dish with no effective category is refused.** `POST /restaurant/menu-items`
+  and the PATCH both check it, because such a dish is reachable from no chip in
+  the app — and until this rule existed the panel had no category field at all,
+  so *every* dish a real restaurant typed in was invisible to every filter, with
+  nothing to see and nothing to report. Rows predating the rule can still be
+  uncategorised; the panel flags them in the Section column.
+- **"Popular" is a showcase, not a section** (`menu_items.is_popular`). A
+  bestseller is popular *and* pizza. As the fifth value of the old enum it was
+  neither: a Margherita in the Popular tab was in no other, so it vanished from
+  the pizza section of the very restaurant that is known for it.
+- **A category is retired, not deleted, once anything points at it**
+  (`is_active`). Deleting one would take its dishes out of every filter on the
+  platform at once, decided by somebody who cannot see whose menus they were on.
+  A genuine delete is possible only while nothing references it.
+- **A category's `key` is permanent.** It travels in `?category=`, in both
+  clients' deep links and in the seed's placeholder filenames; the display name
+  is `name_i18n` and may change any day.
+- **A heading is retired, not deleted, and only once empty.** Moving its dishes
+  somewhere automatically would put food on a shelf nobody chose — and there may
+  be no other shelf to choose.
+
+### A card under a category filter
+
+When the feed is filtered by category, a restaurant card stops wearing its cover
+and wears **the dishes that matched** instead — up to
+`CARD_DISH_SLIDER_LIMIT` (10) in a horizontal strip, each with its picture, its
+name and its price, the branch's bestsellers first and then cheapest.
+
+The reasoning is that the cover answers the wrong question. A guest who tapped
+"Sushi" is choosing between kitchens on the strength of the sushi, and a
+photograph of somebody's dining room does not help them do it. Tapping a plate
+opens that branch's menu **at that dish** — the right heading selected and the
+row scrolled to — rather than at the top of a menu they then have to search.
+
+Absent and empty mean different things on the wire and both clients read the
+difference: no filter is on (wear the cover), versus a filter is on and every
+match is sold out tonight (wear the cover, and the card is still true — this
+kitchen does serve this, just not right now).
 
 ### A dish joining the menu
 

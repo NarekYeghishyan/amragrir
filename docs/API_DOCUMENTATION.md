@@ -49,13 +49,25 @@ Send an OTP to the phone.
 - **Response 200:** `{ "sent": true, "expiresIn": 120 }`
 - **400** for a number that is neither of the two readings — a wrong length for
   its country, or a country not on the list. **429** resend requested inside
-  the 60s cooldown, with `retryAfter` in the payload.
+  the 60s cooldown, with `retryAfter` in the payload. That refusal's `message`
+  is written in `Accept-Language` (`hy`/`ru`/`en`, default `hy`) — the clients
+  show it verbatim, so it cannot be English-only.
 
 ### POST /auth/verify-code · *public*
 Verify the code, return tokens. Creates the account on first verification.
 - **Body:** `{ "phone": "+37499123456", "code": "1234", "name"?, "referralCode"? }`
 - **Response 200:** `{ "accessToken", "refreshToken", "isNewUser": true, "user": { … } }`
-- `name` is optional and used by the register branch of the auth screen.
+- `name` is optional and used by the register branch of the auth screen. It is
+  **trimmed, and a name sent here replaces the stored one** (2026-08-11) —
+  including on an account that already had one. It used to fill in only a
+  missing name, which meant somebody signing up again on a number they already
+  held typed a name into a form that discarded it, with nothing else in the
+  product able to change it afterwards. This is the one place a customer can
+  correct their own name, and it is as authorised as the sign-in around it: the
+  code for *this* number was accepted before the row is touched, so the caller
+  has proved they hold the phone the account is keyed on. Whitespace is not a
+  name — a blank or absent value leaves the stored one alone, so the log-in
+  branch (which sends none) can never blank anybody.
 - **Accepts an optional `Authorization` header.** If a guest presents their
   token and the phone is not yet taken, that same account is upgraded in place
   (`isGuest → false`) so nothing they collected is lost. If the phone already
@@ -118,6 +130,15 @@ failing the signup.
 ### PATCH /me
 - **Body (any):** `{ "name", "email", "avatarUrl" }`
 - **409** if the email belongs to another account.
+- `name` is **trimmed, and whitespace is not a name** (2026-08-11): a blank value
+  leaves the stored one alone rather than emptying the column. Sign-up will not
+  open an account without a name (SCREENS.md §0), so an endpoint that let one be
+  blanked afterwards would undo that rule with one keystroke. Sending no `name`
+  at all has always left it untouched; this only makes `""` and `"   "` mean the
+  same thing.
+- This is what the phone's Settings sheet behind "Edit profile" writes
+  (SCREENS.md §12), and the only route to a name change other than the sign-up
+  tab (`POST /auth/verify-code`).
 
 ### PATCH /me/settings
 - **Body (any):** `{ "notifPush": true, "notifPromo": false, "darkMode": false }`
@@ -197,10 +218,10 @@ Nearby list with filters (Home feed).
   "total": 24, "page": 1 }
 ```
 - **`id` is the branch; `restaurantId` is the business.** They are not
-  interchangeable: a basket and `GET /restaurants/{id}` are addressed by the
-  branch, while a favourite is stored against the restaurant, so a card's heart
-  posts `restaurantId` to `POST /favorites`. `GET /search` has always returned
-  both for the same reason.
+  interchangeable: a basket, `GET /restaurants/{id}` and a favourite are all
+  addressed by the **branch**, so a card's heart posts its own `id` to
+  `POST /favorites`. `restaurantId` names the business the card's name, cuisine
+  and rating belong to; `GET /search` returns both for the same reason.
 
 ### GET /restaurants/{id}
 Restaurant profile + branch.
@@ -212,15 +233,29 @@ Restaurant profile + branch.
 - **404** if nothing matches.
 
 ### GET /restaurants/{id}/menu
-- **Query:** `menuTab=popular|mains|sides|drinks, category`
+- **Query:** `sectionId` (a uuid — one heading of *this* branch's menu),
+  `category` (a platform category key, e.g. `sushi`)
 - `name` and `desc` are resolved from `Accept-Language`; clients never see the
   raw `*_i18n` JSON.
 - **Response 200:**
 ```json
-{ "items": [ { "id","name","desc","priceAmd":5800,"caloriesKcal":520,
+{ "sections": [ { "id","name":"Суши","categoryId" } ],
+  "items": [ { "id","name","desc","priceAmd":5800,"caloriesKcal":520,
   "prepMin":12,"photoUrl","dietaryTags":["vegetarian"],"isAvailable":true,
-  "menuTab":"popular","categoryId" } ] }
+  "sectionId","isPopular":true,"categoryId" } ] }
 ```
+- **`sections` is the branch's full set, always** — it does not answer to the
+  filters. A heading the kitchen created but has not filled yet still belongs on
+  its page, and narrowing by `?category=` must not make empty ones vanish and
+  the tab strip jump about. Only `items` narrows.
+- **`categoryId` on an item is the *effective* one**: the dish's own, or its
+  section's where it names none (BUSINESS_LOGIC.md §6). Resolved here so no
+  client has to know the inheritance rule to draw a chip.
+- **`?category=` matches through that inheritance too**, so a menu organised by
+  shelf rather than tagged dish-by-dish still narrows correctly.
+- **`isPopular` is not a section.** A dish is popular *as well as* being under a
+  heading; the clients draw a "Popular" pill in front of the real ones and fill
+  it from this flag.
 
 ### GET /restaurants/{id}/tables
 Tables (for dine-in). Inactive tables are omitted.
@@ -264,6 +299,9 @@ Bookable times for a local date, **answered per party size**.
 ### GET /categories · *implemented, public*
 Ordered by `sortOrder`. `name` is resolved from `Accept-Language` (default `hy`).
 - **Response 200:** `{ "items": [ { "id","key":"sushi","icon":"🍣","name":"Sushi" } ] }`
+- **Retired categories are absent** (`is_active = false`). This is the rail a
+  guest browses; the editor's list, which shows them so one can be put back, is
+  `GET /admin/categories`.
 
 ### GET /search · *implemented, public*
 - **Query:** `q` (required), `lat`, `lng`
@@ -285,6 +323,42 @@ Ordered by `sortOrder`. `name` is resolved from `Accept-Language` (default `hy`)
 - **Static, deliberately.** Real popularity needs query logging that does not
   exist yet; a table nothing writes to would look like a feature and return
   nothing.
+
+---
+
+## Geocoding
+
+### GET /geocode · *implemented, public* (2026-08-11)
+Addresses in and out of coordinates, for the location pickers.
+- **Query:** either `q` (an address, ≤200 chars) **or** `lat` + `lng`. Neither
+  is a capability probe — see `available` below.
+- **Response 200:** `{ "items": [ { "lat","lng","label" } ], "failed"?: true, "available": boolean }`
+- **400** when only one of `lat`/`lng` is given: half a point is not a point.
+- **Throttled to 30/min per IP**, tighter than the default 120, because unlike
+  the rest of the catalog every call spends a metered third-party quota.
+
+**A proxy, and that is the whole point.** Yandex's geocoder key cannot be
+restricted to a domain or an app, so it can never be shipped to a browser or
+bundled into a phone. It lives in `YANDEX_GEOCODER_API_KEY` on this server and
+the clients ask here. The map itself needs no key — it is Yandex's public
+widget in a frame — so this is the only credential the feature has.
+
+**Answers come back in the alphabet the question was typed in.** `Մաշտոց`
+answers in Armenian and `Маштоц` in Russian, whichever language the app is
+being read in; Latin keeps `Accept-Language`, because both other alphabets are
+routinely transliterated into it and it is therefore evidence of nothing
+(`queryLang`, `@amragrir/shared`). A `lat`/`lng` lookup asked in no alphabet at
+all, so it follows `Accept-Language`.
+
+**Three different answers, deliberately.** `items: []` is "Yerevan has no such
+street"; `failed: true` is "this search is broken" (a refused key, a timeout);
+`available: false` is "this deployment has no geocoder at all", which is not an
+error — the clients then draw no search box rather than one that can never
+answer. Asking with no parameters is how a client finds that out.
+
+**The website has its own copy of this route** (`GET /[lang]/geocode` in
+`apps/web`), because that app never calls this API from the browser — see
+DEVELOPMENT_GUIDE.md. Both build the same request from the same module.
 
 ---
 
@@ -642,20 +716,70 @@ keeps across retries).
 
 > **Implemented.** All routes require a **verified phone** — favourites belong
 > to an account, and a guest session is per-device and would lose them.
+>
+> **A favourite is a branch** (2026-08-13, DATABASE.md §13). It used to be the
+> restaurant, which meant hearting one address of a chain filled the heart on
+> every other address of it — including the ones across town and the ones that
+> were shut — and the favourites list could not say which kitchen it meant.
+> Every other thing a customer acts on here is already a branch.
 
 ### GET /favorites
-- **Response 200:** `{ "items":[ { "restaurantId","branchId","slug","name","cuisine","priceLevel","rating","reviewsCount","coverUrl","prepMin","isOpen","services","addedAt" } ] }`
-- `branchId` is included so a card links straight to a page that can be ordered
-  from; it is `null` for a restaurant that has no branch yet.
+- **Response 200:** `{ "items":[ { "branchId","restaurantId","slug","name","branchName","address","city","cuisine","priceLevel","rating","reviewsCount","coverUrl","prepMin","isOpen","services","addedAt" } ] }`
+- `branchId` is the row's identity — what was saved, what `DELETE` takes, and
+  what `GET /restaurants/{id}` opens.
+- `branchName`, `address` and `city` describe that address, so a client can tell
+  two branches of one chain apart. `coverUrl`, `services`, `prepMin` and
+  `isOpen` are the branch's resolved answers, exactly as on a catalog card.
 
 ### POST /favorites
-- **Body:** `{ "restaurantId" }` → **200** `{ "favorited": true }`
+- **Body:** `{ "branchId" }` → **200** `{ "favorited": true }`
 - **Idempotent** — favouriting twice is what a double tap does, not an error.
-- **404** if the restaurant does not exist.
+- **404** if the branch does not exist.
 
-### DELETE /favorites/{restaurantId} → **204**
+### DELETE /favorites/{branchId} → **204**
 - Also idempotent: removing something absent leaves the caller in the state
   they asked for.
+
+> **A heart can also mean a dish** (2026-08-17, DATABASE.md §13a). Saving only
+> the address was right for a card on the feed and wrong everywhere the app is
+> showing food: a card wearing the plates that matched a category filter, a row
+> on a menu, a dish among search results. Those hearts save the **dish**, and the
+> Favourites screen lists the two under two tabs.
+>
+> A dish names its own branch (`menu_items.branch_id`), so no route below takes
+> one — passing a branch beside a dish would let two clients disagree about where
+> it is cooked.
+
+### GET /favorites/dishes
+- **Response 200:** `{ "items":[ { "menuItemId","branchId","restaurantId","slug","name","desc","priceAmd","photoUrl","caloriesKcal","prepMin","isAvailable","sectionId","restaurantName","branchName","address","city","isOpen","addedAt" } ] }`
+- Newest first. `name` and `desc` are resolved from `Accept-Language`, like the
+  menu's — nothing about the dish is stored on the favourite, so the list shows
+  what the kitchen says today.
+- `menuItemId` is the row's identity; `branchId` is where it is cooked and what
+  opens it — `/restaurant/{branchId}?item={menuItemId}` is the menu at that dish.
+- `restaurantName`, `branchName`, `address` and `city` name the kitchen, so one
+  dish saved at two branches is two distinguishable rows. `isOpen` is that
+  branch's, `isAvailable` the dish's.
+- **Dishes taken off the menu are left out** (`menu_items.deleted_at`); the row
+  survives, so a dish withdrawn and put back is still saved. Sold out tonight is
+  a different state and *is* returned, with `isAvailable: false`.
+
+### GET /favorites/dishes/ids
+- **Query:** `branchId` (optional uuid) — narrows to one branch's menu, which is
+  what a restaurant page asks.
+- **Response 200:** `{ "ids": ["…"] }`
+- Ids rather than rows, because a menu already has the dishes and needs one bit
+  about each. Also excludes dishes off the menu.
+
+### POST /favorites/dishes
+- **Body:** `{ "menuItemId" }` → **200** `{ "favorited": true }`
+- **Idempotent**, as the branch route is.
+- **404** if the dish does not exist **or is off the menu** — a heart on
+  something withdrawn would save a row nothing will ever draw.
+
+### DELETE /favorites/dishes/{menuItemId} → **204**
+- Idempotent, and **not** filtered by `deleted_at`: a dish that has since left
+  the menu is exactly the one somebody needs to be able to unsave.
 
 ---
 
@@ -732,16 +856,16 @@ BUSINESS_LOGIC.md §4.
   "reservedFor" }` for a booking — and the client renders the line from the
   dictionaries it already ships (`ORDER_STATUS_COPY` and
   `RESERVATION_NOTIFICATION_COPY` in `@amragrir/i18n`).
+- **A booking reminder carries `"reminder": true`** beside an unchanged
+  `confirmed` status, and clients must read that marker *before* looking words
+  up by status — drawn by status it would say "Your table is booked" to somebody
+  who booked it weeks ago. Its words are `RESERVATION_REMINDER_COPY`.
 - **The two copy maps are separate and keyed by kind.** An order and a booking
   both have a `confirmed` status and mean different things by it, so a client
   that looked words up by status alone would draw the wrong ones. A booking row
   is announced for three statuses only — `confirmed`, `cancelled`, `no_show`;
   see BUSINESS_LOGIC.md §4 for why the other three are silent, and why a guest
   cancelling their own table is never told about it.
-- **A booking reminder carries `"reminder": true`** beside an unchanged
-  `confirmed` status, and clients must read that marker *before* looking words
-  up by status — drawn by status it would say "Your table is booked" to somebody
-  who booked it weeks ago. Its words are `RESERVATION_REMINDER_COPY`.
   They are populated only where the server wrote the prose — a promo, a system
   note — and there the API's words are all there is.
   Storing a sentence for an order would freeze it in whatever language the
@@ -1442,8 +1566,8 @@ Who works at one branch — its manager and its shifts.
 > which resolves one language. The caller is editing all three; resolving would
 > make the other two invisible and silently unsaveable.
 
-- `GET /restaurant/menu-items?branchId=&menuTab=` — `menu:read`
-- `POST /restaurant/menu-items` — `menu:write` — **Body:** `{ "branchId","menuTab","nameI18n":{"hy","ru"?,"en"?},"descI18n"?,"priceAmd","photoUrl","caloriesKcal"?,"prepMin"?,"dietaryTags"?,"isAvailable"? }`
+- `GET /restaurant/menu-items?branchId=&sectionId=` — `menu:read`
+- `POST /restaurant/menu-items` — `menu:write` — **Body:** `{ "branchId","sectionId","categoryId"?,"isPopular"?,"nameI18n":{"hy","ru"?,"en"?},"descI18n"?,"priceAmd","photoUrl","caloriesKcal"?,"prepMin"?,"dietaryTags"?,"isAvailable"? }`
 - `PATCH /restaurant/menu-items/{id}` — `menu:write` — any of the above except
   `branchId`; moving a dish between branches would change who owns it.
 - `PATCH /restaurant/menu-items/{id}/availability` — **`menu:availability`** —
@@ -1455,7 +1579,35 @@ Who works at one branch — its manager and its shifts.
   references it.
 - `GET /restaurant/menu-items/{id}/history` — `menu:read` — see below.
 
+**The branch's own menu headings** (`branch_menu_sections`, DATABASE.md §5a).
+As many as its menu names, in its own order — the four fixed tabs this replaced
+could not express a fifth.
+
+- `GET /restaurant/menu-sections?branchId=` — `menu:read` — **Response:**
+  `{ "items": [ { "id","branchId","categoryId","nameI18n","sortOrder","itemCount" } ] }`.
+  `itemCount` counts **live** dishes, and is what the panel checks before
+  offering a delete.
+- `POST /restaurant/menu-sections` — `menu:write` — **Body:**
+  `{ "branchId","nameI18n":{"hy",…},"categoryId"?,"sortOrder"? }`. Without
+  `sortOrder` it goes last.
+- `PATCH /restaurant/menu-sections/{id}` — `menu:write` — `nameI18n`,
+  `sortOrder`, `categoryId` (`null` maps it to no category).
+- `DELETE /restaurant/menu-sections/{id}` — `menu:write` → **204**. A soft
+  delete, like a dish.
+
 Rules worth knowing:
+- **`sectionId` must belong to `branchId`** — checked as a pair, not by id
+  alone. Section ids are uuids from a table every branch shares, so filing a
+  dish on somebody else's menu is one copied id away and the foreign key would
+  take it. A section from elsewhere is a **404**.
+- **A dish must end up in some category — 422 otherwise.** Its own, or the one
+  its section maps to (BUSINESS_LOGIC.md §6). A dish in neither is reachable
+  from no chip in the app, which is exactly what used to happen silently to
+  every dish typed into the panel.
+- **Unmapping a section is refused when dishes rely on it** — 422 naming how
+  many would be left uncategorised. Give them their own category first.
+- **Deleting a section with live dishes is refused** — **409** with the count.
+  Moving them somewhere automatically would put food on a shelf nobody chose.
 - **`nameI18n.hy` is required.** It is the fallback every other language
   resolves to, so a dish without it would render nameless for most visitors.
 - **`photoUrl` is required on create — 400 without it.** A menu is a list
@@ -1967,6 +2119,33 @@ What one customer has ordered, newest first.
 - Goes to every **verified, non-guest** account unless `userIds` is given.
 - Re-issuing the same code **tops up accounts that joined since** and skips
   those who already hold it; the response reports what was actually created.
+
+#### The platform's category vocabulary — `categories:write`
+
+Only `super_admin` holds that permission, and the sidebar draws the screen for
+nobody else. This list is what every restaurant on the platform is indexed by:
+a second spelling of "Pizza" added in good faith splits a chip's traffic in two
+and nothing in the product reports that it happened.
+
+- `GET /admin/categories` — **Response:**
+  `{ "items": [ { "id","key","icon","sortOrder","nameI18n","isActive","itemCount","sectionCount" } ] }`.
+  Retired rows included — this is the screen that puts one back. The two counts
+  are what is riding on the row, and why a delete is usually refused.
+- `POST /admin/categories` — **Body:** `{ "key","nameI18n":{"hy",…},"icon"?,"sortOrder"? }`.
+  `key` must match `CATEGORY_KEY_PATTERN` (lowercase latin, digits,
+  underscores); **409** on a duplicate.
+- `PATCH /admin/categories/{id}` — `nameI18n`, `icon`, `sortOrder`, `isActive`.
+  **`key` is deliberately absent**: it travels in `?category=`, in both clients'
+  deep links and in the seed's placeholder filenames, so changing it would break
+  all three while the chip on screen looked fine.
+- `DELETE /admin/categories/{id}` → **204**, and only while no dish and no menu
+  section points at it — **422** with both counts otherwise, saying to retire it
+  instead. Deleting one in use would take its dishes out of every filter on the
+  platform at once.
+
+Every one of these writes an `audit_log` entry (`category.create` /
+`category.update` / `category.delete`) with no restaurant or branch scope — the
+one action in that table filed against the platform itself.
 
 ### Removed
 

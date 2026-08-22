@@ -179,7 +179,7 @@ export async function seedActivity(prisma: PrismaClient): Promise<void> {
       // it was on the menu when the change it records happened.
       const dishes = await prisma.menuItem.findMany({
         where: { branchId: branch.id },
-        select: { id: true, nameI18n: true, priceAmd: true, menuTab: true, isAvailable: true },
+        select: { id: true, nameI18n: true, priceAmd: true, sectionId: true, isAvailable: true },
         orderBy: [{ priceAmd: 'asc' }, { id: 'asc' }],
         take: 6,
       });
@@ -213,7 +213,7 @@ export async function seedActivity(prisma: PrismaClient): Promise<void> {
           after: {
             nameI18n: cheapest.nameI18n as Prisma.InputJsonValue,
             priceAmd: cheapest.priceAmd,
-            menuTab: cheapest.menuTab,
+            sectionId: cheapest.sectionId,
           },
           createdAt: addedAt,
         });

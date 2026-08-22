@@ -229,7 +229,6 @@ model Restaurant {
   owner         User?              @relation("OwnedRestaurants", fields: [ownerId], references: [id])
   branches      RestaurantBranch[]
   reviews       Review[]
-  favorites     Favorite[]
   assignments   StaffAssignment[]
   invites       StaffInvite[]
   auditEntries  AuditLog[]

@@ -4,10 +4,17 @@ import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { api } from '@/lib/api';
 import { LANGUAGES, parseLanguage, t } from '@/lib/language';
-import { SITE_URL, homePath, hreflangFor, searchPath } from '@/lib/site';
+import { SITE_URL, homePath, hreflangFor } from '@/lib/site';
 import { LOCATION_COOKIE, parsePlace, placeQuery } from '@/lib/locations';
-import { forOrigin, homeHref, parseFilters, toApiQuery, hasAnyFilter } from '@/lib/filters';
-import { favoriteIds } from '@/lib/favorites';
+import {
+  categoryHref,
+  forOrigin,
+  homeHref,
+  parseFilters,
+  toApiQuery,
+  hasAnyFilter,
+} from '@/lib/filters';
+import { favoriteDishIds, favoriteIds } from '@/lib/favorites';
 import { RestaurantCard } from '@/components/RestaurantCard';
 import { FilterChips } from '@/components/FilterChips';
 import { Hero } from '@/components/Hero';
@@ -54,11 +61,15 @@ export default async function HomePage({ params, searchParams }: Props) {
   const place = parsePlace((await cookies()).get(LOCATION_COOKIE)?.value);
   const filters = forOrigin(parseFilters(sp), place !== null);
 
-  // In parallel: three independent reads should not cost three round trips.
+  // In parallel: four independent reads should not cost four round trips.
   // The favourites go in here rather than beside the cards for that reason —
   // they are what fills in the hearts, and for a visitor who is not signed in
-  // the call is skipped entirely and the set comes back empty.
-  const [restaurants, categories, favorites] = await Promise.all([
+  // both calls are skipped entirely and the sets come back empty.
+  //
+  // Two of them, because a heart on this page has two possible subjects: the
+  // address, and — where a category filter has the cards wearing the dishes that
+  // matched it — the dish on the plate.
+  const [restaurants, categories, favorites, savedDishes] = await Promise.all([
     // One row per restaurant, not one per branch. A row from `/restaurants` is
     // normally a branch, which is right for the app — it sends coordinates and
     // shows how far each one is. This app has no coordinates and one page per
@@ -76,6 +87,9 @@ export default async function HomePage({ params, searchParams }: Props) {
     }),
     api.categories(language),
     favoriteIds(language),
+    // Every branch's saved dishes, not one branch's: this page draws two dozen
+    // cards and the ones under a filter each carry up to a few plates.
+    favoriteDishIds(language),
   ]);
 
   // Where a heart returns to: this listing with its filters still on.
@@ -90,16 +104,31 @@ export default async function HomePage({ params, searchParams }: Props) {
         // real links: `Link` renders an <a href> into the HTML, so a crawler
         // follows it exactly as before and a visitor gets client navigation.
         <ul className="cats" aria-label={label('browseByCuisine')}>
-          {categories.items.map((category) => (
-            <li key={category.id}>
-              <Link className="cat" href={searchPath(language, category.name)}>
-                <span className="emoji" aria-hidden="true">
-                  {category.icon}
-                </span>
-                <span className="name">{category.name}</span>
-              </Link>
-            </li>
-          ))}
+          {categories.items.map((category) => {
+            const lit = filters.category === category.key;
+            return (
+              <li key={category.id}>
+                {/* The rail **filters this listing** rather than running a
+                    search for the category's name (2026-08-16). That is what
+                    the design draws and what the app has always done; the site
+                    was the one out of step, and a search for "Суши" answered a
+                    different question — it matched restaurant names and cuisine
+                    text, not the dishes those kitchens actually cook.
+
+                    Pressing the lit one clears it, like every chip below. */}
+                <Link
+                  className={lit ? 'cat on' : 'cat'}
+                  href={categoryHref(filters, category.key, language)}
+                  aria-current={lit ? 'true' : undefined}
+                >
+                  <span className="emoji" aria-hidden="true">
+                    {category.icon}
+                  </span>
+                  <span className="name">{category.name}</span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -122,7 +151,12 @@ export default async function HomePage({ params, searchParams }: Props) {
               key={restaurant.id}
               restaurant={restaurant}
               language={language}
-              isFavorite={favorites.has(restaurant.restaurantId)}
+              isFavorite={favorites.has(restaurant.id)}
+              // Narrowed to this card's own plates, which is all its slider can
+              // draw a heart for.
+              savedDishes={(restaurant.dishes ?? [])
+                .filter((dish) => savedDishes.has(dish.id))
+                .map((dish) => dish.id)}
               returnTo={returnTo}
             />
           ))}

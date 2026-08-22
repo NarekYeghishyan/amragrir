@@ -866,6 +866,13 @@ header.site .brand svg,
   border-color: var(--accent);
   color: var(--accent);
 }
+/* The one the listing is filtered by. Pressing it again clears the filter, so
+   it reads as a pressed control rather than as a heading. */
+.cat.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 .cat .emoji {
   font-size: 26px;
   line-height: 1;
@@ -918,6 +925,20 @@ header.site .brand svg,
 .chip.filter-clear:hover {
   color: var(--ink);
   border-color: var(--ink3);
+}
+
+/* The two halves of the Favourites screen — saved addresses, saved dishes.
+   Ordinary links wearing the filter chips' shape: the state lives in the URL
+   (`?tab=dishes`), so switching works with JavaScript off and a tab can be
+   linked to. */
+.fav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 22px;
+  padding: 0;
+  list-style: none;
 }
 
 /* ── Section heading ─────────────────────────────────────────────────────── */
@@ -1259,10 +1280,25 @@ p.lede {
 .menu-tabs {
   display: flex;
   gap: 10px;
-  flex-wrap: wrap;
+  /* One row that scrolls, not a block that wraps: the four labels fit across a
+     narrow screen in English and not in Armenian, where "Հանրաճանաչ" alone is
+     most of a line. Wrapping put the last pill on a row of its own and pushed
+     the menu down; scrolling keeps the strip one row at any label length or
+     count. Nothing is cut off — a strip that fits shows no scrollbar at all. */
+  overflow-x: auto;
+  scrollbar-width: none;
   margin: 26px 0 4px;
 }
+.menu-tabs::-webkit-scrollbar {
+  display: none;
+}
 .menu-tab {
+  /* `flex: none` so a strip wider than the column scrolls at full pill size
+     instead of squeezing every label to fit; `position: relative` so the radio
+     inside is positioned against its own pill, for the reason given below. */
+  flex: none;
+  position: relative;
+  white-space: nowrap;
   padding: 10px 18px;
   border-radius: 22px;
   background: var(--chip);
@@ -1277,7 +1313,12 @@ p.lede {
 }
 /* The radio is the control; the pill is what it looks like. Same arrangement as
    the location picker's chips, and for the same reason — the browser tracks
-   which one is chosen, so this works before and without hydration. */
+   which one is chosen, so this works before and without hydration.
+
+   It is also what the browser scrolls into view when the strip is arrowed
+   through, which is why the pill above is positioned: an absolute radio
+   measured from some further-out ancestor would scroll the wrong place, and
+   arrowing to an off-screen tab would leave it off screen. */
 .menu-tab input {
   position: absolute;
   width: 1px;
@@ -1325,12 +1366,182 @@ p.lede {
   .menu-section {
     display: none;
   }
-  .menu:has(input[value='popular']:checked) .menu-section[data-tab='popular'],
-  .menu:has(input[value='mains']:checked) .menu-section[data-tab='mains'],
-  .menu:has(input[value='sides']:checked) .menu-section[data-tab='sides'],
-  .menu:has(input[value='drinks']:checked) .menu-section[data-tab='drinks'] {
-    display: block;
-  }
+  /* The rule that brings one back is **not here**, and cannot be: the sections
+     are the branch's own now, identified by uuid, so there is no fixed set of
+     values a stylesheet can enumerate. The restaurant page emits one
+     `.menu:has(input[value="<id>"]:checked) .menu-section[data-tab="<id>"]`
+     rule per section in an inline `<style>` — three to six declarations, server
+     rendered, and the menu keeps filtering with no JavaScript at all.
+
+     This block still earns its place: it is what makes a section hidden by
+     default, and it is guarded by `@supports` so a browser without `:has()`
+     never hides anything it cannot show again. */
+}
+
+/* The dish slider that replaces a card's cover under a category filter.
+
+   **One dish per slide, the full width of the card.** It was a row of small
+   tiles first, and small tiles are the wrong shape for this: the plate is the
+   thing being chosen, and at a third of a card's width it is a thumbnail beside
+   two other thumbnails with the third sliced off at the border. One photograph
+   filling the slot the cover used to fill puts the food at the size somebody
+   judges it at — and the card keeps its shape, so a filtered feed does not jump
+   about as cards come and go. */
+.card-strip {
+  position: relative;
+}
+
+.slider-frame {
+  position: relative;
+}
+
+/* `scrollbar-width: none` hides the bar and not the scrolling: a swipe, a
+   wheel and the arrows all still work, and a keyboard reaches every dish
+   because each slide is a link in the tab order. */
+.card-dishes {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+}
+.card-dishes::-webkit-scrollbar {
+  display: none;
+}
+/* The slide, which is the scroll child. The link inside it fills it, and the
+   dish's heart is the link's sibling — a <form> may not live inside an <a>, and
+   the heart has to be positioned against the slide rather than against the strip
+   so that it travels with the plate it saves. */
+.card-dish-slide {
+  position: relative;
+  /* Exactly the card, so a slide can never come to rest showing two halves. */
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+.card-dish {
+  position: relative;
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+.card-dish .media {
+  /* Square, and therefore as tall as the card is wide.
+
+     It matched the cover's 178px first, so that a card would be the same size
+     filtered or not — and that was the wrong thing to optimise for. A cover is
+     a room, which a letterbox suits; this is a plate, and a plate cropped to a
+     third of its height is a photograph of a table edge. The card growing is
+     the price of showing the food at the size somebody decides on it. */
+  height: auto;
+  aspect-ratio: 1;
+}
+
+/* The dish's name and price over the foot of its photograph. Not under it: the
+   card already carries a name and a price lower down — the restaurant's — and
+   two stacked name/price pairs read as one confused block. On the picture, this
+   one is plainly about the picture. */
+.card-dish__cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 26px 14px 12px;
+  color: #fff;
+  background: linear-gradient(to top, rgb(0 0 0 / 78%), rgb(0 0 0 / 0%));
+}
+.card-dish__name {
+  font-size: 15px;
+  font-weight: 700;
+  /* One line: a dish whose name wraps lifts the price off the baseline it
+     shares with every other slide's. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-dish__price {
+  flex: none;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+/* Overlaid on the photograph, vertically centred, and present on every slide —
+   dimmed and disabled at the ends rather than removed. An arrow that
+   disappears shifts the other one under the cursor between slides, and a
+   control that comes and goes is one somebody has to look for. */
+.slider-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
+}
+.slider-nav:hover:not(:disabled) {
+  color: var(--accent);
+}
+.slider-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.slider-nav.prev {
+  left: 10px;
+}
+.slider-nav.next {
+  right: 10px;
+}
+
+/* Under the photograph rather than on it: the caption already occupies the
+   bottom of the picture, and dots over a gradient over a photograph is three
+   layers of contrast to get right for one control. */
+.slider-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 0 2px;
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--line);
+  cursor: pointer;
+  transition:
+    width 0.15s,
+    background 0.15s;
+}
+.dot.on {
+  /* Wider rather than merely darker: on a six-pixel dot a colour change alone
+     is not a difference somebody notices in passing. */
+  width: 16px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+/* The badges sit over the frame rather than inside a slide, so they stay put
+   while the photographs move under them — and take no presses, or they would
+   swallow one meant for the dish. */
+.card-strip > .badge {
+  pointer-events: none;
 }
 
 .dishes {
@@ -1338,6 +1549,18 @@ p.lede {
   grid-template-columns: 1fr 1fr;
   gap: 18px;
   margin-top: 18px;
+}
+
+/* The dish a `?item=…#dish-…` link named. The hash does the scrolling, which is
+   why this needs no JavaScript; the ring is so that a page which jumped says
+   which of twenty near-identical cards it jumped to. */
+.dish.found {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 14px;
+}
+.dish {
+  scroll-margin-top: 88px;
 }
 .dish {
   display: flex;
@@ -1353,6 +1576,51 @@ p.lede {
   width: 104px;
   height: 104px;
   border-radius: 15px;
+}
+
+/* The dish's name and its own heart on one line.
+
+   The heart belongs up here rather than beside the `＋` at the foot of the card:
+   those two do different things — one saves the dish for later, the other orders
+   it now — and a pair of controls side by side invites the wrong one to be
+   pressed. It is also where the eye already is, on the name of the thing being
+   saved. */
+.dish-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.dish-head .name {
+  flex: 1;
+  min-width: 0;
+}
+/* An ordinary flex item rather than a badge floating on glass: the card behind
+   it is `--card`, not a photograph. */
+.dish-head .fav-form {
+  position: static;
+  flex: none;
+}
+.dish-head .fav {
+  width: 30px;
+  height: 30px;
+  background: var(--chip);
+  backdrop-filter: none;
+}
+
+/* A dish among search results: the row and its heart side by side. The row
+   cannot *be* the link once there is a form beside it — interactive content may
+   not nest — so the link fills a flex parent and the heart takes its place at the
+   end of it. */
+.dish-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.dish-result > .dish {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
 }
 .dish .text {
   flex: 1;
@@ -2063,10 +2331,24 @@ p.lede {
 .empty-state .glyph {
   font-size: 52px;
 }
-.empty-state h1 {
+.empty-state h1,
+/* An `h2` where the page already has an `h1` above the empty state — the
+   Favourites screen keeps its heading and its two tabs while one of them is
+   empty, so the empty half is a section of that page rather than the page. */
+.empty-state h2 {
   font-size: 22px;
   margin: 14px 0 6px;
   color: var(--ink);
+}
+
+/* The saved dishes: one full-width row each, since every row ends in a heart and
+   two columns of them would put a control in the middle of the page. */
+.dishes-saved {
+  display: grid;
+  gap: 14px;
+}
+.dishes-saved > .dish-result {
+  margin-top: 0;
 }
 
 /* Which restaurant, and which branch of it, the basket belongs to.

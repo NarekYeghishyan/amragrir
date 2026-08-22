@@ -86,6 +86,20 @@ floats over content and stays legible (the status badge over a restaurant
 photo); `--scrim` is the layer that pushes content back behind a modal. Both
 themes darken, so a scrim cannot be derived from `--ink` — that inverts.
 
+**`--glass` is a tinted panel *and* a blur, and the panel is the part that does
+the work.** Every glass surface in the artifact is `background: var(--glass);
+backdrop-filter: blur(N)` — a 78% opaque fill in light, 72% in dark, with the
+blur behind it. On mobile all five of them were built as the blur alone
+(`BlurView`, no `backgroundColor`), so `colors.glass` was in `packages/ui` and
+used by nothing, and the surfaces were worth however much tint the blur's
+`intensity` happened to produce. Over a photo that is close to nothing: the
+favourite heart on a restaurant's cover was on screen and hard to see, its dark
+`ink` stroke landing on whatever the photograph happened to be. Fixed
+2026-08-11 across the card's status badge and heart, the restaurant cover's back
+and favourite discs, and the tab bar. **A `BlurView` with no `colors.glass`
+under it is the bug, not a style choice** — `intensity` sets how far the blur
+reaches, never what colour the surface is.
+
 ### Two design artifacts, one authority
 
 There are two design artifacts: the **mobile app** (820×1020, 12 screens
@@ -287,7 +301,7 @@ Common press effect: `transform: scale(.85–.98)` with `transition: transform .
 
 ## 7. UI components (inventory)
 
-Header/greeting, Search bar, Location selector, Category rail (horizontal scroll), Filter rail + filter FAB with badge, Restaurant card, Dish card, Menu tabs, Cart CTA (sticky), Bottom sheet (filters), Calendar (month), Time-slot grid, Guest picker, Deposit card, Order summary, Payment method list, Countdown ring, Step tracker, QR/pickup code card, Order history row, Favorite card, Profile stats, Referral card, Settings rows, Toggle rows, Language segmented, Bottom tab bar (5 tabs), Skeleton loaders, Toast/status badges.
+Header/greeting, Search bar, Location selector, Category rail (horizontal scroll), Filter rail + filter FAB with badge, Restaurant card, Dish card, Menu tabs, Cart CTA (sticky), Bottom sheet (filters), Calendar (month), Time wheel (`HH`:`MM`, phone), Time-slot grid (web), Guest picker, Deposit card, Order summary, Payment method list, Countdown ring, Step tracker, QR/pickup code card, Order history row, Favorite card, Profile stats, Referral card, Settings rows, Toggle rows, Language segmented, Bottom tab bar (5 tabs), Skeleton loaders, Toast/status badges.
 
 ---
 
@@ -298,7 +312,7 @@ Header/greeting, Search bar, Location selector, Category rail (horizontal scroll
 | **default** | Base tokens (`--card`, `--line`, `--ink`). |
 | **hover** (web) | `opacity: .82` on links; on cards — slight lift/shadow (web version). |
 | **active / pressed** | `transform: scale(.85–.99)` with `transition .12s`. Selected pills/tabs/chips → `--accent` bg (or `--ink` for menu tabs), contrasting text, shadow. |
-| **selected** | Accent bg + shadow + `--accent` border (pills, pickup/dine mode, date, time, payment method — with a radio dot). |
+| **selected** | Accent bg + shadow + `--accent` border (pills, pickup/dine mode, date, time, payment method — with a radio dot). **The time wheel is the exception:** its settled row is not filled but *lifted* — `--accent` text at 20/800 against `--ink3` at 16/600 for its neighbours — because the `--card` lens behind it already marks the position, and filling the row as well would put two selection marks on one value. Nothing is highlighted at all while the wheel has no answer. |
 | **disabled** | Past calendar days: `disabled`, lowered opacity/`--ink3`, blocked cursor; unavailable time slots — muted. Buttons without actions — reduced contrast. |
 | **loading** | `.skel` skeletons — `--placeholder` blocks with a `--placeholder2` band sweeping across them (`skelSweep`, 1.5s). On the web these are built from the page's own layout classes so the blocks sit where the words will (COMPONENTS.md → `Skeleton (web)`), and each route's `loading.tsx` assembles them; rows stagger by 0.08s via an inherited `--skel-delay`. Reduced motion keeps the blocks and drops the sweep. |
 | **navigating** (web) | Between a press and a server-rendered page. `.route-progress` — a 3px accent→accent2 bar at the top of the window (`z-index: 60`, above header and dialog), silent for the first 140ms, approaching 90% and never arriving; `.is-pending` on the control that was pressed (`navPulse`, breathing to `opacity: .5`); `[data-navigating]` on `<html>` → `cursor: progress`. See COMPONENTS.md → `RouteProgress (web)`. |

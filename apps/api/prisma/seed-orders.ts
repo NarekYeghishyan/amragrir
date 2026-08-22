@@ -40,6 +40,7 @@ import {
   OrderStatus,
   PICKUP_CODE_LENGTH,
   PaymentMethod,
+  PickupOption,
   PaymentStatus,
   RESERVATION_SLOT_MINUTES,
   ReservationStatus,
@@ -143,6 +144,9 @@ export interface PlannedOrder {
   pickupCode: string;
   userId: string;
   serviceMode: ServiceMode;
+  /** Set for a collected order and null for a seated one — the CHECK in the
+   *  database is an equality between those two, not two separate rules. */
+  pickupOption: PickupOption | null;
   status: OrderStatus;
   subtotalAmd: number;
   serviceFeeAmd: number;
@@ -421,6 +425,13 @@ function planOrder(input: {
     pickupCode,
     userId: customer.id,
     serviceMode: seating ? ServiceMode.DineIn : ServiceMode.Pickup,
+    // A collected order records how the guest meant to eat it, and a seated one
+    // has nothing to record — that is the `orders_pickup_option_matches_service_mode`
+    // CHECK, and every seeded pickup order violated it, so a seed run against
+    // an empty database failed at the first order. It went unnoticed because the
+    // constraint arrived after these rows did, and a re-run skips what is
+    // already there.
+    pickupOption: seating ? null : PickupOption.TakeAway,
     status,
     ...totals,
     readyAt,
@@ -861,6 +872,7 @@ async function writeOrder(
         branchId,
         reservationId,
         serviceMode: order.serviceMode,
+        pickupOption: order.pickupOption,
         status: order.status,
         subtotalAmd: order.subtotalAmd,
         serviceFeeAmd: order.serviceFeeAmd,

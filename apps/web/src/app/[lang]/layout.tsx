@@ -12,6 +12,7 @@ import {
   notificationsApiPath,
   notificationsStreamPath,
   ordersPath,
+  reservationsPath,
   profilePath,
   searchPath,
 } from '@/lib/site';
@@ -24,9 +25,14 @@ import { Footer } from '@/components/Footer';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { THEME_KEY } from '@/lib/theme';
 import { BasketButton } from '@/components/BasketButton';
-import { NotificationBell, type StatusCopy } from '@/components/NotificationBell';
+import {
+  NotificationBell,
+  type ReservationCopy,
+  type StatusCopy,
+} from '@/components/NotificationBell';
 import { RouteProgress } from '@/components/RouteProgress';
 import { ORDER_STATUS_COPY } from '@/lib/notification-watch';
+import { RESERVATION_NOTIFICATION_COPY, RESERVATION_REMINDER_COPY } from '@amragrir/i18n';
 import '../globals.css';
 
 export const metadata: Metadata = {
@@ -72,6 +78,23 @@ export default async function LangLayout({
       { title: label(keys.title), body: label(keys.body) },
     ]),
   ) as StatusCopy;
+
+  // The three booking sentences, resolved the same way. Only the statuses that
+  // say anything: `RESERVATION_NOTIFICATION_COPY` marks the silent ones `null`,
+  // and a map holding empty strings for them would be a bell drawing blank rows.
+  const reservationCopy = Object.fromEntries(
+    Object.entries(RESERVATION_NOTIFICATION_COPY)
+      .filter(([, keys]) => keys !== null)
+      .map(([status, keys]) => [
+        status,
+        { title: label(keys!.title), body: label(keys!.body) },
+      ]),
+  ) as ReservationCopy;
+
+  const reminderCopy = {
+    title: label(RESERVATION_REMINDER_COPY.title),
+    body: label(RESERVATION_REMINDER_COPY.body),
+  };
 
   return (
     // suppressHydrationWarning: the script below sets data-theme on <html>
@@ -173,6 +196,9 @@ export default async function LangLayout({
                 clearAll: label('clearNotifications'),
               }}
               statusCopy={statusCopy}
+              reservationCopy={reservationCopy}
+              reminderCopy={reminderCopy}
+              reservationsBase={reservationsPath(language)}
             />
             {/* The artifact draws the account's initial here. This header cannot
                 know it: the session is httpOnly by design, and reading it would

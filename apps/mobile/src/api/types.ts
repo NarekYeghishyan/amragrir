@@ -9,6 +9,7 @@ import type {
   PaymentMethod,
   PaymentStatus,
   PickupOption,
+  Place,
   ReservationStatus,
   Role,
   ServiceMode,
@@ -70,10 +71,10 @@ export interface Category {
 }
 
 export interface RestaurantListItem {
-  /** The branch — what the row describes, and what a basket is opened against. */
+  /** The branch — what the row describes, what a basket is opened against, and
+   *  what the card's heart saves (DATABASE.md §13). */
   id: string;
-  /** The business behind it. A favourite is stored against the restaurant, so
-   *  this is what the card's heart sends to `POST /favorites`. */
+  /** The business behind it, which owns the name, cuisine and rating. */
   restaurantId: string;
   slug: string;
   name: string;
@@ -87,19 +88,45 @@ export interface RestaurantListItem {
   services: string[];
   reservationsEnabled: boolean;
   coverUrl: string | null;
+  /**
+   * The dishes that matched an active category filter.
+   *
+   * Absent means no filter is on and the card wears its cover. Present means
+   * the guest asked for sushi, and a photograph of the dining room does not
+   * answer that. Empty means the filter is on and every match is sold out
+   * tonight — the card is still true, and goes back to its cover.
+   */
+  dishes?: CardDish[];
+}
+
+/** A dish as a filtered card shows it: the picture, what it is, what it costs,
+ *  and enough to open the menu at it. */
+export interface CardDish {
+  id: string;
+  name: string;
+  priceAmd: number;
+  photoUrl: string | null;
+  sectionId: string;
 }
 
 /**
- * A saved restaurant. Close to `RestaurantListItem` but not the same shape —
- * a favourite is stored against the *restaurant*, so the branch fields are
- * whichever branch answers for it and `branchId` can be null when a restaurant
- * has none yet.
+ * A saved **branch**. Close to `RestaurantListItem` and for the same reason —
+ * a favourite is one address, the same thing a card on the feed is, so the two
+ * draw the same card.
+ *
+ * `branchId` is the key: it is what was hearted and what the row opens.
+ * `restaurantId` and `slug` come along because the name, cuisine and rating
+ * belong to the business, and `branchName`/`address` because two branches of
+ * one chain are otherwise the same row printed twice.
  */
 export interface FavoriteItem {
+  branchId: string;
   restaurantId: string;
-  branchId: string | null;
   slug: string;
   name: string;
+  branchName: string | null;
+  address: string | null;
+  city: string;
   cuisine: string | null;
   priceLevel: number | null;
   rating: number;
@@ -111,10 +138,58 @@ export interface FavoriteItem {
   addedAt: string;
 }
 
+/**
+ * A saved **dish**.
+ *
+ * The other half of the Favourites screen, and a different subject from
+ * `FavoriteItem`: hearting a plate saves the plate, not the room it is served
+ * in. `menuItemId` is what was saved; `branchId` comes with it because a dish
+ * belongs to one kitchen, and it is what the row opens — the menu at this dish
+ * (`/restaurant/{branchId}?item={menuItemId}`).
+ *
+ * The name and price are the menu's, read fresh on every list rather than
+ * copied when the heart was pressed, so a repriced dish shows today's price.
+ */
+export interface FavoriteDish {
+  menuItemId: string;
+  branchId: string;
+  restaurantId: string;
+  slug: string;
+  name: string;
+  desc: string;
+  priceAmd: number;
+  photoUrl: string | null;
+  caloriesKcal: number | null;
+  prepMin: number | null;
+  isAvailable: boolean;
+  sectionId: string;
+  /** Whose kitchen, and where — what tells two branches of one chain apart. */
+  restaurantName: string;
+  branchName: string | null;
+  address: string | null;
+  city: string;
+  isOpen: boolean;
+  addedAt: string;
+}
+
 export interface Paged<T> {
   items: T[];
   total: number;
   page: number;
+}
+
+/**
+ * What `GET /geocode` answers — see `apps/api/src/geocode/geocode.service.ts`.
+ *
+ * `failed` and an empty `items` are different answers: "this search is broken"
+ * against "Yerevan has no such street". `available` is a third thing again —
+ * a deployment with no geocoder key, where the picker draws no search box at
+ * all rather than one that can never answer.
+ */
+export interface GeocodeAnswer {
+  items: Place[];
+  failed?: true;
+  available: boolean;
 }
 
 export interface RestaurantDetail {
@@ -168,6 +243,18 @@ export interface Quote {
    *  pre-order screen still draws "eat at the restaurant", dimmed, and tapping
    *  it switches the basket to dine-in rather than choosing an ending. */
   eatInRequiresBooking: boolean;
+  /**
+   * Whether a table can be booked here right now — `reserve` declared **and**
+   * bookings not paused. False makes dine-in a dead end, so the pre-order
+   * screen draws no way into it rather than one that lands on "this restaurant
+   * does not take bookings".
+   *
+   * Distinct from `eatInRequiresBooking`, which is the declaration alone and
+   * stays true through a pause. It is on the quote — not read off the
+   * availability call — because that call is only made for dine-in, and this
+   * question has to be answered on a pickup render too.
+   */
+  reservationsEnabled: boolean;
   items: QuoteLine[];
   unavailable: { menuItemId: string; reason: 'not_on_menu' | 'sold_out' }[];
   subtotalAmd: number;
@@ -347,6 +434,21 @@ export interface NotificationList {
   unread: number;
 }
 
+/**
+ * `GET /referrals/me`. The code is **created by that read**, so this is the
+ * only place a real one comes from — nothing on the client can derive it.
+ */
+export interface ReferralSummary {
+  code: string;
+  /** Already assembled by the API, without a scheme. */
+  link: string;
+  invitedCount: number;
+  discountEarnedPct: number;
+  maxStackPct: number;
+  /** The reward waiting to be used, if any. */
+  coupon: { code: string; discountPct: number; validUntil: string | null } | null;
+}
+
 export interface MenuItem {
   id: string;
   name: string;
@@ -357,6 +459,19 @@ export interface MenuItem {
   photoUrl: string | null;
   dietaryTags: string[];
   isAvailable: boolean;
-  menuTab: string;
+  /** Which of the branch's own headings it sits under. */
+  sectionId: string;
+  /** On the branch's Popular shelf. True *as well as* the section above — a
+   *  bestseller does not stop being pizza. */
+  isPopular: boolean;
+  /** The **effective** category: the dish's own, or its section's, resolved by
+   *  the API so no client has to know the inheritance rule. */
+  categoryId: string | null;
+}
+
+/** One heading of a branch's menu, already in the reader's language. */
+export interface MenuSection {
+  id: string;
+  name: string;
   categoryId: string | null;
 }

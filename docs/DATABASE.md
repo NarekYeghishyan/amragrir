@@ -14,6 +14,9 @@ users 1─* favorites             users 1─* reviews
 users 1─* notifications         users 1─1 referrals (own code)
 restaurants 1─* branches        branches 1─* tables
 branches 1─* menu_items         categories 1─* menu_items
+branches 1─* menu_sections      menu_sections 1─* menu_items
+branches 1─* favorites          (a favourite is one address, §13)
+users 1─* favorite_menu_items   menu_items 1─* favorite_menu_items (§13a)
 orders 1─* order_items          orders 1─0..1 payments
 orders 1─0..1 reservations      reservations 1─0..1 tables
 reservations 1─0..1 payments    (a payment settles an order XOR a reservation)
@@ -172,13 +175,47 @@ is open.
 
 ## 5. categories
 
+**The platform's vocabulary, not a restaurant's.** This is the city's index —
+what the chip rail offers, what `?category=` filters by, and what a guest
+reasons in before they have picked a place. The list is closed and only
+`categories:write` (super admin) may add to it, so it cannot fill with "Пицца",
+"ПИЦЦА" and "Pizza 🍕" as three ways to find the same dinner. How a branch lays
+out its own menu is the other axis: §5a.
+
 | Field | Type | Description |
 |---|---|---|
 | id | uuid PK | |
-| key | varchar(40) UNIQUE | pizza, sushi, healthy… |
+| key | varchar(40) UNIQUE | pizza, sushi, healthy… **Permanent.** It travels in `?category=`, in both clients' deep links and in the seed's placeholder filenames, so `PATCH /admin/categories/{id}` cannot change it |
 | icon | varchar(8) | emoji/icon |
 | sort_order | smallint | |
+| name_i18n | jsonb | {hy,ru,en} — the shop window, editable any day |
+| is_active | boolean NOT NULL default true | Off the rail without being deleted. A category dishes point at cannot be removed without orphaning them out of every filter, so retiring one is this flag; `GET /categories` hides them and `GET /admin/categories` does not |
+| created_at / updated_at | timestamptz | |
+
+---
+
+## 5a. branch_menu_sections
+
+One heading on one branch's menu page — "Mains", "Сеты", "Խորոված". The branch's
+own vocabulary, which is why it is a table per branch and not an enum:
+`menu_items.menu_tab` used to be one, fixed at four values, and a kitchen whose
+menu names five things had nowhere to put the fifth.
+
+`category_id` is the bridge between the two axes. A section that answers "this
+whole shelf is pizza" gives every dish under it a platform category for free; a
+section like "Сеты" that answers nothing leaves each dish to name its own.
+Between them, no dish ends up invisible to the city's filters — which is exactly
+what an unset `menu_items.category_id` used to do, silently.
+
+| Field | Type | Description |
+|---|---|---|
+| id | uuid PK | |
+| branch_id | uuid FK→restaurant_branches.id ON DELETE CASCADE | |
+| category_id | uuid FK→categories.id NULL | The platform category every dish here inherits, or NULL for a heading that maps onto none |
 | name_i18n | jsonb | {hy,ru,en} |
+| sort_order | smallint NOT NULL default 0 | Position in the strip |
+| deleted_at | timestamptz NULL | Soft-deleted, like a dish and for the same reason: withdrawn dishes still point here and their orders still point at them. Refused while live dishes sit under it |
+| created_at / updated_at | timestamptz | |
 
 ---
 
@@ -188,8 +225,9 @@ is open.
 |---|---|---|
 | id | uuid PK | |
 | branch_id | uuid FK→restaurant_branches.id | |
-| category_id | uuid FK→categories.id | |
-| menu_tab | enum(`popular`,`mains`,`sides`,`drinks`) | tab on the page |
+| category_id | uuid FK→categories.id NULL | The dish's **own** platform category, which overrides its section's. NULL means it inherits — the common case |
+| section_id | uuid FK→branch_menu_sections.id NOT NULL, ON DELETE RESTRICT | Which heading of this branch's menu it sits under. Restrict, not cascade: deleting a heading must never delete the food |
+| is_popular | boolean NOT NULL default false | On the branch's "Popular" shelf, which is a *showcase* rather than a section — a dish is popular **as well as** being pizza. It was a fifth value of the old `menu_tab` enum, which forced that false choice |
 | name_i18n | jsonb | {hy,ru,en} |
 | desc_i18n | jsonb | {hy,ru,en} |
 | price_amd | integer NOT NULL | price in dram |
@@ -640,9 +678,68 @@ preserve a second copy of information that is preserved properly elsewhere.
 |---|---|
 | id | uuid PK |
 | user_id | uuid FK→users.id |
-| restaurant_id | uuid FK→restaurants.id |
+| branch_id | uuid FK→restaurant_branches.id |
 | created_at | timestamptz |
-| UNIQUE(user_id, restaurant_id) | |
+| UNIQUE(user_id, branch_id) | |
+
+**A branch, not a business** (2026-08-13). It was `restaurant_id` until then,
+and that was the one place in the product where a customer's action landed on
+the business rather than on the address: a card on the feed is a branch, a
+basket is opened against a branch, a table is booked at a branch. Hearting one
+Dolmama therefore filled the heart on the other one, three kilometres away and
+possibly shut, and the Favourites list could not say which kitchen it meant.
+
+The migration moved every saved restaurant onto its **oldest** branch
+(`created_at`, then `id`) — the same tie-break `/restaurants/{slug}` and the
+grouped listing use, so a row became the branch whose card was being looked at
+when the heart was pressed. Favourites of a restaurant with no branches were
+dropped; there was no address in them to keep.
+
+---
+
+## 13a. favorite_menu_items
+
+| Field | Type |
+|---|---|
+| id | uuid PK |
+| user_id | uuid FK→users.id |
+| menu_item_id | uuid FK→menu_items.id |
+| created_at | timestamptz |
+| UNIQUE(user_id, menu_item_id) | |
+
+**A heart can also mean a dish** (2026-08-17). Saving only the address was right
+for a card on the feed and wrong everywhere the app is actually showing food: a
+card wearing the plates that matched a category filter, a row on a menu, a dish
+among search results. Somebody pressing the heart over a photograph of khinkali
+means the khinkali.
+
+**Its own table, not two nullable columns on `favorites`.** The two lists are
+read, counted and removed separately (the Favourites screen shows them under two
+tabs), and one table where exactly one of two columns is filled is a check
+constraint standing in for a type.
+
+**The branch is not stored here.** `menu_items.branch_id` already says which
+kitchen, so a saved dish is one address's dish by construction — the same rule
+§13 states, inherited through the foreign key rather than restated. It is also
+what the row opens: `/restaurant/{branch_id}?item={menu_item_id}`, the menu
+scrolled to that dish.
+
+**Nothing is stored *about* the dish** — not its name, not its price. The menu is
+the authority on both, so a saved dish shows what the kitchen says today. The
+consequences of that choice:
+
+- a dish taken off the menu (`menu_items.deleted_at`) is **filtered out** of
+  `GET /favorites/dishes` rather than drawn as something nobody can order — the
+  row survives, so a dish withdrawn and put back is still saved;
+- sold out tonight (`is_available = false`) is a different state and *is* shown,
+  marked: it is true now, the dish is still on the menu, and hiding it would make
+  the list flicker with the kitchen's stock;
+- `ON DELETE CASCADE` covers only a **hard** delete of the dish, which takes its
+  hearts with it.
+
+A guest's dish favourites live on the phone (`amragrir.favorites.dishes.guest`)
+and are handed to the account at sign-in, exactly as the branch ones are — see
+ROLES_AND_PERMISSIONS.md §1 for why the endpoint refuses a guest token.
 
 ---
 
@@ -826,7 +923,11 @@ can read it".
 ## Indexes (recommended)
 
 - `restaurant_branches(lat, lng)` — geo search (or PostGIS `geography`).
-- `menu_items(branch_id, menu_tab)`, `menu_items(category_id)`.
+- `menu_items(branch_id, section_id)`, `menu_items(section_id)`,
+  `menu_items(category_id)`.
+- `branch_menu_sections(branch_id, sort_order)` — a branch's menu is always read
+  in its own order; `branch_menu_sections(category_id)` for the reverse question,
+  "what would break if this category went".
 - `orders(user_id, status)`, `orders(branch_id, status)`, `orders(code)`.
 - `order_events(order_id, created_at)` — the timeline is always read for one
   order, oldest first.
@@ -839,7 +940,12 @@ can read it".
 - `staff_notifications(branch_id, created_at)` — one branch's bell, newest
   first; `staff_notification_reads(staff_user_id)`.
 - `reservations(branch_id, reserved_for)`, `reservations(user_id)`.
-- `favorites(user_id)`, `notifications(user_id, is_read)`.
+- `favorites(user_id)` — one account's list; `UNIQUE(user_id, branch_id)` is
+  what makes a second tap idempotent. `notifications(user_id, is_read)`.
+- `favorite_menu_items(user_id)` — the same for saved dishes, with
+  `UNIQUE(user_id, menu_item_id)` doing the same job. The per-branch narrowing a
+  menu page asks for (`GET /favorites/dishes/ids?branchId=`) reads this index and
+  filters through the join, since one account's list is small.
 - `staff_assignments(staff_user_id)`, `(restaurant_id)`, `(branch_id)` — every
   scope filter reads one of the three.
 - `audit_log(actor_staff_id, created_at)` — also what the activity feed reads,

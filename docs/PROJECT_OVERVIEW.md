@@ -25,7 +25,7 @@ The restaurant kitchen times the preparation so the dish is fresh at the exact a
 ## 3. The problem it solves
 
 1. **Queues and waiting.** At lunch, users lose time queuing and waiting for cooking. Amragrir removes the wait: the food is ready on arrival.
-2. **Unpredictable timing.** Regular delivery gives no precise control over the moment of receipt. Here the user chooses the exact "Food ready at" time.
+2. **Unpredictable timing.** Regular delivery gives no precise control over the moment of receipt. Here the user chooses the exact "Ready at" time.
 3. **Table availability.** Arriving and finding no seat. Booking with a deposit solves this ahead of time.
 4. **Freshness vs. speed.** Pre-made food goes cold; delivery takes long. The pre-order model synchronizes cooking with arrival.
 
@@ -50,11 +50,11 @@ Geography — residents and visitors of Yerevan; the multilingual interface serv
 | Search & catalog | List of nearby restaurants, search, cuisine categories, filters (sort, price, distance, rating, diet, service mode). |
 | Restaurant page | Photo, rating, prep time, distance, status (open/closed), menu by tabs (Popular/Mains/Sides/Drinks). |
 | Basket | Line items with quantity, subtotal, service fee, total. Tied to a single restaurant. |
-| Pre-order | Choose mode: **Pickup** or **Dine-in** (table booking). For dine-in — date calendar, reservation time, guest count, deposit. Choose "Food ready at" time. |
+| Pre-order | Choose mode: **Pickup** or **Dine-in** (table booking). For dine-in — date calendar, reservation time, guest count, deposit. Choose "Ready at" time. |
 | Checkout | Order summary, ready-at time, service method, deposit (for dine-in), payment method selection. |
 | Order tracking | Live countdown, ring progress, status steps, pickup code / QR. |
 | Orders | Active order with a timer + history of past orders with a "Reorder" button. |
-| Favorites | Favorite restaurants. |
+| Favorites | Saved branches — one address per heart, not the whole chain. |
 | Profile | Profile, reward points, coupons, referral program, language, section links. |
 | Referral | "Give 2%, get 2%" referral program (stacks up to 25%), personal code/link, statistics. |
 | Settings | Dark theme, push notifications, promo emails, language, account, "About", log out. |
@@ -85,5 +85,5 @@ Amragrir is **order-ahead / dine-in booking**, not delivery. The core mechanic i
 - **Pickup** — self-collect at the counter (express counter), released by pickup code: six digits the guest shows (as a number or a QR), which the counter checks before the order can be closed.
 - **Dine-in** — table booking; accompanied by a deposit.
 - **Table deposit** — table deposit; **fully credited** toward the final bill, not an extra charge.
-- **Food ready at** — the time by which the kitchen prepares the order.
+- **Ready at** — the time by which the kitchen prepares the order.
 - **Service fee** — the platform's service fee.

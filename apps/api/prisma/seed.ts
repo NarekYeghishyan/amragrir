@@ -9,7 +9,7 @@
  *
  * Run: pnpm --filter @amragrir/api db:seed   (after prisma migrate)
  */
-import { PrismaClient, MenuTab, StaffRole } from '@prisma/client';
+import { PrismaClient, StaffRole } from '@prisma/client';
 import { PasswordService } from '../src/staff/password.service';
 import { seedOrders } from './seed-orders';
 import { seedActivity } from './seed-activity';
@@ -29,8 +29,15 @@ const prisma = new PrismaClient();
  * `apps/api/public/menu` instead, for a demo with no way out to the internet.
  */
 interface SeedMenuItem {
+  /**
+   * The platform category, which here doubles as the branch's menu heading:
+   * each demo branch gets one section per category its dishes use, mapped to
+   * that category, so the seeded data shows the inheritance the panel relies on
+   * (a dish under a mapped shelf needs no category of its own).
+   */
   categoryKey: string;
-  menuTab: MenuTab;
+  /** On the branch's "Popular" shelf — a flag now, not a tab. */
+  isPopular?: boolean;
   hy: string;
   ru: string;
   en: string;
@@ -100,11 +107,11 @@ const RESTAURANTS: SeedRestaurant[] = [
       },
     ],
     menu: [
-      { categoryKey: 'grill', menuTab: MenuTab.popular, hy: 'Ջեռոցի ջոթ', ru: 'Гриль-платтер', en: 'Grill Platter', priceAmd: 5800, caloriesKcal: 720, prepMin: 15, dietaryTags: ['halal'] },
-      { categoryKey: 'healthy', menuTab: MenuTab.popular, hy: 'Քինոա բոուլ', ru: 'Боул с киноа', en: 'Quinoa Bowl', priceAmd: 4200, caloriesKcal: 480, prepMin: 8, dietaryTags: ['vegetarian', 'gluten_free'] },
-      { categoryKey: 'pasta', menuTab: MenuTab.mains, hy: 'Պաստա Ալֆրեդո', ru: 'Паста Альфредо', en: 'Pasta Alfredo', priceAmd: 4800, caloriesKcal: 640, prepMin: 12, dietaryTags: ['vegetarian'] },
-      { categoryKey: 'healthy', menuTab: MenuTab.sides, hy: 'Կանաչ աղցան', ru: 'Зелёный салат', en: 'Green Salad', priceAmd: 2200, caloriesKcal: 180, prepMin: 5, dietaryTags: ['vegan', 'gluten_free'] },
-      { categoryKey: 'drinks', menuTab: MenuTab.drinks, hy: 'Թարմ լիմոնադ', ru: 'Свежий лимонад', en: 'Fresh Lemonade', priceAmd: 1200, caloriesKcal: 140, prepMin: 3, dietaryTags: ['vegan'] },
+      { categoryKey: 'grill', isPopular: true,hy: 'Ջեռոցի ջոթ', ru: 'Гриль-платтер', en: 'Grill Platter', priceAmd: 5800, caloriesKcal: 720, prepMin: 15, dietaryTags: ['halal'] },
+      { categoryKey: 'healthy', isPopular: true,hy: 'Քինոա բոուլ', ru: 'Боул с киноа', en: 'Quinoa Bowl', priceAmd: 4200, caloriesKcal: 480, prepMin: 8, dietaryTags: ['vegetarian', 'gluten_free'] },
+      { categoryKey: 'pasta', hy: 'Պաստա Ալֆրեդո', ru: 'Паста Альфредо', en: 'Pasta Alfredo', priceAmd: 4800, caloriesKcal: 640, prepMin: 12, dietaryTags: ['vegetarian'] },
+      { categoryKey: 'healthy', hy: 'Կանաչ աղցան', ru: 'Зелёный салат', en: 'Green Salad', priceAmd: 2200, caloriesKcal: 180, prepMin: 5, dietaryTags: ['vegan', 'gluten_free'] },
+      { categoryKey: 'drinks', hy: 'Թարմ լիմոնադ', ru: 'Свежий лимонад', en: 'Fresh Lemonade', priceAmd: 1200, caloriesKcal: 140, prepMin: 3, dietaryTags: ['vegan'] },
     ],
   },
   {
@@ -135,10 +142,10 @@ const RESTAURANTS: SeedRestaurant[] = [
       },
     ],
     menu: [
-      { categoryKey: 'healthy', menuTab: MenuTab.popular, hy: 'Պոկե բոուլ', ru: 'Поке-боул', en: 'Poke Bowl', priceAmd: 4600, caloriesKcal: 520, prepMin: 9, dietaryTags: ['gluten_free'] },
-      { categoryKey: 'breakfast', menuTab: MenuTab.popular, hy: 'Ավոկադո տոստ', ru: 'Тост с авокадо', en: 'Avocado Toast', priceAmd: 2800, caloriesKcal: 340, prepMin: 6, dietaryTags: ['vegetarian'] },
-      { categoryKey: 'healthy', menuTab: MenuTab.mains, hy: 'Բանջարեղենի ռամեն', ru: 'Овощной рамен', en: 'Veggie Ramen', priceAmd: 3900, caloriesKcal: 430, prepMin: 11, dietaryTags: ['vegan'] },
-      { categoryKey: 'drinks', menuTab: MenuTab.drinks, hy: 'Կանաչ սմուզի', ru: 'Зелёный смузи', en: 'Green Smoothie', priceAmd: 1600, caloriesKcal: 210, prepMin: 4, dietaryTags: ['vegan', 'gluten_free'] },
+      { categoryKey: 'healthy', isPopular: true,hy: 'Պոկե բոուլ', ru: 'Поке-боул', en: 'Poke Bowl', priceAmd: 4600, caloriesKcal: 520, prepMin: 9, dietaryTags: ['gluten_free'] },
+      { categoryKey: 'breakfast', isPopular: true,hy: 'Ավոկադո տոստ', ru: 'Тост с авокадо', en: 'Avocado Toast', priceAmd: 2800, caloriesKcal: 340, prepMin: 6, dietaryTags: ['vegetarian'] },
+      { categoryKey: 'healthy', hy: 'Բանջարեղենի ռամեն', ru: 'Овощной рамен', en: 'Veggie Ramen', priceAmd: 3900, caloriesKcal: 430, prepMin: 11, dietaryTags: ['vegan'] },
+      { categoryKey: 'drinks', hy: 'Կանաչ սմուզի', ru: 'Зелёный смузи', en: 'Green Smoothie', priceAmd: 1600, caloriesKcal: 210, prepMin: 4, dietaryTags: ['vegan', 'gluten_free'] },
     ],
   },
 ];
@@ -154,60 +161,60 @@ const RESTAURANTS: SeedRestaurant[] = [
  */
 const MENUS: Record<string, SeedMenuItem[]> = {
   pizza: [
-    { categoryKey: 'pizza', menuTab: MenuTab.popular, hy: 'Մարգարիտա', ru: 'Маргарита', en: 'Margherita', priceAmd: 3200, caloriesKcal: 780, prepMin: 14, dietaryTags: ['vegetarian'] },
-    { categoryKey: 'pizza', menuTab: MenuTab.popular, hy: 'Պեպերոնի', ru: 'Пепперони', en: 'Pepperoni', priceAmd: 3900, caloriesKcal: 920, prepMin: 14, dietaryTags: [] },
-    { categoryKey: 'pizza', menuTab: MenuTab.mains, hy: 'Չորս պանիր', ru: 'Четыре сыра', en: 'Four Cheese', priceAmd: 4300, caloriesKcal: 980, prepMin: 15, dietaryTags: ['vegetarian'] },
-    { categoryKey: 'lunch', menuTab: MenuTab.sides, hy: 'Սխտորով հաց', ru: 'Чесночный хлеб', en: 'Garlic Bread', priceAmd: 1400, caloriesKcal: 260, prepMin: 6, dietaryTags: ['vegetarian'] },
-    { categoryKey: 'drinks', menuTab: MenuTab.drinks, hy: 'Կոլա', ru: 'Кола', en: 'Cola', priceAmd: 700, caloriesKcal: 140, prepMin: 1, dietaryTags: ['vegan'] },
+    { categoryKey: 'pizza', isPopular: true,hy: 'Մարգարիտա', ru: 'Маргарита', en: 'Margherita', priceAmd: 3200, caloriesKcal: 780, prepMin: 14, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'pizza', isPopular: true,hy: 'Պեպերոնի', ru: 'Пепперони', en: 'Pepperoni', priceAmd: 3900, caloriesKcal: 920, prepMin: 14, dietaryTags: [] },
+    { categoryKey: 'pizza', hy: 'Չորս պանիր', ru: 'Четыре сыра', en: 'Four Cheese', priceAmd: 4300, caloriesKcal: 980, prepMin: 15, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'lunch', hy: 'Սխտորով հաց', ru: 'Чесночный хлеб', en: 'Garlic Bread', priceAmd: 1400, caloriesKcal: 260, prepMin: 6, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'drinks', hy: 'Կոլա', ru: 'Кола', en: 'Cola', priceAmd: 700, caloriesKcal: 140, prepMin: 1, dietaryTags: ['vegan'] },
   ],
   burgers: [
-    { categoryKey: 'burgers', menuTab: MenuTab.popular, hy: 'Դասական բուրգեր', ru: 'Классический бургер', en: 'Classic Burger', priceAmd: 3400, caloriesKcal: 850, prepMin: 11, dietaryTags: [] },
-    { categoryKey: 'burgers', menuTab: MenuTab.popular, hy: 'Չիզբուրգեր', ru: 'Чизбургер', en: 'Cheeseburger', priceAmd: 3800, caloriesKcal: 940, prepMin: 11, dietaryTags: [] },
-    { categoryKey: 'burgers', menuTab: MenuTab.mains, hy: 'Հավով բուրգեր', ru: 'Куриный бургер', en: 'Chicken Burger', priceAmd: 3600, caloriesKcal: 790, prepMin: 12, dietaryTags: ['halal'] },
-    { categoryKey: 'lunch', menuTab: MenuTab.sides, hy: 'Ֆրի', ru: 'Картофель фри', en: 'Fries', priceAmd: 1300, caloriesKcal: 330, prepMin: 5, dietaryTags: ['vegetarian'] },
-    { categoryKey: 'drinks', menuTab: MenuTab.drinks, hy: 'Միլքշեյք', ru: 'Молочный коктейль', en: 'Milkshake', priceAmd: 1800, caloriesKcal: 420, prepMin: 4, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'burgers', isPopular: true,hy: 'Դասական բուրգեր', ru: 'Классический бургер', en: 'Classic Burger', priceAmd: 3400, caloriesKcal: 850, prepMin: 11, dietaryTags: [] },
+    { categoryKey: 'burgers', isPopular: true,hy: 'Չիզբուրգեր', ru: 'Чизбургер', en: 'Cheeseburger', priceAmd: 3800, caloriesKcal: 940, prepMin: 11, dietaryTags: [] },
+    { categoryKey: 'burgers', hy: 'Հավով բուրգեր', ru: 'Куриный бургер', en: 'Chicken Burger', priceAmd: 3600, caloriesKcal: 790, prepMin: 12, dietaryTags: ['halal'] },
+    { categoryKey: 'lunch', hy: 'Ֆրի', ru: 'Картофель фри', en: 'Fries', priceAmd: 1300, caloriesKcal: 330, prepMin: 5, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'drinks', hy: 'Միլքշեյք', ru: 'Молочный коктейль', en: 'Milkshake', priceAmd: 1800, caloriesKcal: 420, prepMin: 4, dietaryTags: ['vegetarian'] },
   ],
   sushi: [
-    { categoryKey: 'sushi', menuTab: MenuTab.popular, hy: 'Ֆիլադելֆիա', ru: 'Филадельфия', en: 'Philadelphia Roll', priceAmd: 4900, caloriesKcal: 480, prepMin: 13, dietaryTags: [] },
-    { categoryKey: 'sushi', menuTab: MenuTab.popular, hy: 'Կալիֆոռնիա', ru: 'Калифорния', en: 'California Roll', priceAmd: 4400, caloriesKcal: 440, prepMin: 13, dietaryTags: [] },
-    { categoryKey: 'sushi', menuTab: MenuTab.mains, hy: 'Սաղմոնի նիգիրի', ru: 'Нигири с лососем', en: 'Salmon Nigiri', priceAmd: 2600, caloriesKcal: 220, prepMin: 9, dietaryTags: ['gluten_free'] },
-    { categoryKey: 'asian', menuTab: MenuTab.sides, hy: 'Միսո ապուր', ru: 'Мисо-суп', en: 'Miso Soup', priceAmd: 1500, caloriesKcal: 90, prepMin: 5, dietaryTags: ['vegan'] },
-    { categoryKey: 'drinks', menuTab: MenuTab.drinks, hy: 'Կանաչ թեյ', ru: 'Зелёный чай', en: 'Green Tea', priceAmd: 800, caloriesKcal: 5, prepMin: 3, dietaryTags: ['vegan', 'gluten_free'] },
+    { categoryKey: 'sushi', isPopular: true,hy: 'Ֆիլադելֆիա', ru: 'Филадельфия', en: 'Philadelphia Roll', priceAmd: 4900, caloriesKcal: 480, prepMin: 13, dietaryTags: [] },
+    { categoryKey: 'sushi', isPopular: true,hy: 'Կալիֆոռնիա', ru: 'Калифорния', en: 'California Roll', priceAmd: 4400, caloriesKcal: 440, prepMin: 13, dietaryTags: [] },
+    { categoryKey: 'sushi', hy: 'Սաղմոնի նիգիրի', ru: 'Нигири с лососем', en: 'Salmon Nigiri', priceAmd: 2600, caloriesKcal: 220, prepMin: 9, dietaryTags: ['gluten_free'] },
+    { categoryKey: 'asian', hy: 'Միսո ապուր', ru: 'Мисо-суп', en: 'Miso Soup', priceAmd: 1500, caloriesKcal: 90, prepMin: 5, dietaryTags: ['vegan'] },
+    { categoryKey: 'drinks', hy: 'Կանաչ թեյ', ru: 'Зелёный чай', en: 'Green Tea', priceAmd: 800, caloriesKcal: 5, prepMin: 3, dietaryTags: ['vegan', 'gluten_free'] },
   ],
   grill: [
-    { categoryKey: 'grill', menuTab: MenuTab.popular, hy: 'Խոզի խորոված', ru: 'Свиной хоровац', en: 'Pork Khorovats', priceAmd: 6200, caloriesKcal: 880, prepMin: 20, dietaryTags: [] },
-    { categoryKey: 'grill', menuTab: MenuTab.popular, hy: 'Հավի խորոված', ru: 'Куриный хоровац', en: 'Chicken Khorovats', priceAmd: 5400, caloriesKcal: 720, prepMin: 18, dietaryTags: ['halal'] },
-    { categoryKey: 'grill', menuTab: MenuTab.mains, hy: 'Լյուլա քյաբաբ', ru: 'Люля-кебаб', en: 'Lula Kebab', priceAmd: 4800, caloriesKcal: 660, prepMin: 16, dietaryTags: ['halal'] },
-    { categoryKey: 'grill', menuTab: MenuTab.sides, hy: 'Խորոված բանջարեղեն', ru: 'Овощи на гриле', en: 'Grilled Vegetables', priceAmd: 2400, caloriesKcal: 190, prepMin: 12, dietaryTags: ['vegan', 'gluten_free'] },
-    { categoryKey: 'drinks', menuTab: MenuTab.drinks, hy: 'Թան', ru: 'Тан', en: 'Tan', priceAmd: 700, caloriesKcal: 90, prepMin: 1, dietaryTags: ['vegetarian', 'gluten_free'] },
+    { categoryKey: 'grill', isPopular: true,hy: 'Խոզի խորոված', ru: 'Свиной хоровац', en: 'Pork Khorovats', priceAmd: 6200, caloriesKcal: 880, prepMin: 20, dietaryTags: [] },
+    { categoryKey: 'grill', isPopular: true,hy: 'Հավի խորոված', ru: 'Куриный хоровац', en: 'Chicken Khorovats', priceAmd: 5400, caloriesKcal: 720, prepMin: 18, dietaryTags: ['halal'] },
+    { categoryKey: 'grill', hy: 'Լյուլա քյաբաբ', ru: 'Люля-кебаб', en: 'Lula Kebab', priceAmd: 4800, caloriesKcal: 660, prepMin: 16, dietaryTags: ['halal'] },
+    { categoryKey: 'grill', hy: 'Խորոված բանջարեղեն', ru: 'Овощи на гриле', en: 'Grilled Vegetables', priceAmd: 2400, caloriesKcal: 190, prepMin: 12, dietaryTags: ['vegan', 'gluten_free'] },
+    { categoryKey: 'drinks', hy: 'Թան', ru: 'Тан', en: 'Tan', priceAmd: 700, caloriesKcal: 90, prepMin: 1, dietaryTags: ['vegetarian', 'gluten_free'] },
   ],
   asian: [
-    { categoryKey: 'asian', menuTab: MenuTab.popular, hy: 'Պադ Թայ', ru: 'Пад Тай', en: 'Pad Thai', priceAmd: 4100, caloriesKcal: 610, prepMin: 13, dietaryTags: [] },
-    { categoryKey: 'asian', menuTab: MenuTab.popular, hy: 'Հավով ռամեն', ru: 'Рамен с курицей', en: 'Chicken Ramen', priceAmd: 4300, caloriesKcal: 580, prepMin: 14, dietaryTags: ['halal'] },
-    { categoryKey: 'asian', menuTab: MenuTab.mains, hy: 'Տապակած բրինձ', ru: 'Жареный рис', en: 'Fried Rice', priceAmd: 3300, caloriesKcal: 520, prepMin: 10, dietaryTags: ['vegetarian'] },
-    { categoryKey: 'asian', menuTab: MenuTab.sides, hy: 'Գարնանային ռոլլ', ru: 'Спринг-роллы', en: 'Spring Rolls', priceAmd: 1900, caloriesKcal: 240, prepMin: 7, dietaryTags: ['vegan'] },
-    { categoryKey: 'drinks', menuTab: MenuTab.drinks, hy: 'Հասմիկի թեյ', ru: 'Жасминовый чай', en: 'Jasmine Tea', priceAmd: 900, caloriesKcal: 5, prepMin: 3, dietaryTags: ['vegan', 'gluten_free'] },
+    { categoryKey: 'asian', isPopular: true,hy: 'Պադ Թայ', ru: 'Пад Тай', en: 'Pad Thai', priceAmd: 4100, caloriesKcal: 610, prepMin: 13, dietaryTags: [] },
+    { categoryKey: 'asian', isPopular: true,hy: 'Հավով ռամեն', ru: 'Рамен с курицей', en: 'Chicken Ramen', priceAmd: 4300, caloriesKcal: 580, prepMin: 14, dietaryTags: ['halal'] },
+    { categoryKey: 'asian', hy: 'Տապակած բրինձ', ru: 'Жареный рис', en: 'Fried Rice', priceAmd: 3300, caloriesKcal: 520, prepMin: 10, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'asian', hy: 'Գարնանային ռոլլ', ru: 'Спринг-роллы', en: 'Spring Rolls', priceAmd: 1900, caloriesKcal: 240, prepMin: 7, dietaryTags: ['vegan'] },
+    { categoryKey: 'drinks', hy: 'Հասմիկի թեյ', ru: 'Жасминовый чай', en: 'Jasmine Tea', priceAmd: 900, caloriesKcal: 5, prepMin: 3, dietaryTags: ['vegan', 'gluten_free'] },
   ],
   breakfast: [
-    { categoryKey: 'breakfast', menuTab: MenuTab.popular, hy: 'Ձվածեղ', ru: 'Омлет', en: 'Omelette', priceAmd: 2400, caloriesKcal: 380, prepMin: 8, dietaryTags: ['vegetarian', 'gluten_free'] },
-    { categoryKey: 'breakfast', menuTab: MenuTab.popular, hy: 'Բլիթներ', ru: 'Панкейки', en: 'Pancakes', priceAmd: 2700, caloriesKcal: 520, prepMin: 10, dietaryTags: ['vegetarian'] },
-    { categoryKey: 'healthy', menuTab: MenuTab.mains, hy: 'Գրանոլա բոուլ', ru: 'Гранола-боул', en: 'Granola Bowl', priceAmd: 2900, caloriesKcal: 410, prepMin: 6, dietaryTags: ['vegetarian'] },
-    { categoryKey: 'breakfast', menuTab: MenuTab.sides, hy: 'Կրուասան', ru: 'Круассан', en: 'Croissant', priceAmd: 1100, caloriesKcal: 290, prepMin: 3, dietaryTags: ['vegetarian'] },
-    { categoryKey: 'drinks', menuTab: MenuTab.drinks, hy: 'Կապուչինո', ru: 'Капучино', en: 'Cappuccino', priceAmd: 1200, caloriesKcal: 130, prepMin: 4, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'breakfast', isPopular: true,hy: 'Ձվածեղ', ru: 'Омлет', en: 'Omelette', priceAmd: 2400, caloriesKcal: 380, prepMin: 8, dietaryTags: ['vegetarian', 'gluten_free'] },
+    { categoryKey: 'breakfast', isPopular: true,hy: 'Բլիթներ', ru: 'Панкейки', en: 'Pancakes', priceAmd: 2700, caloriesKcal: 520, prepMin: 10, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'healthy', hy: 'Գրանոլա բոուլ', ru: 'Гранола-боул', en: 'Granola Bowl', priceAmd: 2900, caloriesKcal: 410, prepMin: 6, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'breakfast', hy: 'Կրուասան', ru: 'Круассан', en: 'Croissant', priceAmd: 1100, caloriesKcal: 290, prepMin: 3, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'drinks', hy: 'Կապուչինո', ru: 'Капучино', en: 'Cappuccino', priceAmd: 1200, caloriesKcal: 130, prepMin: 4, dietaryTags: ['vegetarian'] },
   ],
   desserts: [
-    { categoryKey: 'desserts', menuTab: MenuTab.popular, hy: 'Նապոլեոն', ru: 'Наполеон', en: 'Napoleon', priceAmd: 1800, caloriesKcal: 430, prepMin: 4, dietaryTags: ['vegetarian'] },
-    { categoryKey: 'desserts', menuTab: MenuTab.popular, hy: 'Չիզքեյք', ru: 'Чизкейк', en: 'Cheesecake', priceAmd: 2100, caloriesKcal: 470, prepMin: 4, dietaryTags: ['vegetarian'] },
-    { categoryKey: 'desserts', menuTab: MenuTab.mains, hy: 'Գաթա', ru: 'Гата', en: 'Gata', priceAmd: 1300, caloriesKcal: 380, prepMin: 3, dietaryTags: ['vegetarian'] },
-    { categoryKey: 'desserts', menuTab: MenuTab.sides, hy: 'Պաղպաղակ', ru: 'Мороженое', en: 'Ice Cream', priceAmd: 1400, caloriesKcal: 260, prepMin: 2, dietaryTags: ['vegetarian', 'gluten_free'] },
-    { categoryKey: 'drinks', menuTab: MenuTab.drinks, hy: 'Էսպրեսո', ru: 'Эспрессо', en: 'Espresso', priceAmd: 800, caloriesKcal: 5, prepMin: 3, dietaryTags: ['vegan', 'gluten_free'] },
+    { categoryKey: 'desserts', isPopular: true,hy: 'Նապոլեոն', ru: 'Наполеон', en: 'Napoleon', priceAmd: 1800, caloriesKcal: 430, prepMin: 4, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'desserts', isPopular: true,hy: 'Չիզքեյք', ru: 'Чизкейк', en: 'Cheesecake', priceAmd: 2100, caloriesKcal: 470, prepMin: 4, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'desserts', hy: 'Գաթա', ru: 'Гата', en: 'Gata', priceAmd: 1300, caloriesKcal: 380, prepMin: 3, dietaryTags: ['vegetarian'] },
+    { categoryKey: 'desserts', hy: 'Պաղպաղակ', ru: 'Мороженое', en: 'Ice Cream', priceAmd: 1400, caloriesKcal: 260, prepMin: 2, dietaryTags: ['vegetarian', 'gluten_free'] },
+    { categoryKey: 'drinks', hy: 'Էսպրեսո', ru: 'Эспрессо', en: 'Espresso', priceAmd: 800, caloriesKcal: 5, prepMin: 3, dietaryTags: ['vegan', 'gluten_free'] },
   ],
   healthy: [
-    { categoryKey: 'healthy', menuTab: MenuTab.popular, hy: 'Կեսար աղցան', ru: 'Салат Цезарь', en: 'Caesar Salad', priceAmd: 3100, caloriesKcal: 390, prepMin: 8, dietaryTags: [] },
-    { categoryKey: 'healthy', menuTab: MenuTab.popular, hy: 'Ֆալաֆելի ռափ', ru: 'Фалафель-рап', en: 'Falafel Wrap', priceAmd: 2800, caloriesKcal: 450, prepMin: 9, dietaryTags: ['vegan'] },
-    { categoryKey: 'lunch', menuTab: MenuTab.mains, hy: 'Ոսպով ապուր', ru: 'Чечевичный суп', en: 'Lentil Soup', priceAmd: 1900, caloriesKcal: 240, prepMin: 7, dietaryTags: ['vegan', 'gluten_free'] },
-    { categoryKey: 'healthy', menuTab: MenuTab.sides, hy: 'Հումուս', ru: 'Хумус', en: 'Hummus', priceAmd: 1600, caloriesKcal: 210, prepMin: 4, dietaryTags: ['vegan', 'gluten_free'] },
-    { categoryKey: 'drinks', menuTab: MenuTab.drinks, hy: 'Թարմ հյութ', ru: 'Свежий сок', en: 'Fresh Juice', priceAmd: 1500, caloriesKcal: 160, prepMin: 4, dietaryTags: ['vegan', 'gluten_free'] },
+    { categoryKey: 'healthy', isPopular: true,hy: 'Կեսար աղցան', ru: 'Салат Цезарь', en: 'Caesar Salad', priceAmd: 3100, caloriesKcal: 390, prepMin: 8, dietaryTags: [] },
+    { categoryKey: 'healthy', isPopular: true,hy: 'Ֆալաֆելի ռափ', ru: 'Фалафель-рап', en: 'Falafel Wrap', priceAmd: 2800, caloriesKcal: 450, prepMin: 9, dietaryTags: ['vegan'] },
+    { categoryKey: 'lunch', hy: 'Ոսպով ապուր', ru: 'Чечевичный суп', en: 'Lentil Soup', priceAmd: 1900, caloriesKcal: 240, prepMin: 7, dietaryTags: ['vegan', 'gluten_free'] },
+    { categoryKey: 'healthy', hy: 'Հումուս', ru: 'Хумус', en: 'Hummus', priceAmd: 1600, caloriesKcal: 210, prepMin: 4, dietaryTags: ['vegan', 'gluten_free'] },
+    { categoryKey: 'drinks', hy: 'Թարմ հյութ', ru: 'Свежий сок', en: 'Fresh Juice', priceAmd: 1500, caloriesKcal: 160, prepMin: 4, dietaryTags: ['vegan', 'gluten_free'] },
   ],
 };
 
@@ -467,11 +474,34 @@ async function main(): Promise<void> {
       // Per branch, not per restaurant: a menu item hangs off a branch, which
       // is what lets one branch of a chain sell out a dish while the rest
       // carry on.
+      // The branch's own menu headings: one per category its dishes use, in the
+      // order the category rail runs, each mapped to that category. The dishes
+      // below then inherit a category without naming one — the arrangement the
+      // panel nudges every real restaurant towards, and the reason this seed
+      // exercises it rather than setting both fields on every row.
+      const sectionByCategory = new Map<string, string>();
+      const usedKeys = CATEGORIES.map((c) => c.key).filter((key) =>
+        r.menu.some((m) => m.categoryKey === key),
+      );
+      for (const [index, key] of usedKeys.entries()) {
+        const category = CATEGORIES.find((c) => c.key === key)!;
+        const section = await prisma.branchMenuSection.create({
+          data: {
+            branchId: branch.id,
+            categoryId: categoryByKey.get(key) ?? null,
+            nameI18n: { hy: category.hy, ru: category.ru, en: category.en },
+            sortOrder: index,
+          },
+        });
+        sectionByCategory.set(key, section.id);
+      }
+
       await prisma.menuItem.createMany({
         data: r.menu.map((m) => ({
           branchId: branch.id,
-          categoryId: categoryByKey.get(m.categoryKey) ?? null,
-          menuTab: m.menuTab,
+          sectionId: sectionByCategory.get(m.categoryKey)!,
+          categoryId: null,
+          isPopular: m.isPopular ?? false,
           nameI18n: { hy: m.hy, ru: m.ru, en: m.en },
           priceAmd: m.priceAmd,
           caloriesKcal: m.caloriesKcal,

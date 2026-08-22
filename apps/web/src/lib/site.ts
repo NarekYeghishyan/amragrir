@@ -105,8 +105,8 @@ export function basketApiPath(language: string): string {
  * not live. See `app/[lang]/saved/route.ts` for why a static page cannot answer
  * this itself.
  */
-export function savedApiPath(language: string, restaurantId: string): string {
-  return `${prefix(language) || ''}/saved?restaurant=${encodeURIComponent(restaurantId)}`;
+export function savedApiPath(language: string, branchId: string): string {
+  return `${prefix(language) || ''}/saved?branch=${encodeURIComponent(branchId)}`;
 }
 
 /**
@@ -191,8 +191,17 @@ export function profilePath(language: string): string {
   return `${prefix(language)}/profile`;
 }
 
-export function favoritesPath(language: string): string {
-  return `${prefix(language)}/favorites`;
+/**
+ * The favourites screen, optionally on its dishes half.
+ *
+ * The tab is in the URL rather than in client state, so it survives a heart
+ * being pressed — removing a dish returns to the dish tab — and can be linked
+ * to. `undefined` is the restaurants tab, which is the screen's own path and
+ * what everything that revalidates it passes.
+ */
+export function favoritesPath(language: string, tab?: 'dishes'): string {
+  const path = `${prefix(language)}/favorites`;
+  return tab ? `${path}?tab=${tab}` : path;
 }
 
 export function signinPath(language: string, next?: string): string {

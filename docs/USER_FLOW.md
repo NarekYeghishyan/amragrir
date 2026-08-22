@@ -37,6 +37,19 @@ the code rather than as a "create profile" step after it, because
 place — there is no second call to hang a third step off. The Apple/Google
 branch is not built on either client: `POST /auth/social` does not exist.
 
+**As built on the phone** (SCREENS.md §0): the same tab pair over the same two
+steps — number → code → Home — with the name asked on the sign-up tab beside the
+number, as on the web. It was missing entirely until 2026-08-11, which left the
+one screen that says "create an account" saying only "sign in".
+
+**And on that tab the name is required** (2026-08-11), which is where the two
+clients now differ: the phone will not send the code until there is one, the web
+still submits without. The "create profile" step drawn above stays unnecessary
+either way — `verify-code` takes the name together with the code and upgrades the
+guest account in place, so there is no second call to hang a third step off. The
+API keeps `name` optional (SCREENS.md §0), so an account made anywhere else, or
+before this, is still identified by the number it verified.
+
 ---
 
 ## 2. Finding a restaurant
@@ -123,8 +136,10 @@ a second one on top of it: nothing on the phone ever listed a booking again.
 ```
 Restaurant (nothing in the basket)
    ↓  "🪑 Book a table" — only where the restaurant declares `reserve`
-      and has not paused bookings
-/book/{branchId} — its own screen, the full RESERVATION_MAX_LEAD_DAYS horizon
+      and has not paused bookings; the branch travels with the press
+/preorder?branchId= — "When & how", the screen "Choose time" opens,
+   with everything that needs a quote absent;
+   the full RESERVATION_MAX_LEAD_DAYS horizon
    ↓  date, then a time (morning / afternoon / evening), guests, deposit
    ↓  "Book the table · {deposit}" — the choice above commits nothing
    ↓  (sign-in if the phone is unverified — asked before the money, not after)
@@ -141,13 +156,29 @@ other way round — pick, then submit — and so does the design. The same split
 runs the pre-order screen's footer, where "Book the table" used to be a *dead*
 label on a disabled button naming the very thing it would not do.
 
-**Its own screen rather than the checkout's, unlike the web.** The web reuses
-the checkout because that is already where a booking's terms are settled; on the
-phone the pre-order screen is a *basket* screen — quote, service mode, ready
-time — and teaching it to render with no basket would have been more surface
-than a second screen. What the two phone screens share is the calendar itself
-(`BookingCalendar`), which is the part that must not diverge: it is one reading
-of one availability answer.
+**It had its own screen until 2026-08-12, and that was the wrong call.** The
+reasoning was that the pre-order screen is a *basket* screen — quote, service
+mode, ready time — and teaching it to render with no basket would be more
+surface than a second screen. True of the code and wrong for the guest: this is
+still the screen where you settle when you are coming, and two of them meant two
+places that had to agree about the calendar, the party size and the deposit. The
+web had already made exactly this correction, in the other direction (§3a), and
+its note said so. So `app/book/[branchId].tsx` is gone and "🪑 Book a table"
+opens `/preorder`, which drops what needs a quote — the ready-time grid, the
+totals, the endings row, the checkout CTA — and keeps the title, the mode row
+and the calendar.
+
+**Both mode tiles are still drawn**, as on the web: Table booking ticked and
+inert, and **Pre-Order goes to the menu** rather than switching an empty basket
+to pickup and stranding the guest on a screen with nothing to settle. A basket
+belonging to another restaurant counts as no basket — it is not priced here and
+nothing on this screen moves it to dine-in. With a basket at *this* branch the
+press is not the table-only shape at all: the screen opens in Table booking mode
+with the quote and the deposit, which is what booking a table for this food has
+always meant.
+
+What the two shapes share is the calendar itself (`BookingCalendar`), which is
+the part that must not diverge: it is one reading of one availability answer.
 
 **And the list.** `/bookings` from the profile, beside the order history —
 upcoming and past, with the API deciding which is which.
@@ -188,7 +219,7 @@ Pre-order → "Pre-Order" mode (stored as `pickup`)
    ↓  where `dinein`: Takeaway / Eat at the Restaurant (both live, no deposit)
    ↓  where `reserve`: Takeaway only — "Eat at the Restaurant" is drawn
    ↓  dead and switches to Dine-in, where the table is booked
-Food ready at (choose ready time — pickup only; dine-in takes the table's hour)
+Ready at (pickup: choose the ready time; dine-in: states the table's hour)
    ↓
 Checkout (summary + payment method)
    ↓
@@ -198,6 +229,14 @@ Order confirmation (Tracking)
    ↓
 Live countdown → Ready → Pickup by code at counter
 ```
+
+**The way back to the menu from the Basket is the restaurant card**, on both
+clients, alongside the back button and "＋ Add more items" (SCREENS.md §4). The
+phone joined the web here on 2026-08-12; its card had been a picture that did
+nothing. It **pushes** the restaurant rather than popping back, because a basket
+is reached from the tab bar and from "Reorder" as well as from a menu, and it
+carries the **branch id**, so the screen that opens is the kitchen the basket was
+priced against rather than whichever branch the slug resolves to.
 
 ---
 
@@ -269,6 +308,11 @@ Language: hy / ru / en  (switch on the fly)
 Dark mode: toggle (light / dark)
 ```
 
+On the **phone**, a guest reaches only the first of the two: the language switch
+sits on Profile itself, but Settings is entered from the profile menu, and that
+menu is account-only for a guest (SCREENS.md §10). Both switches are the
+device's rather than the account's, so this is a gap to close — not a rule.
+
 On the **web** the switch is in the header of every screen, not in Settings,
 because there the language is part of the URL. Switching it is a move to *the
 same page* in the other language — `/r/dolmama` → `/ru/r/dolmama`,
@@ -285,10 +329,48 @@ same page, same query, other language
 ## 9. Managing favorites
 
 ```
-Restaurant → ♥ (add/remove)
+Home card (cover) / Restaurant banner → ♥ (add/remove a branch)
    ↓
-Favorites (tab) → list → Restaurant
+Favorites (tab) → Restaurants → Restaurant (that branch)
+
+Home card wearing dishes / menu row / web search result → ♥ (add/remove a dish)
+   ↓
+Favorites (tab) → Dishes → Restaurant (that branch), scrolled to that dish
 ```
+
+**A ♥ is one branch, not the business** (2026-08-13, DATABASE.md §13). The card
+that is hearted is one address, with its own distance, hours and prep time, and
+that address is what is saved — so the other branches of a chain keep their own
+hollow hearts, and the list names a street for each row it holds.
+
+**A ♥ over a plate is that dish** (2026-08-17, DATABASE.md §13a). Wherever the
+app is showing food rather than a place, the heart's subject is the food: a card
+wearing the dishes that matched a category filter, a row on a menu, a dish among
+the web's search results. A saved dish carries its kitchen with it (a dish belongs
+to one branch), which is why the list can open the menu *at* it rather than at the
+top. The Favourites tab keeps the two under two tabs — they are different cards
+that lead to different places.
+
+On the **phone**, a guest may do all of this before verifying anything. Their
+list lives on the device, and signing in hands it to the account:
+
+```
+guest → ♥ ♥ ♥            (kept on the phone, AsyncStorage — two stores,
+                          branches and dishes)
+   ↓  Sign in / Sign up → code confirmed
+POST /favorites × N       (one per saved branch, idempotent)
+POST /favorites/dishes × M (one per saved dish, idempotent)
+   ↓
+the phone's copies are emptied; every later read is GET /favorites
+and GET /favorites/dishes
+```
+
+The two handovers run side by side and independently, so a dish that has left the
+menu cannot take the restaurants' transfer down with it. Anything the transfer
+could not send stays on the phone and goes again at the next sign-in — except what
+the API refuses outright (a deleted branch, a withdrawn dish), which is dropped.
+Logging out deletes the device's copies along with the basket, so neither list
+crosses from one person to the next (ROLES_AND_PERMISSIONS.md §1).
 
 ---
 
@@ -299,7 +381,8 @@ Auth → Home
 Home ⇄ Search ⇄ Orders ⇄ Favorites ⇄ Profile   (bottom tab bar)
 Home → Restaurant → Basket → Pre-order → Checkout → Tracking → Home
 Home → Filter sheet → Home
-Profile → Referral / Settings
+Profile → Referral / Settings          (Settings: signed-in only)
+Profile → Auth                         (guest: "Sign in" / "Sign up")
 Orders → Tracking (active)
 Settings → Auth (Log out)
 ```
@@ -539,6 +622,15 @@ back to the whole city. **Nothing is stored until "confirm"**, so a point tried
 and abandoned costs nothing; closing it — ✕, Escape or the scrim — leaves the
 previous choice standing. Confirmed points are also kept in this browser's
 `localStorage` and offered back at the top of the dialog next time.
+
+**The phone has the same preference since 2026-08-11**, as a bottom sheet behind
+the home screen's location row (SCREENS.md §1): the same map, the same search,
+the same recents, the same "confirm before anything is stored". Two differences,
+both because a phone is not a browser. It has a **sensor**, so no choice at all
+means "wherever this device is" rather than "the whole city" — the ✕ hands the
+feed back to the GPS. And it has a **geocoder of its own**, so nothing here
+calls a server for an address: the search asks the OS, which answers in the OS's
+language and a few results at a time.
 
 This is the one preference **JavaScript is required for**: the district chips
 that answered it without one were removed on 2026-08-06, and everything left in

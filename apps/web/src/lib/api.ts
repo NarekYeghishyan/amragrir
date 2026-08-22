@@ -183,8 +183,9 @@ async function messageFrom(response: Response, path: string): Promise<string> {
 // ── shapes (mirror docs/API_DOCUMENTATION.md) ───────────────────────────────
 
 export interface RestaurantListItem {
+  /** The branch — what the row describes, and what a heart saves. */
   id: string;
-  /** The business, where `id` is the branch. A heart saves the restaurant. */
+  /** The business behind it, which owns the name, cuisine and rating. */
   restaurantId: string;
   slug: string;
   name: string;
@@ -198,6 +199,26 @@ export interface RestaurantListItem {
   services: string[];
   reservationsEnabled: boolean;
   coverUrl: string | null;
+  /**
+   * The dishes that matched a category filter, or absent when none was asked
+   * for.
+   *
+   * Absent and empty mean different things and the card reads both: no filter
+   * (wear the cover), versus a filter whose every match is sold out tonight
+   * (wear the cover, and the card is still a true answer — this kitchen does
+   * serve this, just not right now).
+   */
+  dishes?: CardDish[];
+}
+
+/** A dish as a filtered card shows it: the picture, what it is, what it costs,
+ *  and enough to open the menu at it. */
+export interface CardDish {
+  id: string;
+  name: string;
+  priceAmd: number;
+  photoUrl: string | null;
+  sectionId: string;
 }
 
 export interface RestaurantDetail {
@@ -236,7 +257,20 @@ export interface MenuItem {
   photoUrl: string | null;
   dietaryTags: string[];
   isAvailable: boolean;
-  menuTab: MenuTab;
+  /** Which of the branch's own headings it sits under. */
+  sectionId: string;
+  /** On the branch's Popular shelf — a property of the dish, so it is true as
+   *  well as the section above rather than instead of it. */
+  isPopular: boolean;
+  /** The **effective** category: the dish's own, or its section's. Resolved by
+   *  the API, so no client has to know the inheritance rule. */
+  categoryId: string | null;
+}
+
+/** One heading of a branch's menu, already in the reader's language. */
+export interface MenuSection {
+  id: string;
+  name: string;
   categoryId: string | null;
 }
 
@@ -300,12 +334,21 @@ export interface MeProfile {
   couponsCount: number;
 }
 
-/** `GET /favorites` — already shaped like a restaurant card. */
-export interface FavoriteRestaurant {
+/**
+ * `GET /favorites` — already shaped like a restaurant card.
+ *
+ * A **branch**, like every card in this product: `branchId` is what was saved,
+ * and the address rides along so two branches of one chain are two rows rather
+ * than the same row twice (DATABASE.md §13).
+ */
+export interface FavoriteBranch {
+  branchId: string;
   restaurantId: string;
-  branchId: string | null;
   slug: string;
   name: string;
+  branchName: string | null;
+  address: string | null;
+  city: string;
   cuisine: string | null;
   priceLevel: number | null;
   rating: number;
@@ -314,6 +357,38 @@ export interface FavoriteRestaurant {
   prepMin: number | null;
   isOpen: boolean;
   services: string[];
+  addedAt: string;
+}
+
+/**
+ * `GET /favorites/dishes` — the other thing a heart can save.
+ *
+ * A **dish**, and the kitchen it is cooked in: `menuItemId` is what was saved,
+ * `branchId` comes with it because a dish belongs to one address, and that pair
+ * is what the card links to — the menu opened at this dish.
+ *
+ * The name, description and price are the menu's, resolved to the reader's
+ * language on every read, so a repriced dish shows today's price rather than the
+ * one it was saved at.
+ */
+export interface FavoriteDish {
+  menuItemId: string;
+  branchId: string;
+  restaurantId: string;
+  slug: string;
+  name: string;
+  desc: string;
+  priceAmd: number;
+  photoUrl: string | null;
+  caloriesKcal: number | null;
+  prepMin: number | null;
+  isAvailable: boolean;
+  sectionId: string;
+  restaurantName: string;
+  branchName: string | null;
+  address: string | null;
+  city: string;
+  isOpen: boolean;
   addedAt: string;
 }
 
@@ -523,7 +598,10 @@ export const api = {
     getOrNull<RestaurantDetail>(`/restaurants/${encodeURIComponent(slugOrId)}`, { language }),
 
   menu: (slugOrId: string, language: Language) =>
-    get<{ items: MenuItem[] }>(`/restaurants/${encodeURIComponent(slugOrId)}/menu`, { language }),
+    get<{ sections: MenuSection[]; items: MenuItem[] }>(
+      `/restaurants/${encodeURIComponent(slugOrId)}/menu`,
+      { language },
+    ),
 
   categories: (language: Language) => get<{ items: Category[] }>('/categories', { language }),
 
@@ -559,20 +637,46 @@ export const api = {
   me: (token: string, language: Language) => authed<MeProfile>('/me', token, { language }),
 
   favorites: (token: string, language: Language) =>
-    authed<{ items: FavoriteRestaurant[] }>('/favorites', token, { language }),
+    authed<{ items: FavoriteBranch[] }>('/favorites', token, { language }),
 
   /** Idempotent server-side, so a double-submitted heart adds one favourite. */
-  addFavorite: (restaurantId: string, token: string, language: Language) =>
+  addFavorite: (branchId: string, token: string, language: Language) =>
     authed<{ favorited: true }>('/favorites', token, {
       method: 'POST',
-      body: { restaurantId },
+      body: { branchId },
       language,
     }),
 
   /** Also idempotent: removing one that is gone leaves the caller where they
    *  asked to be, and answers 204. */
-  removeFavorite: (restaurantId: string, token: string, language: Language) =>
-    authed<void>(`/favorites/${encodeURIComponent(restaurantId)}`, token, {
+  removeFavorite: (branchId: string, token: string, language: Language) =>
+    authed<void>(`/favorites/${encodeURIComponent(branchId)}`, token, {
+      method: 'DELETE',
+      language,
+    }),
+
+  /** The saved dishes, in the reader's language. Dishes taken off a menu are
+   *  left out by the API rather than drawn as something nobody can order. */
+  favoriteDishes: (token: string, language: Language) =>
+    authed<{ items: FavoriteDish[] }>('/favorites/dishes', token, { language }),
+
+  /** Which dishes are saved, ids only — what a menu or a card's slider needs to
+   *  fill its hearts. Narrowed to one branch where the caller has one. */
+  favoriteDishIds: (token: string, language: Language, branchId?: string) =>
+    authed<{ ids: string[] }>('/favorites/dishes/ids', token, {
+      language,
+      ...(branchId ? { query: { branchId } } : {}),
+    }),
+
+  addFavoriteDish: (menuItemId: string, token: string, language: Language) =>
+    authed<{ favorited: true }>('/favorites/dishes', token, {
+      method: 'POST',
+      body: { menuItemId },
+      language,
+    }),
+
+  removeFavoriteDish: (menuItemId: string, token: string, language: Language) =>
+    authed<void>(`/favorites/dishes/${encodeURIComponent(menuItemId)}`, token, {
       method: 'DELETE',
       language,
     }),

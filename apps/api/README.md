@@ -106,7 +106,7 @@ src/
 ├── audit/            # writing `audit_log` — the read side lives with each
 │                     #   thing it is about (staff activity, menu history)
 ├── admin/            # metrics, role changes, restaurants, promo coupons
-├── favorites/        # saved restaurants
+├── favorites/        # saved branches — one address per heart (DATABASE.md §13)
 ├── referrals/        # referral codes, coupons, reward points
 ├── health/           # GET /v1/health (liveness + DB/Redis reachability)
 └── common/           # error filter, i18n resolution, idempotency interceptor

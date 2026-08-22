@@ -43,9 +43,9 @@ src/
 │   │   ├── signin/      #  │
 │   │   ├── orders/      # ─┘ list + tracking
 │   │   ├── basket/      # route handler: the priced basket, as JSON
-│   │   ├── saved/       # route handler: is this restaurant favourited?
+│   │   ├── saved/       # route handler: is this branch favourited?
 │   │   ├── profile/     # the account: counters, history, reorder, sign out
-│   │   ├── favorites/   # the restaurants hearted, listed — and un-hearted here
+│   │   ├── favorites/   # the branches hearted, listed — and un-hearted here
 │   │   ├── session/     # route handler: mints/refreshes, then bounces back
 │   │   ├── [...missing]/# anything else → the designed 404, inside the layout
 │   │   ├── not-found.tsx
@@ -583,12 +583,19 @@ is trapped in a 72px strip.
 App-store links belong in the restaurant CTA once such URLs exist; the branch
 phone sits there today beside the basket link.
 
-**Favourites are read, not written.** `/favorites` lists what `GET /favorites`
-returns, and the two clients share one list, so a restaurant hearted in the app
-is here. There is no heart on a card: the design puts favouriting in the app,
-and the account rows the design draws for saved addresses and stored cards are
-absent for stronger reasons — there are no couriers, and `GET /payment-methods`
-lists what the platform accepts rather than anything somebody saved.
+**Favourites *are* built, and written here — not only read.** Every card carries
+the same heart the app draws, as a `<form>` posting `toggleFavorite`
+(2026-08-09), and the two clients share one list. It saves the **branch** the
+card describes (2026-08-13, DATABASE.md §13), so `/favorites` prints an address
+per row and links each one by branch id — `/r/{branchId}` is a URL this site
+serves, with its canonical pointing back at the slug. The listings keep their
+slug links: those are the canonical pages, and the grouped listing picks the
+branch a slug resolves to anyway.
+
+What is genuinely absent from the design's account rows are saved addresses and
+stored cards, for stronger reasons: there are no couriers, and
+`GET /payment-methods` lists what the platform accepts rather than anything
+somebody saved.
 
 **The header's account mark is a person, not an initial.** The design draws the
 customer's own letter; this header cannot know it. The session cookie is
