@@ -1,4 +1,15 @@
 import type { TranslationKey } from '@amragrir/i18n';
+import {
+  AREA_POINTS,
+  YEREVAN,
+  cleanLabel,
+  isOnGlobe,
+  metresBetween,
+  nearestAreaPoint,
+  roundCoord,
+  type AreaId,
+  type Place,
+} from '@amragrir/shared';
 
 /**
  * Where the visitor says they are.
@@ -17,19 +28,21 @@ import type { TranslationKey } from '@amragrir/i18n';
  * the chips that offered them were removed, and what is left of them is
  * `nearestArea`, which is how a tapped point gets a name when no geocoder can
  * give it a better one.
+ *
+ * **The model itself lives in `@amragrir/shared`** — the shape of a place, the
+ * precision it is kept to, the districts and the distance between two points.
+ * The phone's picker answers the same API with the same units, and the two
+ * cannot be allowed to drift. What stays here is what only a browser has: the
+ * cookie, and the drawing the six pins sit on.
  */
-export interface Place {
-  lat: number;
-  lng: number;
-  /** What the header reads and what the picker's "recent" row lists. */
-  label: string;
-}
+export type { Place };
+export { YEREVAN, metresBetween };
 
 /** A district preset — one of the artifact's six, as a `Place` with a name in
  *  every language and a pin on the fallback map. */
 export interface Area {
   /** Stable id, used as a DOM key and to look the preset's name up. */
-  id: string;
+  id: AreaId;
   labelKey: TranslationKey;
   lat: number;
   lng: number;
@@ -57,35 +70,28 @@ export interface Area {
  */
 export const LOCATION_COOKIE = 'amr_loc';
 
+/** What each district is called, and where the drawing puts its pin. The
+ *  coordinates are not here: they are `AREA_POINTS`, which the phone reads too. */
+const DRAWN: Record<AreaId, { labelKey: TranslationKey; mapX: number; mapY: number }> = {
+  northern: { labelKey: 'locNorthern', mapX: 200, mapY: 150 },
+  kentron: { labelKey: 'locKentron', mapX: 120, mapY: 95 },
+  cascade: { labelKey: 'locCascade', mapX: 255, mapY: 70 },
+  arabkir: { labelKey: 'locArabkir', mapX: 300, mapY: 200 },
+  zeytun: { labelKey: 'locZeytun', mapX: 95, mapY: 235 },
+  shengavit: { labelKey: 'locShengavit', mapX: 180, mapY: 285 },
+};
+
 /**
  * The six districts the artifact lists, at their real coordinates.
  *
- * Yerevan only. The product is a Yerevan product (`AI_CONTEXT.md`), and a
- * picker offering a city with no restaurants in it would be a list of dead
- * ends. Nothing offers them to press any more — what still reads this list is
+ * Nothing offers them to press any more — what still reads this list is
  * `nearestArea`, naming points the geocoder cannot, and the drawn placeholder,
  * which puts a pin at each `mapX`/`mapY`.
  */
-export const AREAS: readonly Area[] = [
-  { id: 'northern', labelKey: 'locNorthern', lat: 40.1811, lng: 44.5136, mapX: 200, mapY: 150 },
-  { id: 'kentron', labelKey: 'locKentron', lat: 40.1798, lng: 44.5152, mapX: 120, mapY: 95 },
-  { id: 'cascade', labelKey: 'locCascade', lat: 40.1901, lng: 44.5157, mapX: 255, mapY: 70 },
-  { id: 'arabkir', labelKey: 'locArabkir', lat: 40.2043, lng: 44.4938, mapX: 300, mapY: 200 },
-  { id: 'zeytun', labelKey: 'locZeytun', lat: 40.2138, lng: 44.5245, mapX: 95, mapY: 235 },
-  { id: 'shengavit', labelKey: 'locShengavit', lat: 40.1403, lng: 44.4818, mapX: 180, mapY: 285 },
-];
-
-/** Where the map opens when nothing has been chosen: Republic Square, zoomed to
- *  hold the city the product serves. */
-export const YEREVAN = { lat: 40.1776, lng: 44.5126, zoom: 12 } as const;
-
-/** How precisely a stored point is kept. Six decimals is ~10cm — far past what
- *  a tap on a map means, and past what any distance on a card would show. */
-const PRECISION = 6;
-
-/** A pasted or hand-edited label is rendered in the header, where React escapes
- *  it but will happily let 4KB of it destroy the row. */
-const LABEL_MAX = 80;
+export const AREAS: readonly Area[] = AREA_POINTS.map((point) => ({
+  ...point,
+  ...DRAWN[point.id],
+}));
 
 /**
  * The cookie's value for a place: `lat~lng~base64url(label)`.
@@ -99,8 +105,8 @@ const LABEL_MAX = 80;
  */
 export function encodePlace(place: Place): string {
   return [
-    round(place.lat),
-    round(place.lng),
+    roundCoord(place.lat),
+    roundCoord(place.lng),
     toBase64Url(cleanLabel(place.label)),
   ].join('~');
 }
@@ -123,16 +129,13 @@ export function parsePlace(value: string | undefined): Place | null {
   }
   const lat = Number(parts[0]);
   const lng = Number(parts[1]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return null;
-  }
   // Off the globe is not somewhere a person can be standing. The API would
   // take it and compute distances from it, so it is refused here.
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+  if (!isOnGlobe(lat, lng)) {
     return null;
   }
   const label = cleanLabel(fromBase64Url(parts[2]!) ?? '');
-  return label === '' ? null : { lat: round(lat), lng: round(lng), label };
+  return label === '' ? null : { lat: roundCoord(lat), lng: roundCoord(lng), label };
 }
 
 /** A preset as the thing that gets stored. `label` needs the dictionary, which
@@ -147,40 +150,13 @@ export function areaPlace(area: Area, label: string): Place {
  *
  * Two callers: "use current location", which turns the browser's answer into
  * something nameable, and the picker naming a point that came back from the map
- * with no address on it.
- *
- * Flat geometry, not haversine: the six points span three kilometres, where a
- * degree of longitude is a constant to five decimal places. The `cos(lat)`
- * factor is still applied, because without it a degree east would count as far
- * as a degree north and Shengavit would win from the wrong side of town.
- *
- * Never null. Somebody in Tbilisi asking for the nearest Yerevan district gets
- * the nearest Yerevan district — the alternative is a control that refuses to
- * answer, and the list beside it says plainly that this is a Yerevan product.
+ * with no address on it. The arithmetic is `nearestAreaPoint`; this puts the
+ * drawing and the dictionary key back on the answer.
  */
 export function nearestArea(lat: number, lng: number): Area {
-  const scale = Math.cos((lat * Math.PI) / 180);
-  return AREAS.reduce((closest, area) => (span(area) < span(closest) ? area : closest));
-
-  function span(area: Area): number {
-    const dy = area.lat - lat;
-    const dx = (area.lng - lng) * scale;
-    return dy * dy + dx * dx;
-  }
-}
-
-/**
- * Metres between two points, near enough.
- *
- * Used to decide whether two stored places are the same place — the recents
- * list, and nothing that decides money or distance shown to anybody. Same flat
- * approximation as `nearestArea`, for the same reason.
- */
-export function metresBetween(a: Place, b: Place): number {
-  const scale = Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180));
-  const dy = (a.lat - b.lat) * 111_320;
-  const dx = (a.lng - b.lng) * 111_320 * scale;
-  return Math.sqrt(dy * dy + dx * dx);
+  const { id } = nearestAreaPoint(lat, lng);
+  // Every point has an entry: both lists are built from the same six ids.
+  return AREAS.find((area) => area.id === id)!;
 }
 
 /**
@@ -193,19 +169,6 @@ export function metresBetween(a: Place, b: Place): number {
  */
 export function placeQuery(place: Place | null): Record<string, string | undefined> {
   return place === null ? {} : { lat: String(place.lat), lng: String(place.lng) };
-}
-
-function round(value: number): number {
-  return Number(value.toFixed(PRECISION));
-}
-
-/** One line, no control characters, and short enough to sit in a header. */
-function cleanLabel(value: string): string {
-  return value
-    .replace(/[\u0000-\u001F\u007F]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, LABEL_MAX);
 }
 
 /** base64url of UTF-8. `btoa`/`atob` are byte-oriented and exist in both Node

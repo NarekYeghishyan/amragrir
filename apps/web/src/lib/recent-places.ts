@@ -1,4 +1,10 @@
-import { encodePlace, metresBetween, parsePlace, type Place } from './locations';
+import { RECENTS_MAX, SAME_PLACE_METRES, withRecent } from '@amragrir/shared';
+import { encodePlace, parsePlace, type Place } from './locations';
+
+/** The list itself is `@amragrir/shared` — the phone keeps one too, with the
+ *  same cap and the same idea of what counts as the same corner. What is here
+ *  is the browser's way of holding it. */
+export { RECENTS_MAX, SAME_PLACE_METRES, withRecent };
 
 /**
  * The places this browser has chosen before, newest first.
@@ -14,19 +20,6 @@ import { encodePlace, metresBetween, parsePlace, type Place } from './locations'
  * a reader without one has nothing to have a history of either.
  */
 export const RECENTS_KEY = 'amr_recent_places';
-
-/** Five is what fits on one row at the dialog's width without scrolling, and
- *  a history nobody can see the end of is a list, not a shortcut. */
-export const RECENTS_MAX = 5;
-
-/**
- * How close two points have to be to count as the same place.
- *
- * A map tap is never repeated to the metre, so exact equality would fill the
- * row with five copies of one street corner. 120m is about a block: near enough
- * that offering both would be offering the same answer twice.
- */
-export const SAME_PLACE_METRES = 120;
 
 /** Newline-separated `encodePlace` values — so every entry is validated on the
  *  way back in by the same parser the cookie uses, and a corrupted line costs
@@ -50,19 +43,6 @@ export function parseRecents(raw: string | null | undefined): Place[] {
 
 export function serializeRecents(places: readonly Place[]): string {
   return places.slice(0, RECENTS_MAX).map(encodePlace).join('\n');
-}
-
-/**
- * The list with `place` at the front.
- *
- * Anything within `SAME_PLACE_METRES` of it drops out first, so choosing the
- * same corner twice moves it up rather than duplicating it — and re-choosing it
- * under a new name (the geocoder is not deterministic across zoom levels)
- * replaces the old name instead of listing both.
- */
-export function withRecent(places: readonly Place[], place: Place): Place[] {
-  const others = places.filter((existing) => metresBetween(existing, place) > SAME_PLACE_METRES);
-  return [place, ...others].slice(0, RECENTS_MAX);
 }
 
 /** Reads the list, tolerating a browser that refuses storage entirely —

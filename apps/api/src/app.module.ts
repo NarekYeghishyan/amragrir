@@ -10,6 +10,7 @@ import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CatalogModule } from './catalog/catalog.module';
+import { GeocodeModule } from './geocode/geocode.module';
 import { OrdersModule } from './orders/orders.module';
 import { AdminModule } from './admin/admin.module';
 import { FavoritesModule } from './favorites/favorites.module';
@@ -44,6 +45,7 @@ import { IdempotencyInterceptor } from './common/idempotency/idempotency.interce
     AuthModule,
     UsersModule,
     CatalogModule,
+    GeocodeModule,
     OrderEventsModule,
     NotificationEventsModule,
     OrdersModule,

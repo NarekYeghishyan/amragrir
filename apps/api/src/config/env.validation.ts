@@ -116,6 +116,21 @@ export class EnvVars {
   @IsInt()
   @Min(0)
   TRUST_PROXY_HOPS = 0;
+
+  /**
+   * Yandex Geocoder key, for `GET /geocode` — the address search behind both
+   * location pickers.
+   *
+   * **Optional, and the feature says so rather than breaking.** Without it the
+   * endpoint answers `available: false` and the apps do not draw a search box
+   * at all; the map still takes any point, named after the nearest district.
+   * It cannot be restricted to a domain or an app, which is why it is here and
+   * not in either client (DEVELOPMENT_GUIDE.md). The website holds its own copy
+   * for its own route.
+   */
+  @IsString()
+  @IsOptional()
+  YANDEX_GEOCODER_API_KEY?: string;
 }
 
 export function validateEnv(config: Record<string, unknown>): EnvVars {
